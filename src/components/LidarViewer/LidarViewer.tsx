@@ -157,28 +157,64 @@ function PovController({
 const _poseMatrix = new THREE.Matrix4()
 
 /**
- * WorldPoseSync — applies vehicle pose to the scene group inside useFrame.
+ * WorldPoseSync — keeps the scene group matrix in sync with the vehicle pose.
  *
- * This MUST run in useFrame (not useEffect) so the group matrix updates
- * in the same Three.js render tick as PointCloud's buffer write.
- * A useEffect would fire after paint, causing a one-frame desync where
- * new point data renders under the old pose — visible as jitter in world mode.
+ * Two-layer approach:
+ *   1. useSceneStore.subscribe() — fires synchronously during Zustand set(),
+ *      BEFORE React re-renders. This ensures the group matrix is already correct
+ *      when R3F's reconciler updates BoundingBoxes' Three.js objects.
+ *      Without this, arrow-key scrubbing causes visible jitter: React flushes
+ *      BoundingBoxes (new positions) synchronously, but useFrame hasn't run yet,
+ *      so the group matrix still holds the old pose for one render.
+ *   2. useFrame() — safety-net that re-applies the matrix every render tick,
+ *      covering edge cases (initial mount, external matrix modifications).
+ *
  * See docs/R3F_RENDER_SYNC.md for the full analysis.
  */
 function WorldPoseSync({ groupRef }: { groupRef: React.RefObject<THREE.Group | null> }) {
+  // Synchronous matrix update via store subscription.
+  // Fires BEFORE React reconciles BoundingBoxes, eliminating the
+  // one-frame desync between box positions and group transform.
+  useEffect(() => {
+    const applyPose = (wm: boolean, pose: number[] | null) => {
+      const group = groupRef.current
+      if (!group) return
+      if (wm && pose) {
+        _poseMatrix.fromArray(pose).transpose() // Waymo row-major → Three.js column-major
+        group.matrix.copy(_poseMatrix)
+      } else {
+        group.matrix.identity()
+      }
+      group.matrixWorldNeedsUpdate = true
+    }
+
+    // Apply current state immediately (handles initial mount)
+    const s = useSceneStore.getState()
+    applyPose(s.worldMode, s.currentFrame?.vehiclePose ?? null)
+
+    // Subscribe — fires synchronously during set(), before React re-render
+    return useSceneStore.subscribe((state, prev) => {
+      if (state.currentFrame !== prev.currentFrame || state.worldMode !== prev.worldMode) {
+        applyPose(state.worldMode, state.currentFrame?.vehiclePose ?? null)
+      }
+    })
+  }, [groupRef])
+
+  // Safety-net: re-apply in useFrame for continuous correctness
   useFrame(() => {
     const group = groupRef.current
     if (!group) return
     const { worldMode, currentFrame } = useSceneStore.getState()
     const pose = currentFrame?.vehiclePose ?? null
     if (worldMode && pose) {
-      _poseMatrix.fromArray(pose).transpose() // Waymo row-major → Three.js column-major
+      _poseMatrix.fromArray(pose).transpose()
       group.matrix.copy(_poseMatrix)
     } else {
       group.matrix.identity()
     }
     group.matrixWorldNeedsUpdate = true
   })
+
   return null
 }
 

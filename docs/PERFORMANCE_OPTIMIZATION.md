@@ -428,10 +428,12 @@ No heap impact — expected, since the optimization targets DOM mutation through
 ## FIX-001: World-mode double-render jitter
 
 **Date:** 2026-03-01
-**Status:** Fixed
+**Status:** Fixed (v2)
 **Files:** `src/components/LidarViewer/LidarViewer.tsx`
 
-Scene group pose matrix was updated via `useEffect` (fires after paint), while PointCloud's buffer was updated via `useFrame` (fires during Three.js render loop). This one-frame desync caused visible jitter when scrubbing in world mode. Fixed by moving the matrix update into `useFrame` via a `WorldPoseSync` component. See [R3F_RENDER_SYNC.md](./R3F_RENDER_SYNC.md) for the full analysis, desync diagram, and general lesson.
+**v1:** Moved scene group pose matrix from `useEffect` (fires after paint) to `useFrame` (fires in render loop). Fixed the useEffect-after-paint desync but a subtler jitter remained during arrow-key scrubbing.
+
+**v2:** Added `useSceneStore.subscribe()` to update the group matrix synchronously during Zustand's `set()`, before React reconciliation. Arrow-key handlers trigger React's SyncLane (synchronous commit), which updates BoundingBoxes' Three.js objects immediately — before `useFrame` has a chance to run. The subscribe callback fires before React even starts, ensuring the matrix is always in sync. See [R3F_RENDER_SYNC.md](./R3F_RENDER_SYNC.md) for the full analysis.
 
 ---
 
