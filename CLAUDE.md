@@ -50,14 +50,16 @@ npm test        # Vitest (27 tests)
 
 ## Key Features (Implemented)
 - Multi-segment support with dropdown selector (auto-discovers segments from waymo_data/)
-- LiDAR point cloud: 5 sensors, ~168K points/frame, turbo colormap, per-sensor toggle/coloring
+- LiDAR point cloud: 5 sensors, ~168K points/frame, 4 colormap modes (intensity/height/range/elongation)
 - 3D bounding boxes: wireframe or GLB models (car/pedestrian/cyclist), class-colored
 - 2D camera bounding boxes: SVG overlay on camera panels, synced with boxMode toggle
 - Cross-modal hover highlight: hover 2D box → highlight linked 3D box (and vice versa) via association data
 - Trajectory trails: past N frames of object positions as fading polylines
 - 5 camera image panels: preloaded JPEG, POV switching (click card), hover border highlight
-- Camera frustum visualization in 3D view with hover sync
+- Camera frustum visualization: base-only default, full wireframe on hover, per-camera FOV sizing
+- POV camera: quaternion slerp for gimbal-lock-free orbital↔POV transitions
 - Timeline: scrubber, play/pause (spacebar), speed control (0.5x–4x), YouTube-style buffer bar
+- Unified frosted glass control panel with conditional UI (opacity hidden when all sensors off)
 - Parallel worker pools: 4 lidar workers + 2 camera workers for fast row group decompression
 
 ## Data Components Used

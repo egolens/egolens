@@ -588,8 +588,13 @@ Chronological record of technical decisions and the reasoning behind them.
   - FOV 계산: `fovX = 2 * atan(width / (2 * f_u))`, `fovY = 2 * atan(height / (2 * f_v))`
   - Near plane에 4개 코너 포인트 생성 → extrinsic 역행렬로 vehicle frame 변환
   - `THREE.LineSegments`로 렌더링 (origin → 4 corners + 4 edges)
-- **POV 전환**: 카메라 패널 클릭 시 `activeCam` 상태 설정 → OrbitControls 비활성화 → `camera.position`/`lookAt`을 해당 카메라의 extrinsic에서 추출한 위치/방향으로 설정. 다시 클릭하면 orbital 모드로 복귀.
-- **Hover highlight sync**: 카메라 패널 hover → `hoveredCam` 상태 → CameraFrustums에서 해당 프러스텀을 흰색 + 불투명도 1.0으로 강조. 나머지는 dim (0.25).
+- **POV 전환**: 카메라 패널 클릭 시 `activeCam` 상태 설정 → OrbitControls 비활성화 → `PovController`가 `useFrame`에서 position lerp + quaternion slerp로 부드럽게 전환. ESC 또는 버튼으로 orbital 모드 복귀.
+  - **진입 시**: orbital camera의 position/quaternion/fov/target을 `savedState`에 저장. POV 카메라의 extrinsic quaternion에 optical→Three.js 변환(X축 180° 회전) 적용 후 slerp.
+  - **복귀 시**: 저장된 quaternion으로 직접 slerp. `lookAt()` 미사용 — bird's-eye view(카메라 방향이 Z축과 평행)에서 up vector `(0,0,1)`과 충돌하여 gimbal lock이 발생하므로, lookAt 기반 quaternion 계산을 제거하고 저장된 quaternion으로 직접 보간.
+  - **카메라 간 전환**: 복귀 애니메이션 중 다른 카메라 클릭 시, 복귀 목적지를 새 savedState로 저장하여 끊김 없이 전환.
+- **프러스텀 디스플레이**: 기본 상태에서는 far plane 사각형(base)만 표시, hover/active 시 origin→corner 엣지(pyramid) 추가 표시. `buildFrustumBase()` + `buildFrustumEdges()` 분리. FRUSTUM_FAR = 2m.
+  - FRONT 카메라(넓은 vFov)와 SIDE 카메라(좁은 vFov)의 세로 크기 차이는 실제 FOV 차이를 반영한 정상 동작.
+- **Hover highlight sync**: 카메라 패널 hover → `hoveredCam` 상태 → CameraFrustums에서 해당 프러스텀을 흰색 + 불투명도 1.0으로 강조. 나머지는 dim (0.6).
 
 ### D23. Multi-Segment Support
 
@@ -711,6 +716,34 @@ Chronological record of technical decisions and the reasoning behind them.
   - LiDAR는 정확하지만 sparse, Camera는 dense하지만 2D → 3DGS가 dense + 3D context 제공
   - Perception engineer가 prediction과 3DGS reconstruction을 교차 비교하면 false positive/negative 원인 분석 가능
 
+### D35. LiDAR Colormap 모드 — 4가지 시각화 속성
+
+- **배경**: 포인트 클라우드가 intensity 단일 색상만 지원 → perception 분석에 부족. 자율주행 업계에서 range/height/elongation 컬러맵이 표준적으로 사용됨.
+- **구현**: `POINT_STRIDE`를 4→6으로 확장하여 `[x, y, z, intensity, range, elongation]` interleaved. 각 속성별 전용 컬러 팔레트:
+  - **Intensity** (0–1): dark → cyan → yellow → white (turbo 계열)
+  - **Height/Z** (-3–8m): blue → green → yellow → red (지면/객체 분리에 유용)
+  - **Range** (0–75m): green → yellow → red → dark (거리 기반 밀도 분석)
+  - **Elongation** (0–1): dark → purple → magenta → pink (반사 특성)
+- **R3F 버퍼 업데이트 타이밍 이슈**: `useEffect` + `needsUpdate = true` 방식이 R3F reconciler의 `<bufferAttribute {...posAttr} />` 재적용으로 무효화됨. **해결**: dirty ref + `useFrame` 패턴으로 전환 — 버퍼 업데이트를 Three.js 렌더 루프 내에서 수행하여 reconciler 간섭 회피.
+- **센서별 색상 제거**: 모든 5개 센서가 동일한 4채널 range image 포맷이므로, 센서 필터링 시에도 항상 선택된 컬러맵 적용 (기존 센서별 고유색 제거).
+
+### D36. 통합 Frosted Glass 컨트롤 패널
+
+- **문제**: 개별 UI 요소(버튼, 레이블)에 배경이 없어 밝은 장면에서 가독성 저하. 레이블에만 frost 배경을 넣으면 디자인 불일치.
+- **해결**: 전체 컨트롤 패널을 단일 frosted container로 감싸기:
+  - `backgroundColor: rgba(26, 31, 53, 0.75)` + `backdropFilter: blur(12px)`
+  - 내부 요소는 개별 배경 없이, 활성 요소만 `rgba(255,255,255,0.06)` subtle highlight
+  - 섹션 구분: 1px `colors.border` divider
+- **레이블 변경**: "Sensors" → "LiDAR" (더 직관적)
+- **조건부 UI**: 모든 센서 off 시 opacity 슬라이더 숨김 (`visibleSensors.size > 0` 조건)
+
+### D37. POV 복귀 Gimbal Lock 수정 — Quaternion 직접 Slerp
+
+- **문제**: bird's-eye view(Z축 직하방)에서 POV 진입 후 복귀 시 카메라가 비정상적으로 회전.
+- **원인**: 복귀 애니메이션에서 매 프레임 `Matrix4.lookAt(pos, target, up=(0,0,1))`로 target quaternion 계산. 카메라 방향이 Z축과 거의 평행할 때 lookAt의 up vector와 forward vector가 충돌 → 불안정한 rotation matrix → gimbal lock.
+- **해결**: POV 진입 시 orbital camera의 `quaternion`을 `savedState`에 함께 저장. 복귀 시 `lookAt()` 없이 저장된 quaternion으로 직접 `camera.quaternion.slerp(rt.quat, LERP_SPEED)`. Quaternion slerp는 특이점이 없으므로 모든 카메라 각도에서 안정적 보간.
+- **교훈**: 3D 카메라 시스템에서 `lookAt()`은 편리하지만, up vector가 view direction과 평행한 경우(top-down, bottom-up) degenerate. 가능하면 quaternion을 직접 저장/보간하는 것이 안정적.
+
 ## 11. Progress Tracker
 
 1. ✅ Project scaffolding (Vite + React + TS + R3F)
@@ -734,7 +767,9 @@ Chronological record of technical decisions and the reasoning behind them.
 19. ✅ Landing page: intro section + collapsible download guide with copy button
 20. ✅ Segment dropdown with truncated ID + location/time metadata
 21. ✅ README rewrite for public-facing GitHub Pages deployment
-22. ⬜ DriveStudio/OmniRe 3DGS training + .ply export
+22. ✅ LiDAR colormap modes (intensity/height/range/elongation) + unified frosted control panel
+23. ✅ POV gimbal lock fix (quaternion slerp) + frustum base/edge split display
+24. ⬜ DriveStudio/OmniRe 3DGS training + .ply export
 23. ⬜ gsplat.js integration for 3DGS BEV tab
 24. ⬜ GitHub Pages deployment + demo GIF + LinkedIn post
 25. ⬜ IEEE VIS 2026 Short Paper (deadline: April 30)

@@ -190,7 +190,7 @@ export default function PointCloud() {
       geom.setDrawRange(0, count)
       geom.computeBoundingSphere()
     } else {
-      // Per-sensor path: merge visible sensors with sensor coloring
+      // Per-sensor path: merge visible sensors, same colormap
       const sensorClouds = currentFrame.sensorClouds
       if (!sensorClouds || sensorClouds.size === 0) {
         geom.setDrawRange(0, 0)
@@ -209,12 +209,12 @@ export default function PointCloud() {
           posArr[dst] = positions[src]
           posArr[dst + 1] = positions[src + 1]
           posArr[dst + 2] = positions[src + 2]
-
-          // Sensor coloring
-          const color = SENSOR_COLORS[laserName] ?? [0.5, 0.5, 0.5]
-          colArr[dst] = color[0]
-          colArr[dst + 1] = color[1]
-          colArr[dst + 2] = color[2]
+          const raw = positions[src + attrOff]
+          const t = (raw - attrMin) / attrSpan
+          const [r, g, b] = colormapColor(stops, t)
+          colArr[dst] = r
+          colArr[dst + 1] = g
+          colArr[dst + 2] = b
         }
         total += count
       }

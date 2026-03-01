@@ -60,9 +60,9 @@ function PovController({
   returningRef: React.MutableRefObject<boolean>
 }) {
   const { camera } = useThree()
-  const savedState = useRef<{ pos: THREE.Vector3; fov: number; target: THREE.Vector3 } | null>(null)
+  const savedState = useRef<{ pos: THREE.Vector3; quat: THREE.Quaternion; fov: number; target: THREE.Vector3 } | null>(null)
   /** When non-null we're animating back to the saved orbital view */
-  const returnTarget = useRef<{ pos: THREE.Vector3; fov: number; target: THREE.Vector3 } | null>(null)
+  const returnTarget = useRef<{ pos: THREE.Vector3; quat: THREE.Quaternion; fov: number; target: THREE.Vector3 } | null>(null)
 
   // Save orbital camera state when entering POV
   useEffect(() => {
@@ -74,10 +74,11 @@ function PovController({
         returnTarget.current = null
         returningRef.current = false
       }
-      // First POV entry — save current orbital camera state
+      // First POV entry — save current orbital camera state (including quaternion!)
       if (!savedState.current) {
         savedState.current = {
           pos: camera.position.clone(),
+          quat: camera.quaternion.clone(),
           fov: (camera as THREE.PerspectiveCamera).fov,
           target: orbitRef.current?.target?.clone() ?? new THREE.Vector3(),
         }
@@ -124,16 +125,14 @@ function PovController({
       pc.fov = THREE.MathUtils.lerp(pc.fov, rt.fov, LERP_SPEED)
       pc.updateProjectionMatrix()
 
-      // Compute an orientation that looks from the returning position toward the orbit target
-      const lookAtMatrix = new THREE.Matrix4().lookAt(camera.position, rt.target, new THREE.Vector3(0, 0, 1))
-      const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix)
-      camera.quaternion.slerp(targetQuat, LERP_SPEED)
+      // Slerp directly to saved quaternion — no lookAt, no gimbal lock
+      camera.quaternion.slerp(rt.quat, LERP_SPEED)
 
       // Check if close enough to snap and finish
       const dist = camera.position.distanceTo(rt.pos)
       if (dist < SNAP_THRESHOLD) {
         camera.position.copy(rt.pos)
-        camera.quaternion.copy(targetQuat)
+        camera.quaternion.copy(rt.quat)
         pc.fov = rt.fov
         pc.updateProjectionMatrix()
         if (orbitRef.current) {
@@ -246,18 +245,23 @@ export default function LidarViewer() {
         </GizmoHelper>
       </Canvas>
 
-      {/* Layer control overlay */}
+      {/* Layer control overlay — single frosted panel */}
       <div style={{
         position: 'absolute',
         top: 12,
         left: 12,
         display: 'flex',
         flexDirection: 'column',
-        gap: '0px',
+        gap: 2,
         pointerEvents: 'auto',
         width: 172,
+        padding: 6,
+        backgroundColor: 'rgba(26, 31, 53, 0.75)',
+        borderRadius: radius.md,
+        backdropFilter: 'blur(12px)',
+        border: `1px solid ${colors.border}`,
       }}>
-        {/* ── SENSORS group ── */}
+        {/* ── LIDAR group ── */}
         <div style={{
           fontSize: '9px',
           fontFamily: fonts.sans,
@@ -265,94 +269,92 @@ export default function LidarViewer() {
           color: colors.textDim,
           letterSpacing: '1.2px',
           textTransform: 'uppercase',
-          padding: '4px 10px 3px',
+          padding: '2px 4px 2px',
         }}>
-          Sensors
+          LiDAR
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          {SENSOR_INFO.map(({ id, label, color }) => {
-            const active = visibleSensors.has(id)
-            const cloud = sensorClouds?.get(id)
-            const pts = cloud ? cloud.pointCount.toLocaleString() : '—'
-            return (
-              <button
-                key={id}
-                onClick={() => toggleSensor(id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '4px 10px',
-                  fontSize: '11px',
-                  fontFamily: fonts.sans,
-                  fontWeight: 500,
-                  border: 'none',
-                  borderRadius: radius.sm,
-                  cursor: 'pointer',
-                  backgroundColor: active ? 'rgba(26, 31, 53, 0.9)' : 'rgba(26, 31, 53, 0.5)',
-                  color: active ? colors.textPrimary : colors.textDim,
-                  opacity: active ? 1 : 0.6,
-                  backdropFilter: 'blur(8px)',
-                  transition: 'opacity 0.15s, background-color 0.15s',
-                }}
-              >
-                <span style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: active ? color : colors.textDim,
-                  display: 'inline-block',
-                  flexShrink: 0,
-                  boxShadow: active ? `0 0 6px ${color}` : 'none',
-                }} />
-                {label}
-                <span style={{
-                  color: colors.textSecondary,
-                  marginLeft: 'auto',
-                  paddingLeft: 8,
-                  fontFamily: fonts.mono,
-                  fontSize: '10px',
-                }}>
-                  {pts}
-                </span>
-              </button>
-            )
-          })}
-        </div>
+        {SENSOR_INFO.map(({ id, label, color }) => {
+          const active = visibleSensors.has(id)
+          const cloud = sensorClouds?.get(id)
+          const pts = cloud ? cloud.pointCount.toLocaleString() : '—'
+          return (
+            <button
+              key={id}
+              onClick={() => toggleSensor(id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '4px 8px',
+                fontSize: '11px',
+                fontFamily: fonts.sans,
+                fontWeight: 500,
+                border: 'none',
+                borderRadius: radius.sm,
+                cursor: 'pointer',
+                backgroundColor: active ? 'rgba(255,255,255,0.06)' : 'transparent',
+                color: active ? colors.textPrimary : colors.textDim,
+                opacity: active ? 1 : 0.6,
+                transition: 'opacity 0.15s, background-color 0.15s',
+              }}
+            >
+              <span style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                backgroundColor: active ? color : colors.textDim,
+                display: 'inline-block',
+                flexShrink: 0,
+                boxShadow: active ? `0 0 6px ${color}` : 'none',
+              }} />
+              {label}
+              <span style={{
+                color: colors.textSecondary,
+                marginLeft: 'auto',
+                paddingLeft: 8,
+                fontFamily: fonts.mono,
+                fontSize: '10px',
+              }}>
+                {pts}
+              </span>
+            </button>
+          )
+        })}
 
-        {/* Opacity slider */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '4px 10px',
-          marginTop: 4,
-          backgroundColor: 'rgba(26, 31, 53, 0.9)',
-          borderRadius: radius.sm,
-          backdropFilter: 'blur(8px)',
-        }}>
-          <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-            Opacity
-          </span>
-          <input
-            type="range"
-            min={10}
-            max={100}
-            value={Math.round(pointOpacity * 100)}
-            onChange={(e) => setPointOpacity(Number(e.target.value) / 100)}
-            style={{ width: 52, height: 2, accentColor: colors.accent }}
-          />
-          <span style={{
-            fontSize: '10px',
-            fontFamily: fonts.mono,
-            color: colors.textPrimary,
-            minWidth: 24,
-            textAlign: 'right',
+        {/* Opacity slider — hidden when all sensors off */}
+        {visibleSensors.size > 0 && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '4px 8px',
           }}>
-            {Math.round(pointOpacity * 100)}%
-          </span>
-        </div>
+            <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+              Opacity
+            </span>
+            <input
+              type="range"
+              min={10}
+              max={100}
+              value={Math.round(pointOpacity * 100)}
+              onChange={(e) => setPointOpacity(Number(e.target.value) / 100)}
+              style={{ width: 52, height: 2, accentColor: colors.accent }}
+            />
+            <span style={{
+              fontSize: '10px',
+              fontFamily: fonts.mono,
+              color: colors.textPrimary,
+              minWidth: 24,
+              textAlign: 'right',
+            }}>
+              {Math.round(pointOpacity * 100)}%
+            </span>
+          </div>
+        )}
+
+        {/* ── Divider ── */}
+        <div style={{ height: '1px', backgroundColor: colors.border, margin: '4px 4px' }} />
 
         {/* ── COLORMAP group ── */}
         <div style={{
@@ -362,7 +364,7 @@ export default function LidarViewer() {
           color: colors.textDim,
           letterSpacing: '1.2px',
           textTransform: 'uppercase',
-          padding: '8px 10px 3px',
+          padding: '2px 4px 2px',
         }}>
           Colormap
         </div>
@@ -371,8 +373,7 @@ export default function LidarViewer() {
           display: 'flex',
           borderRadius: radius.sm,
           overflow: 'hidden',
-          backgroundColor: 'rgba(26, 31, 53, 0.7)',
-          backdropFilter: 'blur(8px)',
+          backgroundColor: 'rgba(255,255,255,0.04)',
         }}>
           {([['intensity', 'Int'], ['height', 'Z'], ['range', 'Range'], ['elongation', 'Elong']] as [ColormapMode, string][]).map(([mode, label]) => {
             const active = colormapMode === mode
@@ -388,7 +389,7 @@ export default function LidarViewer() {
                   fontWeight: active ? 600 : 400,
                   border: 'none',
                   cursor: 'pointer',
-                  backgroundColor: active ? 'rgba(0, 200, 219, 0.2)' : 'transparent',
+                  backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
                   color: active ? colors.accentBlue : colors.textDim,
                   transition: 'all 0.15s',
                   letterSpacing: '0.3px',
@@ -400,48 +401,29 @@ export default function LidarViewer() {
           })}
         </div>
 
-        {/* ── Divider + PERCEPTION group (hidden when no box data, e.g. test set) ── */}
+        {/* ── PERCEPTION group (hidden when no box data) ── */}
         {hasBoxData && <>
-        <div style={{
-          height: '1px',
-          background: `linear-gradient(90deg, ${colors.border} 0%, transparent 100%)`,
-          margin: '8px 10px',
-        }} />
+          {/* Divider */}
+          <div style={{ height: '1px', backgroundColor: colors.border, margin: '4px 4px' }} />
 
-        {/* ── PERCEPTION group ── */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '0px 10px 4px',
-        }}>
           <div style={{
-            width: '3px',
-            height: '10px',
-            borderRadius: '2px',
-            backgroundColor: boxMode !== 'off' ? colors.accentBlue : colors.textDim,
-            transition: 'background-color 0.2s',
-          }} />
-          <span style={{
             fontSize: '9px',
             fontFamily: fonts.sans,
             fontWeight: 600,
             color: colors.textDim,
             letterSpacing: '1.2px',
             textTransform: 'uppercase',
+            padding: '2px 4px 2px',
           }}>
             Perception
-          </span>
-        </div>
+          </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {/* Segmented control: Off | Boxes | Models */}
           <div style={{
             display: 'flex',
             borderRadius: radius.sm,
             overflow: 'hidden',
-            backgroundColor: 'rgba(26, 31, 53, 0.7)',
-            backdropFilter: 'blur(8px)',
+            backgroundColor: 'rgba(255,255,255,0.04)',
           }}>
             {([['off', 'Off'], ['box', 'Boxes'], ['model', 'Models']] as const).map(([mode, label]) => {
               const active = boxMode === mode
@@ -459,7 +441,7 @@ export default function LidarViewer() {
                     border: 'none',
                     cursor: 'pointer',
                     backgroundColor: active
-                      ? (isOn ? 'rgba(0, 200, 219, 0.2)' : 'rgba(26, 31, 53, 0.95)')
+                      ? (isOn ? 'rgba(0, 200, 219, 0.15)' : 'rgba(255,255,255,0.06)')
                       : 'transparent',
                     color: active
                       ? (isOn ? colors.accentBlue : colors.textPrimary)
@@ -480,10 +462,7 @@ export default function LidarViewer() {
               display: 'flex',
               flexWrap: 'wrap',
               gap: '2px 8px',
-              padding: '4px 10px',
-              backgroundColor: 'rgba(26, 31, 53, 0.9)',
-              borderRadius: radius.sm,
-              backdropFilter: 'blur(8px)',
+              padding: '4px 8px',
             }}>
               {([
                 [BoxType.TYPE_VEHICLE, 'Vehicle'],
@@ -516,10 +495,7 @@ export default function LidarViewer() {
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              padding: '4px 10px',
-              backgroundColor: 'rgba(26, 31, 53, 0.9)',
-              borderRadius: radius.sm,
-              backdropFilter: 'blur(8px)',
+              padding: '4px 8px',
             }}>
               <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
                 Trail
@@ -543,7 +519,6 @@ export default function LidarViewer() {
               </span>
             </div>
           </>)}
-        </div>
         </>}
       </div>
 
