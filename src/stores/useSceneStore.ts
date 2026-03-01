@@ -82,7 +82,6 @@ function invertRowMajor4x4(m: number[]): number[] {
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
-export type BoxRenderer = 'svg' | 'canvas'
 export type ColormapMode = 'intensity' | 'height' | 'range' | 'elongation'
 export interface FrameData {
   timestamp: bigint
@@ -116,7 +115,6 @@ interface SceneActions {
   setHoveredCam: (cam: number | null) => void
   /** Set hovered box for cross-modal 2D↔3D highlight (association-linked boxes only) */
   setHoveredBox: (id: string | null, source: 'laser' | 'camera' | null) => void
-  setBoxRenderer: (renderer: BoxRenderer) => void
   setAvailableSegments: (segments: string[]) => void
   selectSegment: (segmentId: string) => Promise<void>
   loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
@@ -181,8 +179,6 @@ export interface SceneState {
   highlightedCameraBoxIds: Set<string>
   /** Laser box ID to highlight (derived from hovering a 2D box) */
   highlightedLaserBoxId: string | null
-  /** 2D bbox overlay renderer: 'svg' (React DOM) or 'canvas' (imperative Canvas 2D) */
-  boxRenderer: BoxRenderer
   /** World coordinate mode (true = world frame, false = vehicle frame) */
   worldMode: boolean
   /** All discovered segment IDs */
@@ -401,7 +397,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   pointOpacity: 0.85,
   colormapMode: 'intensity' as ColormapMode,
   hasBoxData: false,
-  boxRenderer: 'canvas' as BoxRenderer,
   activeCam: null,
   hoveredCam: null,
   hoveredBoxId: null,
@@ -634,10 +629,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set({ hoveredCam: cam })
     },
 
-    setBoxRenderer: (renderer: BoxRenderer) => {
-      set({ boxRenderer: renderer })
-    },
-
     setHoveredBox: (id: string | null, source: 'laser' | 'camera' | null) => {
       if (!id || !source) {
         // Clear all highlights
@@ -742,7 +733,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         cameraTotalCount: 0,
         visibleSensors: new Set([1, 2, 3, 4, 5]),
         boxMode: 'box' as BoxMode,
-        boxRenderer: 'canvas' as BoxRenderer,
         trailLength: 10,
         pointOpacity: 0.85,
         colormapMode: 'intensity' as ColormapMode,

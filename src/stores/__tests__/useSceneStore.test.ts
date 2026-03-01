@@ -368,22 +368,6 @@ describe('useSceneStore', () => {
     })
   })
 
-  describe('boxRenderer state (OPT-005)', () => {
-    it('defaults to canvas', () => {
-      expect(state().boxRenderer).toBe('canvas')
-    })
-
-    it('setBoxRenderer switches to svg', () => {
-      actions().setBoxRenderer('svg')
-      expect(state().boxRenderer).toBe('svg')
-    })
-
-    it('setBoxRenderer switches back to canvas', () => {
-      actions().setBoxRenderer('canvas')
-      expect(state().boxRenderer).toBe('canvas')
-    })
-  })
-
   describe('setHoveredBox cross-modal highlight', () => {
     it('clear: null id clears all highlights', () => {
       actions().setHoveredBox(null, null)
@@ -491,14 +475,6 @@ describe('useSceneStore', () => {
       expect(state().status).toBe('idle')
       expect(state().totalFrames).toBe(0)
       expect(state().currentFrame).toBeNull()
-    })
-
-    it('reset restores boxRenderer to canvas', () => {
-      // First change it
-      actions().setBoxRenderer('svg')
-      expect(state().boxRenderer).toBe('svg')
-      actions().reset()
-      expect(state().boxRenderer).toBe('canvas')
     })
 
     it('reset restores highlight state', () => {

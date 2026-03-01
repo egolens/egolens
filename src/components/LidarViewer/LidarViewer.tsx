@@ -19,7 +19,7 @@ import CameraFrustums from './CameraFrustums'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
 import { BOX_TYPE_COLORS, BoxType } from '../../types/waymo'
-import type { ColormapMode, BoxRenderer } from '../../stores/useSceneStore'
+import type { ColormapMode } from '../../stores/useSceneStore'
 import { colors, fonts, radius } from '../../theme'
 
 const SENSOR_INFO: { id: number; label: string; color: string }[] = [
@@ -258,8 +258,6 @@ export default function LidarViewer() {
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const setColormapMode = useSceneStore((s) => s.actions.setColormapMode)
   const hasBoxData = useSceneStore((s) => s.hasBoxData)
-  const boxRenderer = useSceneStore((s) => s.boxRenderer)
-  const setBoxRenderer = useSceneStore((s) => s.actions.setBoxRenderer)
   const cameraCalibrations = useSceneStore((s) => s.cameraCalibrations)
   const activeCam = useSceneStore((s) => s.activeCam)
   const setActiveCam = useSceneStore((s) => s.actions.setActiveCam)
@@ -654,49 +652,6 @@ export default function LidarViewer() {
                   </span>
                 </div>
               ))}
-            </div>
-
-            {/* 2D overlay renderer toggle */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '4px 8px',
-            }}>
-              <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                2D
-              </span>
-              <div style={{
-                display: 'flex',
-                borderRadius: radius.sm,
-                overflow: 'hidden',
-                backgroundColor: 'rgba(255,255,255,0.04)',
-              }}>
-                {([['svg', 'SVG'], ['canvas', 'Canvas']] as [BoxRenderer, string][]).map(([mode, label]) => {
-                  const active = boxRenderer === mode
-                  return (
-                    <button
-                      key={mode}
-                      onClick={() => setBoxRenderer(mode)}
-                      style={{
-                        padding: '2px 8px',
-                        fontSize: '9px',
-                        fontFamily: fonts.sans,
-                        fontWeight: active ? 600 : 400,
-                        border: 'none',
-                        cursor: active ? 'default' : 'pointer',
-                        backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
-                        color: active ? colors.accentBlue : colors.textDim,
-                        transition: 'all 0.15s',
-                        letterSpacing: '0.3px',
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
-              </div>
             </div>
 
             {/* Trail slider */}

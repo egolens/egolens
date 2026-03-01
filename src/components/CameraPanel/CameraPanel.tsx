@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
-import { CameraName, BOX_TYPE_COLORS, BoxType, CAMERA_RESOLUTION, HIGHLIGHT_COLOR } from '../../types/waymo'
+import { CameraName } from '../../types/waymo'
 import type { ParquetRow } from '../../utils/merge'
 import { colors, fonts, radius, shadows } from '../../theme'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
@@ -42,7 +42,6 @@ export default function CameraPanel() {
   const cameraImages = useSceneStore((s) => s.currentFrame?.cameraImages)
   const cameraBoxes = useSceneStore((s) => s.currentFrame?.cameraBoxes)
   const boxMode = useSceneStore((s) => s.boxMode)
-  const boxRenderer = useSceneStore((s) => s.boxRenderer)
   const activeCam = useSceneStore((s) => s.activeCam)
   const toggleActiveCam = useSceneStore((s) => s.actions.toggleActiveCam)
   const setHoveredCam = useSceneStore((s) => s.actions.setHoveredCam)
@@ -81,7 +80,6 @@ export default function CameraPanel() {
           label={label}
           imageBuffer={cameraImages?.get(id) ?? null}
           boxes={boxesByCamera.get(id) ?? EMPTY_BOXES}
-          boxRenderer={boxRenderer}
           active={activeCam === id}
           onTogglePov={toggleActiveCam}
           onHover={setHoveredCam}
@@ -102,13 +100,12 @@ interface CameraViewProps {
   label: string
   imageBuffer: ArrayBuffer | null
   boxes: ParquetRow[]
-  boxRenderer: 'svg' | 'canvas'
   active: boolean
   onTogglePov: (cameraName: number) => void
   onHover: (cameraName: number | null) => void
 }
 
-function CameraView({ cameraName, label, imageBuffer, boxes, boxRenderer, active, onTogglePov, onHover }: CameraViewProps) {
+function CameraView({ cameraName, label, imageBuffer, boxes, active, onTogglePov, onHover }: CameraViewProps) {
   /** The URL currently displayed (kept until a new image fully loads) */
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   /** The newest blob URL being loaded (may not be visible yet) */
@@ -202,9 +199,7 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxRenderer, active
 
       {/* 2D bounding box overlay */}
       {boxes.length > 0 && (
-        boxRenderer === 'canvas'
-          ? <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
-          : <BBoxOverlay cameraName={cameraName} boxes={boxes} />
+        <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
       )}
 
       {/* Label overlay */}
@@ -245,73 +240,3 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxRenderer, active
 
 // ---------------------------------------------------------------------------
 // 2D Bounding Box SVG Overlay
-// ---------------------------------------------------------------------------
-
-/** Stroke width in image-pixel units (scales with the viewBox) */
-const BBOX_STROKE_WIDTH = 4
-const BBOX_STROKE_WIDTH_HIGHLIGHT = 7
-
-function BBoxOverlay({ cameraName, boxes }: { cameraName: number; boxes: ParquetRow[] }) {
-  const res = CAMERA_RESOLUTION[cameraName] ?? { width: 1920, height: 1280 }
-  const highlightedCameraBoxIds = useSceneStore((s) => s.highlightedCameraBoxIds)
-  const hoveredBoxId = useSceneStore((s) => s.hoveredBoxId)
-  const setHoveredBox = useSceneStore((s) => s.actions.setHoveredBox)
-
-  const rects = useMemo(() => {
-    return boxes.map((row, i) => {
-      const cx = row['[CameraBoxComponent].box.center.x'] as number
-      const cy = row['[CameraBoxComponent].box.center.y'] as number
-      const w = row['[CameraBoxComponent].box.size.x'] as number
-      const h = row['[CameraBoxComponent].box.size.y'] as number
-      const type = (row['[CameraBoxComponent].type'] as number) ?? 0
-      const camObjectId = (row['key.camera_object_id'] as string) ?? ''
-      const baseColor = BOX_TYPE_COLORS[type] ?? BOX_TYPE_COLORS[BoxType.TYPE_UNKNOWN]
-
-      // Determine highlight state
-      const highlighted = hoveredBoxId === camObjectId || highlightedCameraBoxIds.has(camObjectId)
-      const color = highlighted ? HIGHLIGHT_COLOR : baseColor
-      const strokeW = highlighted ? BBOX_STROKE_WIDTH_HIGHLIGHT : BBOX_STROKE_WIDTH
-      const strokeOp = highlighted ? 1.0 : 0.85
-
-      // Only pedestrian/cyclist have associations → only they are interactive
-      const hasAssociation = !!camObjectId && (type === BoxType.TYPE_PEDESTRIAN || type === BoxType.TYPE_CYCLIST)
-
-      return (
-        <g key={i}>
-          <rect
-            x={cx - w / 2}
-            y={cy - h / 2}
-            width={w}
-            height={h}
-            fill="transparent"
-            stroke={color}
-            strokeWidth={strokeW}
-            strokeOpacity={strokeOp}
-            style={{
-              pointerEvents: hasAssociation ? 'auto' : 'none',
-              cursor: hasAssociation ? 'pointer' : 'default',
-            }}
-            onMouseEnter={hasAssociation ? () => setHoveredBox(camObjectId, 'camera') : undefined}
-            onMouseLeave={hasAssociation ? () => setHoveredBox(null, null) : undefined}
-          />
-        </g>
-      )
-    })
-  }, [boxes, highlightedCameraBoxIds, hoveredBoxId, setHoveredBox])
-
-  return (
-    <svg
-      viewBox={`0 0 ${res.width} ${res.height}`}
-      preserveAspectRatio="xMidYMid slice"
-      style={{
-        position: 'absolute',
-        inset: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-      }}
-    >
-      {rects}
-    </svg>
-  )
-}
