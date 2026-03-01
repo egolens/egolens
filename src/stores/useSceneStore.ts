@@ -9,7 +9,7 @@
  * to cache the entire 199-frame segment, now across N concurrent workers.
  *
  * Usage in React:
- *   const pointCloud = useSceneStore(s => s.currentFrame?.pointCloud)
+ *   const sensorClouds = useSceneStore(s => s.currentFrame?.sensorClouds)
  *   const { loadDataset, nextFrame } = useSceneStore(s => s.actions)
  */
 
@@ -85,8 +85,7 @@ export type BoxMode = 'off' | 'box' | 'model'
 export type ColormapMode = 'intensity' | 'height' | 'range' | 'elongation'
 export interface FrameData {
   timestamp: bigint
-  pointCloud: PointCloud | null
-  /** Per-sensor point clouds for toggle UI (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
+  /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
   sensorClouds: Map<number, PointCloud>
   boxes: ParquetRow[]
   /** 2D camera bounding boxes for overlay on camera panels */
@@ -326,10 +325,6 @@ function cacheRowGroupFrames(
 
     const frameData: FrameData = {
       timestamp,
-      pointCloud: {
-        positions: frame.positions,
-        pointCount: frame.pointCount,
-      },
       sensorClouds,
       boxes,
       cameraBoxes,
@@ -539,7 +534,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             cameraImages,
           },
           lastFrameLoadMs: 0,
-          lastConvertMs: cached.pointCloud ? get().lastConvertMs : 0,
+          lastConvertMs: cached.sensorClouds.size > 0 ? get().lastConvertMs : 0,
         })
         return
       }
@@ -847,7 +842,6 @@ async function loadFrameMainThread(
 
   const frameData: FrameData = {
     timestamp,
-    pointCloud: result.merged,
     sensorClouds: result.perSensor,
     boxes,
     cameraBoxes,

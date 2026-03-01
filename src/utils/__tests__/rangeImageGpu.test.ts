@@ -154,27 +154,39 @@ import { convertAllSensorsGpu } from '../rangeImageGpu'
 // Skip all GPU tests if webgpu package couldn't load OR gpu object is falsy
 const shouldSkip = !!skipReason || !gpu
 
+/** Merge per-sensor clouds into a single buffer for comparison with GPU output */
+function mergeSensorClouds(result: { perSensor: Map<number, { positions: Float32Array; pointCount: number }>; totalPointCount: number }) {
+  const positions = new Float32Array(result.totalPointCount * POINT_STRIDE)
+  let offset = 0
+  for (const cloud of result.perSensor.values()) {
+    positions.set(cloud.positions, offset)
+    offset += cloud.pointCount * POINT_STRIDE
+  }
+  return { positions, pointCount: result.totalPointCount }
+}
+
 describe('GPU vs CPU consistency', () => {
   it.skipIf(shouldSkip)('point counts match', async () => {
     const cpuResult = convertAllSensors(allRangeImages, calibrations)
     const gpuCloud = await convertAllSensorsGpu(allRangeImages, calibrations, gpu!)
 
     // Point counts should be identical (same filtering logic)
-    expect(gpuCloud.pointCount).toBe(cpuResult.merged.pointCount)
+    expect(gpuCloud.pointCount).toBe(cpuResult.totalPointCount)
   })
 
   it.skipIf(shouldSkip)('xyz positions match within float32 epsilon', async () => {
     const cpuResult = convertAllSensors(allRangeImages, calibrations)
+    const cpuMerged = mergeSensorClouds(cpuResult)
     const gpuCloud = await convertAllSensorsGpu(allRangeImages, calibrations, gpu!)
 
     // Note: GPU uses atomic counter for stream compaction, so point ORDER
     // may differ from CPU. We compare aggregate statistics:
 
     // 1. Total point count
-    expect(gpuCloud.pointCount).toBe(cpuResult.merged.pointCount)
+    expect(gpuCloud.pointCount).toBe(cpuResult.totalPointCount)
 
     // 2. Bounding box should match closely
-    const cpuBounds = computeBounds(cpuResult.merged.positions, cpuResult.merged.pointCount, POINT_STRIDE)
+    const cpuBounds = computeBounds(cpuMerged.positions, cpuMerged.pointCount, POINT_STRIDE)
     const gpuBounds = computeBounds(gpuCloud.positions, gpuCloud.pointCount, 4)
 
     expect(gpuBounds.minX).toBeCloseTo(cpuBounds.minX, 1)
@@ -187,13 +199,14 @@ describe('GPU vs CPU consistency', () => {
 
   it.skipIf(shouldSkip)('intensity values and sum match', async () => {
     const cpuResult = convertAllSensors(allRangeImages, calibrations)
+    const cpuMerged = mergeSensorClouds(cpuResult)
     const gpuCloud = await convertAllSensorsGpu(allRangeImages, calibrations, gpu!)
 
     // Sum all intensity values (index 3 of each stride)
     let cpuSum = 0
     let gpuSum = 0
-    for (let i = 0; i < cpuResult.merged.pointCount; i++) {
-      cpuSum += cpuResult.merged.positions[i * POINT_STRIDE + 3]
+    for (let i = 0; i < cpuMerged.pointCount; i++) {
+      cpuSum += cpuMerged.positions[i * POINT_STRIDE + 3]
     }
     for (let i = 0; i < gpuCloud.pointCount; i++) {
       gpuSum += gpuCloud.positions[i * 4 + 3]

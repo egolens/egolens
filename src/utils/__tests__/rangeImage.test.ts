@@ -286,19 +286,23 @@ describe('convertRangeImageToPointCloud()', () => {
 // ---------------------------------------------------------------------------
 
 describe('convertAllSensors()', () => {
-  it('merges all 5 sensors into one point cloud', () => {
+  it('returns per-sensor clouds with correct total count', () => {
     const result = convertAllSensors(allRangeImages, calibrations)
 
     // Mock total: TOP(~704) + FRONT(~352) + 3×SIDE(~70×3=210) ≈ 1266 points
-    expect(result.merged.pointCount).toBeGreaterThan(800)
-    expect(result.merged.positions.length).toBe(result.merged.pointCount * POINT_STRIDE)
+    expect(result.totalPointCount).toBeGreaterThan(800)
+    expect(result.perSensor.size).toBe(5)
+    // Verify totalPointCount matches sum of per-sensor counts
+    let sum = 0
+    for (const cloud of result.perSensor.values()) sum += cloud.pointCount
+    expect(result.totalPointCount).toBe(sum)
   })
 
-  it('merged cloud has more points than any single sensor', () => {
+  it('all sensors combined have more points than any single sensor', () => {
     const result = convertAllSensors(allRangeImages, calibrations)
     const topOnly = convertRangeImageToPointCloud(topRangeImage, calibrations.get(1)!)
 
-    expect(result.merged.pointCount).toBeGreaterThan(topOnly.pointCount)
+    expect(result.totalPointCount).toBeGreaterThan(topOnly.pointCount)
   })
 })
 

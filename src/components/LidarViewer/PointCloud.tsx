@@ -2,8 +2,8 @@
  * PointCloud renderer — single draw call for ~168K points.
  *
  * Supports per-sensor visibility toggle via store's visibleSensors set.
- * When all sensors visible, uses pre-merged buffer (zero copy).
- * When some hidden, merges only visible sensor clouds on the fly.
+ * Always merges from per-sensor clouds in useFrame (no pre-merged buffer
+ * is cached, saving ~772 MB for a 199-frame segment — see OPT-004).
  *
  * Colormap modes: intensity (default), height (Z), range, elongation.
  * When sensors are filtered, per-sensor coloring overrides colormap.
@@ -116,9 +116,6 @@ const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
 /** Maximum points we'll ever allocate buffers for (avoids realloc). */
 const MAX_POINTS = 200_000
 
-/** All 5 sensor IDs */
-const ALL_SENSORS = new Set([1, 2, 3, 4, 5])
-
 export default function PointCloud() {
   const currentFrame = useSceneStore((s) => s.currentFrame)
   const currentFrameIndex = useSceneStore((s) => s.currentFrameIndex)
@@ -126,9 +123,6 @@ export default function PointCloud() {
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const geometryRef = useRef<THREE.BufferGeometry>(null)
-
-  // Check if all sensors visible (fast path — use pre-merged buffer)
-  const allVisible = visibleSensors.size === ALL_SENSORS.size
 
   // Pre-allocate position & color buffers once
   const { posAttr, colorAttr } = useMemo(() => {
@@ -142,7 +136,7 @@ export default function PointCloud() {
   // Mark dirty when any input changes — actual buffer update happens in useFrame
   // to avoid R3F reconciler resetting needsUpdate between useEffect and render.
   const dirtyRef = useRef(true)
-  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, allVisible, colormapMode])
+  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode])
 
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
@@ -155,27 +149,28 @@ export default function PointCloud() {
       return
     }
 
+    const sensorClouds = currentFrame.sensorClouds
+    if (!sensorClouds || sensorClouds.size === 0) {
+      geom.setDrawRange(0, 0)
+      return
+    }
+
     const posArr = posAttr.array as Float32Array
     const colArr = colorAttr.array as Float32Array
+    const stops = COLORMAP_STOPS[colormapMode]
+    const attrOff = ATTR_OFFSET[colormapMode]
+    const [attrMin, attrMax] = ATTR_RANGE[colormapMode]
+    const attrSpan = attrMax - attrMin
 
-    if (allVisible) {
-      // Fast path: use pre-merged buffer
-      const pc = currentFrame.pointCloud
-      if (!pc || pc.pointCount === 0) {
-        geom.setDrawRange(0, 0)
-        return
-      }
-      const { positions, pointCount } = pc
-      const count = Math.min(pointCount, MAX_POINTS)
-
-      const stops = COLORMAP_STOPS[colormapMode]
-      const attrOff = ATTR_OFFSET[colormapMode]
-      const [attrMin, attrMax] = ATTR_RANGE[colormapMode]
-      const attrSpan = attrMax - attrMin
+    let total = 0
+    for (const [laserName, cloud] of sensorClouds) {
+      if (!visibleSensors.has(laserName)) continue
+      const count = Math.min(cloud.pointCount, MAX_POINTS - total)
+      const { positions } = cloud
 
       for (let i = 0; i < count; i++) {
         const src = i * POINT_STRIDE
-        const dst = i * 3
+        const dst = (total + i) * 3
         posArr[dst] = positions[src]
         posArr[dst + 1] = positions[src + 1]
         posArr[dst + 2] = positions[src + 2]
@@ -186,51 +181,13 @@ export default function PointCloud() {
         colArr[dst + 1] = g
         colArr[dst + 2] = b
       }
-
-      posAttr.needsUpdate = true
-      colorAttr.needsUpdate = true
-      geom.setDrawRange(0, count)
-      geom.computeBoundingSphere()
-    } else {
-      // Per-sensor path: merge visible sensors
-      const sensorClouds = currentFrame.sensorClouds
-      if (!sensorClouds || sensorClouds.size === 0) {
-        geom.setDrawRange(0, 0)
-        return
-      }
-
-      const stops = COLORMAP_STOPS[colormapMode]
-      const attrOff = ATTR_OFFSET[colormapMode]
-      const [attrMin, attrMax] = ATTR_RANGE[colormapMode]
-      const attrSpan = attrMax - attrMin
-
-      let total = 0
-      for (const [laserName, cloud] of sensorClouds) {
-        if (!visibleSensors.has(laserName)) continue
-        const count = Math.min(cloud.pointCount, MAX_POINTS - total)
-        const { positions } = cloud
-
-        for (let i = 0; i < count; i++) {
-          const src = i * POINT_STRIDE
-          const dst = (total + i) * 3
-          posArr[dst] = positions[src]
-          posArr[dst + 1] = positions[src + 1]
-          posArr[dst + 2] = positions[src + 2]
-          const raw = positions[src + attrOff]
-          const t = (raw - attrMin) / attrSpan
-          const [r, g, b] = colormapColor(stops, t)
-          colArr[dst] = r
-          colArr[dst + 1] = g
-          colArr[dst + 2] = b
-        }
-        total += count
-      }
-
-      posAttr.needsUpdate = true
-      colorAttr.needsUpdate = true
-      geom.setDrawRange(0, total)
-      geom.computeBoundingSphere()
+      total += count
     }
+
+    posAttr.needsUpdate = true
+    colorAttr.needsUpdate = true
+    geom.setDrawRange(0, total)
+    geom.computeBoundingSphere()
   })
 
   return (

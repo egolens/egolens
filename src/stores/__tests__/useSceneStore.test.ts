@@ -118,8 +118,6 @@ vi.mock('../../workers/workerPool', () => {
 
           frames.push({
             timestamp: ts.toString(),
-            positions: result.merged.positions,
-            pointCount: result.merged.pointCount,
             sensorClouds,
             convertMs,
           })
@@ -277,11 +275,14 @@ describe('useSceneStore', () => {
     it('starts at frame 0 with point cloud', () => {
       expect(state().currentFrameIndex).toBe(0)
       expect(state().currentFrame).not.toBeNull()
-      const pc = state().currentFrame!.pointCloud!
+      const clouds = state().currentFrame!.sensorClouds
+      expect(clouds.size).toBeGreaterThan(0)
+      // Sum point counts across all sensors
+      let totalPoints = 0
+      for (const cloud of clouds.values()) totalPoints += cloud.pointCount
       // Mock fixtures: ~1266 points total (small range images)
-      expect(pc.pointCount).toBeGreaterThan(800)
-      expect(pc.pointCount).toBeLessThan(2000)
-      expect(pc.positions.length).toBe(pc.pointCount * 6)
+      expect(totalPoints).toBeGreaterThan(800)
+      expect(totalPoints).toBeLessThan(2000)
     })
 
     it('has bounding boxes', () => {
@@ -304,7 +305,7 @@ describe('useSceneStore', () => {
       await actions().seekFrame(0)
       await actions().nextFrame()
       expect(state().currentFrameIndex).toBe(1)
-      expect(state().currentFrame?.pointCloud).not.toBeNull()
+      expect(state().currentFrame?.sensorClouds.size).toBeGreaterThan(0)
     }, 15000)
 
     it('prevFrame → back to 0', async () => {
@@ -316,7 +317,7 @@ describe('useSceneStore', () => {
     it('seekFrame jumps to frame 50', async () => {
       await actions().seekFrame(50)
       expect(state().currentFrameIndex).toBe(50)
-      expect(state().currentFrame?.pointCloud).not.toBeNull()
+      expect(state().currentFrame?.sensorClouds.size).toBeGreaterThan(0)
     }, 15000)
 
     it('clamps below 0', async () => {

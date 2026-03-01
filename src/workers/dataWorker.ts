@@ -61,9 +61,7 @@ export interface SensorCloudResult {
 export interface FrameResult {
   /** bigint timestamp serialized as string */
   timestamp: string
-  positions: Float32Array
-  pointCount: number
-  /** Per-sensor breakdown for toggle UI */
+  /** Per-sensor point clouds (no merged buffer — renderer merges on the fly) */
   sensorClouds: SensorCloudResult[]
   convertMs: number
 }
@@ -184,18 +182,14 @@ async function handleMessage(msg: DataWorkerRequest) {
           const scResult: SensorCloudResult = { laserName, positions: cloud.positions, pointCount: cloud.pointCount }
 
           sensorClouds.push(scResult)
-          transferBuffers.push(cloud.positions.buffer)
+          transferBuffers.push(cloud.positions.buffer as ArrayBuffer)
         }
 
         frames.push({
           timestamp: ts.toString(),
-          positions: result.merged.positions,
-          pointCount: result.merged.pointCount,
           sensorClouds,
           convertMs,
         })
-
-        transferBuffers.push(result.merged.positions.buffer)
       }
 
       const totalMs = performance.now() - t0

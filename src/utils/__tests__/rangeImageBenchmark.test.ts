@@ -137,26 +137,26 @@ describe('CPU Benchmark', () => {
     expect(avg).toBeLessThan(200)
   })
 
-  it('All 5 sensors merged', () => {
+  it('All 5 sensors converted', () => {
     const runs = 5
     const times: number[] = []
-    let lastCloud = { pointCount: 0 }
+    let lastResult = { totalPointCount: 0 }
 
     for (let i = 0; i < runs; i++) {
       const t0 = performance.now()
-      const cloud = convertAllSensors(allRangeImages, calibrations)
+      const result = convertAllSensors(allRangeImages, calibrations)
       const t1 = performance.now()
       times.push(t1 - t0)
-      lastCloud = cloud
+      lastResult = result
     }
 
     const avg = times.reduce((a, b) => a + b) / runs
     const min = Math.min(...times)
     const max = Math.max(...times)
 
-    console.log(`\n  All 5 sensors merged (5 runs):`)
+    console.log(`\n  All 5 sensors converted (5 runs):`)
     console.log(`    avg: ${avg.toFixed(1)}ms, min: ${min.toFixed(1)}ms, max: ${max.toFixed(1)}ms`)
-    console.log(`    total points: ${lastCloud.pointCount}`)
+    console.log(`    total points: ${lastResult.totalPointCount}`)
 
     // Should be under 200ms for all 5 sensors
     expect(avg).toBeLessThan(500)
@@ -181,39 +181,42 @@ describe('CPU Benchmark', () => {
 
 describe('Output format validation', () => {
   it('positions are properly interleaved [x,y,z,i,r,e, ...]', () => {
-    const cloud = convertAllSensors(allRangeImages, calibrations)
+    const result = convertAllSensors(allRangeImages, calibrations)
 
-    // Length must be exactly pointCount × POINT_STRIDE
-    expect(cloud.positions.length).toBe(cloud.pointCount * POINT_STRIDE)
-
-    // Spot-check: no NaN values
-    for (let i = 0; i < Math.min(cloud.pointCount * POINT_STRIDE, 1000); i++) {
-      expect(Number.isNaN(cloud.positions[i])).toBe(false)
-      expect(Number.isFinite(cloud.positions[i])).toBe(true)
+    // Check each per-sensor cloud
+    for (const cloud of result.perSensor.values()) {
+      expect(cloud.positions.length).toBe(cloud.pointCount * POINT_STRIDE)
+      // Spot-check: no NaN values
+      for (let i = 0; i < Math.min(cloud.pointCount * POINT_STRIDE, 1000); i++) {
+        expect(Number.isNaN(cloud.positions[i])).toBe(false)
+        expect(Number.isFinite(cloud.positions[i])).toBe(true)
+      }
     }
   })
 
   it('GPU test data export matches CPU output shape', () => {
-    // This validates that the test data exported from rangeImage.test.ts
-    // can be used for GPU comparison tests in the browser
-    const cloud = convertAllSensors(allRangeImages, calibrations)
+    const result = convertAllSensors(allRangeImages, calibrations)
 
-    // The data structure that GPU tests will verify against
+    // Merge for reference data export
+    const merged = new Float32Array(result.totalPointCount * POINT_STRIDE)
+    let offset = 0
+    for (const cloud of result.perSensor.values()) {
+      merged.set(cloud.positions, offset)
+      offset += cloud.pointCount * POINT_STRIDE
+    }
+
     const testFixture = {
-      pointCount: cloud.pointCount,
-      // First 10 points as reference (GPU output should match within epsilon)
-      referencePoints: Array.from(cloud.positions.slice(0, 40)),
-      // Last 10 points
-      tailPoints: Array.from(cloud.positions.slice(-40)),
+      pointCount: result.totalPointCount,
+      referencePoints: Array.from(merged.slice(0, 40)),
+      tailPoints: Array.from(merged.slice(-40)),
     }
 
     expect(testFixture.pointCount).toBeGreaterThan(150000)
     expect(testFixture.referencePoints).toHaveLength(40)
     expect(testFixture.tailPoints).toHaveLength(40)
 
-    // Log for manual verification / GPU test fixtures
     console.log(`\n  GPU test fixture:`)
     console.log(`    totalPoints: ${testFixture.pointCount}`)
-    console.log(`    first point: [${testFixture.referencePoints.slice(0, 4).map(v => v.toFixed(3)).join(', ')}]`)
+    console.log(`    first point: [${testFixture.referencePoints.slice(0, 4).map((v: number) => v.toFixed(3)).join(', ')}]`)
   })
 })

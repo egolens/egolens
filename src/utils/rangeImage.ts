@@ -212,27 +212,30 @@ export function convertRangeImageToPointCloud(
 // Multi-sensor merge
 // ---------------------------------------------------------------------------
 
-/** Result of converting all sensors — includes per-sensor breakdown. */
+/** Result of converting all sensors — per-sensor point clouds only. */
 export interface MultiSensorResult {
-  /** Merged point cloud (all sensors) */
-  merged: PointCloud
   /** Per-sensor point clouds keyed by laser_name */
   perSensor: Map<number, PointCloud>
+  /** Total point count across all sensors */
+  totalPointCount: number
 }
 
 /**
- * Convert range images from all 5 LiDAR sensors and merge into one point cloud.
+ * Convert range images from all 5 LiDAR sensors into per-sensor point clouds.
+ *
+ * No merged buffer is produced — the renderer merges on the fly in useFrame
+ * to avoid storing duplicate data (~772 MB savings for a 199-frame segment).
  *
  * @param rangeImages - Map from laser_name → RangeImage
  * @param calibrations - Map from laser_name → LidarCalibration
- * @returns merged + per-sensor point clouds in vehicle frame
+ * @returns per-sensor point clouds in vehicle frame
  */
 export function convertAllSensors(
   rangeImages: Map<number, RangeImage>,
   calibrations: Map<number, LidarCalibration>,
 ): MultiSensorResult {
   const perSensor = new Map<number, PointCloud>()
-  let totalPoints = 0
+  let totalPointCount = 0
 
   for (const [laserName, rangeImage] of rangeImages) {
     const calib = calibrations.get(laserName)
@@ -242,19 +245,8 @@ export function convertAllSensors(
     }
     const cloud = convertRangeImageToPointCloud(rangeImage, calib)
     perSensor.set(laserName, cloud)
-    totalPoints += cloud.pointCount
+    totalPointCount += cloud.pointCount
   }
 
-  // Merge positions into single Float32Array
-  const merged = new Float32Array(totalPoints * POINT_STRIDE)
-  let offset = 0
-  for (const cloud of perSensor.values()) {
-    merged.set(cloud.positions, offset)
-    offset += cloud.pointCount * POINT_STRIDE
-  }
-
-  return {
-    merged: { positions: merged, pointCount: totalPoints },
-    perSensor,
-  }
+  return { perSensor, totalPointCount }
 }

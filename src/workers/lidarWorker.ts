@@ -11,6 +11,7 @@
 
 import {
   convertAllSensors,
+  POINT_STRIDE,
   type LidarCalibration,
   type RangeImage,
 } from '../utils/rangeImage'
@@ -51,18 +52,26 @@ self.onmessage = (event: MessageEvent<LidarWorkerRequest>) => {
   )
   const calibrations = new Map<number, LidarCalibration>(calibEntries)
 
-  const cloud = convertAllSensors(rangeImages, calibrations)
+  const { perSensor, totalPointCount } = convertAllSensors(rangeImages, calibrations)
+
+  // Merge per-sensor clouds into a single buffer for transfer
+  const positions = new Float32Array(totalPointCount * POINT_STRIDE)
+  let offset = 0
+  for (const cloud of perSensor.values()) {
+    positions.set(cloud.positions, offset)
+    offset += cloud.pointCount * POINT_STRIDE
+  }
 
   const elapsedMs = performance.now() - t0
 
   // Transfer the Float32Array buffer (zero-copy) back to main thread
   const response: LidarWorkerResponse = {
     type: 'result',
-    positions: cloud.positions,
-    pointCount: cloud.pointCount,
+    positions,
+    pointCount: totalPointCount,
     elapsedMs,
   }
 
   ;(self as unknown as { postMessage(msg: unknown, transfer: Transferable[]): void })
-    .postMessage(response, [cloud.positions.buffer])
+    .postMessage(response, [positions.buffer])
 }

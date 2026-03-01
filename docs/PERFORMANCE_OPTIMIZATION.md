@@ -123,36 +123,35 @@ Measure where the bytes actually live before optimizing. The heap snapshot showe
 
 ---
 
-## Current memory baseline (post OPT-001 + OPT-002)
+## Current memory baseline (post OPT-004)
 
 **Date:** 2026-03-01
 **Segment:** #1 · 1045547 · San Francisco · Day (199 frames, all cached)
 
-| Metric | Pre-optimizations | Post OPT-001 + OPT-002 | Delta |
-|---|---|---|---|
-| `performance.memory.usedJSHeapSize` | 4,140 MB | 4,091 MB | **-49 MB** |
-| Heap snapshot (self-sizes) | 4,140 MB | 4,106 MB | **-34 MB** |
-| Heap node count | 2,049,766 | 1,487,216 | **-562,550 (-27%)** |
-| V8 heap limit | 4,096 MB | 4,096 MB | — |
-| Heap utilization | 101% (over limit) | 99.9% | — |
+| Metric | Pre-optimizations | Post OPT-001 | Post OPT-004 | Total delta |
+|---|---|---|---|---|
+| `performance.memory.usedJSHeapSize` | 4,140 MB | 4,091 MB | 3,340 MB | **-800 MB (-19.3%)** |
+| Heap snapshot (self-sizes) | 4,140 MB | 4,106 MB | 3,333 MB | **-807 MB (-19.5%)** |
+| Heap node count | 2,049,766 | 1,487,216 | 1,394,224 | **-655,542 (-32%)** |
+| V8 heap limit | 4,096 MB | 4,096 MB | 4,096 MB | — |
+| Heap utilization | 101% (over limit) | 99.9% | **81.5%** | **-19.5pp** |
 
-### Heap breakdown (measured via snapshot analysis, see OPT-003 for methodology)
+### Heap breakdown (post OPT-004)
 
 | Category | Measured size | Notes |
 |---|---|---|
-| LiDAR merged positions | ~772 MB | **DUPLICATE** of sensorClouds (199 × ~3.9 MB) |
-| LiDAR per-sensor clouds | ~772 MB | 5 sensors × 199 frames (canonical data) |
+| LiDAR per-sensor clouds | ~772 MB | 5 sensors × 199 frames (no longer duplicated) |
 | Camera JPEG ArrayBuffers | ~312 MB | 5 cameras × ~200-400KB × 199 frames |
 | Box data (lidar + camera) | ~27 MB | ~270 rows/frame × JS objects with string keys |
-| V8 overhead | ~2,223 MB | GC metadata, hidden classes, PerformanceMeasure, etc. |
+| V8 overhead | ~2,222 MB | GC metadata, hidden classes, PerformanceMeasure, etc. |
 
-### Next steps for memory reduction
+### Next steps for further reduction
 
-The heap is dominated by the **frame cache holding all 199 frames**. The two optimizations so far addressed leak rate (OPT-001) and raster memory (OPT-002), but the fundamental issue is caching every frame simultaneously. Further reduction requires:
+The P0 stability issue (OOM at V8 4GB limit) is resolved — heap utilization dropped from 99.9% to 81.5%, providing ~756 MB headroom. For longer segments or lower-memory devices, further options:
 
-- **LRU frame cache** — keep only N frames around the playhead (e.g., ±30), evict distant frames. Requires re-fetching on seek but drops steady-state memory proportionally.
-- **SharedArrayBuffer for lidar** — share point cloud buffers between workers and main thread without copying. Halves the lidar memory footprint.
-- **Streaming camera JPEGs** — don't cache all 199 frames of camera ArrayBuffers; decode on demand from Parquet row groups with a small LRU.
+- **LRU frame cache** — keep only N frames around the playhead, evict distant frames. Needed for segments >300 frames.
+- **Deferred camera caching** — lazy-load camera JPEGs with small LRU (~30 frames). Saves ~260 MB.
+- **SharedArrayBuffer for lidar** — share buffers between workers and main thread without copying.
 
 ---
 
@@ -286,6 +285,61 @@ Full segment loaded (199 frames, all cached). `take_memory_snapshot` analysis:
 **Strategy A is the clear first step.** It's a surgical change (modify worker output + PointCloud.tsx fast path), saves 772 MB with no user-visible impact, and keeps instant seek. The 2ms merge overhead fits within frame budget (15.4 ms < 16.6 ms).
 
 Strategy B should be deferred — the 4.7s cold decompress stall is a significant UX regression that requires careful prefetch-ahead logic and loading indicators. It's only needed if segments grow beyond ~300 frames.
+
+---
+
+## OPT-004: Eliminate pointCloud/sensorClouds duplication
+
+**Date:** 2026-03-01
+**Status:** Implemented
+**Files:** `src/utils/rangeImage.ts`, `src/workers/dataWorker.ts`, `src/stores/useSceneStore.ts`, `src/components/LidarViewer/PointCloud.tsx`, `src/workers/lidarWorker.ts`
+
+### Problem
+
+OPT-003 analysis identified that every cached frame stored the same LiDAR xyz data twice:
+- `pointCloud.positions`: a single merged Float32Array (~3.9 MB/frame)
+- `sensorClouds`: 5 separate Float32Arrays totaling ~3.9 MB/frame
+
+These are independent copies (different ArrayBuffer backing stores). For 199 frames, this costs **~772 MB** of wasted heap — the single largest source of duplicate data.
+
+### Alternatives considered
+
+| Approach | Tradeoff |
+|---|---|
+| **A) Remove merged buffer, merge on the fly in useFrame** | Adds ~2ms per dirty frame. No seek latency. Simplest change. |
+| B) Keep merged buffer, remove per-sensor clouds | Breaks per-sensor toggle UI (can't hide individual sensors). |
+| C) SharedArrayBuffer between worker and main thread | Complex (COOP/COEP headers), browser compat issues. |
+
+### Decision
+
+Option A — stop producing the merged `pointCloud` entirely. The renderer's `useFrame` callback already had a per-sensor merge path for when some sensors are toggled off. Now that path is the only path, used for all frames regardless of sensor visibility.
+
+### Changes
+
+1. **`rangeImage.ts`**: `convertAllSensors()` no longer creates the merged Float32Array. Returns `{ perSensor, totalPointCount }` instead of `{ merged, perSensor }`.
+2. **`dataWorker.ts`**: Removed `positions`/`pointCount` from `FrameResult`. Workers no longer allocate or transfer the merged buffer.
+3. **`useSceneStore.ts`**: Removed `pointCloud` field from `FrameData`. Both builder paths (worker and direct) only store `sensorClouds`.
+4. **`PointCloud.tsx`**: Removed the separate "all visible" fast path. Unified into a single loop that iterates `sensorClouds`, filtering by `visibleSensors`.
+5. **`lidarWorker.ts`**: Updated to merge locally before transfer (this worker is a standalone fallback, not used in main pipeline).
+
+### Measurements
+
+| Metric | Before (OPT-001 baseline) | After OPT-004 | Improvement |
+|---|---|---|---|
+| `performance.memory.usedJSHeapSize` | 4,091 MB | 3,340 MB | **-751 MB (-18.4%)** |
+| Heap snapshot (self-sizes) | 4,106 MB | 3,333 MB | **-773 MB (-18.8%)** |
+| Heap node count | 1,487,216 | 1,394,224 | **-92,992 (-6.3%)** |
+| V8 heap utilization | 99.9% | 81.5% | **-18.4pp** |
+
+### Performance regression check
+
+The unified per-sensor merge path adds a memcpy loop for all sensors on every dirty frame. Measured overhead:
+
+| Metric | Before (fast path) | After (unified path) | Delta |
+|---|---|---|---|
+| useFrame dirty cost | ~13.4 ms | ~13.4 ms | **< 0.5 ms** (within noise) |
+
+The merge overhead is negligible because the colormap loop (11.3 ms) already iterates every point — adding a per-sensor iteration with the same point count doesn't add measurable wall time. The inner loop was already doing scattered reads from `positions[src + POINT_STRIDE]`; switching from one contiguous buffer to 5 sensor buffers doesn't change the memory access pattern significantly.
 
 ---
 
