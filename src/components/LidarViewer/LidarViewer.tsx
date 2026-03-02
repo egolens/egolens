@@ -27,7 +27,7 @@ import { colors, fonts, radius } from '../../theme'
 // ---------------------------------------------------------------------------
 // Chase-cam defaults + reusable temp objects
 // ---------------------------------------------------------------------------
-const CHASE_CAM_POSITION = new THREE.Vector3(-15, -3, 12)
+const CHASE_CAM_POSITION = new THREE.Vector3(-15, 0, 12)
 const CHASE_CAM_TARGET = new THREE.Vector3(5, 0, 0)
 // Temp objects for follow/reset (avoid allocation in hot path)
 const _followCurrPos = new THREE.Vector3()
@@ -314,10 +314,11 @@ function InitialCameraSetup({ orbitRef }: { orbitRef: React.RefObject<any> }) {
 // ---------------------------------------------------------------------------
 // WorldFollowCamera — delta-based camera follow in world mode
 // ---------------------------------------------------------------------------
-function WorldFollowCamera({ orbitRef, enabled, returningRef }: {
+function WorldFollowCamera({ orbitRef, enabled, returningRef, resetRequestedRef }: {
   orbitRef: React.RefObject<any>
   enabled: boolean
   returningRef: React.MutableRefObject<boolean>
+  resetRequestedRef: React.MutableRefObject<boolean>
 }) {
   const prevPos = useRef<THREE.Vector3 | null>(null)
   const enabledRef = useRef(enabled)
@@ -336,6 +337,15 @@ function WorldFollowCamera({ orbitRef, enabled, returningRef }: {
 
       const pose = state.currentFrame?.vehiclePose ?? null
       if (!pose) return
+
+      // On rewind/jump (frame goes backwards), reset tracking and snap
+      // camera to chase-cam at the new vehicle position.
+      if (state.currentFrameIndex < prev.currentFrameIndex) {
+        prevPos.current = null
+        if (enabledRef.current) {
+          resetRequestedRef.current = true
+        }
+      }
 
       _followCurrPos.set(pose[3], pose[7], pose[11])
 
@@ -467,7 +477,7 @@ export default function LidarViewer() {
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Canvas
         camera={{
-          position: [-15, -3, 12],
+          position: [-15, 0, 12],
           fov: 60,
           near: 0.1,
           far: 500,
@@ -507,7 +517,7 @@ export default function LidarViewer() {
 
         {/* Chase-cam initial setup + world follow + reset */}
         <InitialCameraSetup orbitRef={orbitRef} />
-        <WorldFollowCamera orbitRef={orbitRef} enabled={followCam} returningRef={returningRef} />
+        <WorldFollowCamera orbitRef={orbitRef} enabled={followCam} returningRef={returningRef} resetRequestedRef={resetRequestedRef} />
         <ResetViewController orbitRef={orbitRef} resetRequestedRef={resetRequestedRef} />
 
         {/* Ground grid (XY plane, Z=0) — stays at world origin */}
@@ -523,6 +533,7 @@ export default function LidarViewer() {
           dampingFactor={0.1}
           minDistance={5}
           maxDistance={200}
+          enablePan={!(worldMode && followCam)}
           /* enabled is controlled imperatively by PovController via orbitRef */
         />
 
