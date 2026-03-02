@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="Perception Studio Screenshot" width="720" />
+  <video src="https://github.com/heejaekim/waymo-perception-studio/raw/main/assets/demo.mp4" width="720" autoplay loop muted playsinline></video>
 </p>
 
 ## About
