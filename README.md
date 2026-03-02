@@ -18,6 +18,14 @@
   </tr>
 </table>
 
+## Why
+
+[Waymo Open Dataset](https://waymo.com/open/) is one of the largest public self-driving datasets, with LiDAR point clouds, camera images, and 3D bounding box labels from real driving scenes. The Perception subset alone has 2,000+ segments of 20-second clips at 10 Hz.
+
+But actually *looking at* this data is painful. The official tools require a full Python environment with TensorFlow. Jupyter notebooks give you static matplotlib plots. Desktop viewers need installation and data conversion. You just want to see what's in a segment without fighting your environment.
+
+Perception Studio lets you drag and drop raw Parquet files into the browser and immediately explore the scene in interactive 3D.
+
 ## About
 
 - **See what the car sees**: explore real self-driving scenes in 3D with LiDAR point clouds and 5 synchronized camera views
