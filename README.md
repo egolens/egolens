@@ -11,27 +11,33 @@
   <a href="https://happyhj.github.io/waymo-perception-studio"><strong>✦ Live Demo</strong></a>
 </p>
 
-<table>
-  <tr>
-    <td><video src="https://github.com/user-attachments/assets/c6bf45f1-41c4-41d3-9e93-2b09a99606bf" autoplay loop muted playsinline></video></td>
-    <td><video src="https://github.com/user-attachments/assets/a6361d24-00a6-4e24-9365-210f9a94277c" autoplay loop muted playsinline></video></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/ca5566ed-f2f2-42ad-8c13-b05d9150aacc" alt="Perception Studio screenshot" width="720" />
+</p>
 
-## Why
+## The Problem
 
-[Waymo Open Dataset](https://waymo.com/open/) is one of the largest public self-driving datasets, with LiDAR point clouds, camera images, and 3D bounding box labels from real driving scenes. The Perception subset alone has 2,000+ segments of 20-second clips at 10 Hz.
+[Waymo Open Dataset](https://waymo.com/open/) is one of the richest public self-driving datasets out there, but actually looking at the data is painful. The [official tools](https://github.com/waymo-research/waymo-open-dataset) need Python + TensorFlow. Jupyter gives you static plots. [Foxglove](https://foxglove.dev/) is paid. And you can't even use the raw Parquet files without preprocessing scripts.
 
-But actually *looking at* this data is painful. The official tools require a full Python environment with TensorFlow. Jupyter notebooks give you static matplotlib plots. Desktop viewers need installation and data conversion. You just want to see what's in a segment without fighting your environment.
+You just want to drop in the files and see what's inside.
 
-Perception Studio lets you drag and drop raw Parquet files into the browser and immediately explore the scene in interactive 3D.
-
-## About
+## What's Inside
 
 - **See what the car sees**: explore real self-driving scenes in 3D with LiDAR point clouds and 5 synchronized camera views
 - **3D object models**: vehicles, pedestrians, and cyclists rendered as 3D models with color-coded tracking
 - **Camera POV mode**: click a camera to jump into its viewpoint in 3D, compare what the sensor sees side by side
 - **Cross-modal linking**: hover over a camera detection and its 3D counterpart lights up, and vice versa
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/8ca4aa6e-5818-4d2f-bed2-58687dd825d8" alt="LiDAR point cloud driving scene" width="720" />
+</p>
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/0c99b33b-59d8-4fcb-9a47-cba7bdaa51fa" alt="3D model rendering and POV switching" /></td>
+    <td><img src="https://github.com/user-attachments/assets/f8c9f708-dce1-4313-8de8-1da3ac727788" alt="Bounding boxes and POV transition" /></td>
+  </tr>
+</table>
 
 ## 🚀 Try It With Your Waymo Data
 
