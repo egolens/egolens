@@ -620,6 +620,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           style={{
             display: 'inline-flex',
             alignItems: 'center',
+            alignSelf: 'center',
             gap: '6px',
             fontSize: '12px',
             fontFamily: fonts.sans,
