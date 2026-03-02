@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/heejaekim/waymo-perception-studio/raw/main/assets/demo.mp4" width="720" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/c6bf45f1-41c4-41d3-9e93-2b09a99606bf" width="720" autoplay loop muted playsinline></video>
 </p>
 
 ## About
