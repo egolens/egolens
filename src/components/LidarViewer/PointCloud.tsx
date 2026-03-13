@@ -14,7 +14,7 @@ import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { useSceneStore } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
-import { POINT_STRIDE } from '../../utils/rangeImage'
+import { getManifest } from '../../adapters/registry'
 
 // ---------------------------------------------------------------------------
 // Colormaps
@@ -139,6 +139,8 @@ export default function PointCloud() {
     const [attrMin, attrMax] = ATTR_RANGE[colormapMode]
     const attrSpan = attrMax - attrMin
 
+    const stride = getManifest().pointStride
+
     let total = 0
     for (const [laserName, cloud] of sensorClouds) {
       if (!visibleSensors.has(laserName)) continue
@@ -146,12 +148,13 @@ export default function PointCloud() {
       const { positions } = cloud
 
       for (let i = 0; i < count; i++) {
-        const src = i * POINT_STRIDE
+        const src = i * stride
         const dst = (total + i) * 3
         posArr[dst] = positions[src]
         posArr[dst + 1] = positions[src + 1]
         posArr[dst + 2] = positions[src + 2]
-        const raw = positions[src + attrOff]
+        // Attribute color: only read if the offset exists within stride
+        const raw = attrOff < stride ? positions[src + attrOff] : 0
         const t = (raw - attrMin) / attrSpan
         const [r, g, b] = colormapColor(stops, t)
         colArr[dst] = r

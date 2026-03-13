@@ -80,6 +80,7 @@ export const nuScenesManifest: DatasetManifest = {
   ],
 
   frameRate: 2,   // nuScenes keyframe rate
+  pointStride: 4, // x, y, z, intensity
 
   cameraColors: {
     [CAM.FRONT]: colors.camFront,

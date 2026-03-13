@@ -129,6 +129,8 @@ export interface DatasetManifest {
   boxTypes: BoxTypeDef[]
   /** Nominal frame rate in Hz (10 for Waymo keyframes, 2 for nuScenes) */
   frameRate: number
+  /** Number of floats per point in positions buffer (Waymo=6: xyz+intensity+range+elongation, nuScenes=4: xyz+intensity) */
+  pointStride: number
   /** Per-sensor colormap for 3D frustum / UI accents (cameraId → color) */
   cameraColors: Record<number, string>
   /** POV label shown when a camera is active (cameraId → short name) */
