@@ -23,6 +23,7 @@ import type {
   NuScenesCategory,
   NuScenesCalibratedSensor,
   NuScenesSensor,
+  NuScenesLog,
 } from '../../types/nuscenes'
 import { NUSCENES_CATEGORY_MAP } from '../../types/nuscenes'
 import { NUSCENES_CHANNEL_TO_ID, nuScenesManifest } from './manifest'
@@ -43,6 +44,7 @@ export interface NuScenesDatabase {
   sensorByToken: Map<string, NuScenesSensor>
   instanceByToken: Map<string, NuScenesInstance>
   categoryByToken: Map<string, NuScenesCategory>
+  logByToken: Map<string, NuScenesLog>
 
   /** sample_token → annotations for that sample */
   annotationsBySample: Map<string, NuScenesSampleAnnotation[]>
@@ -95,6 +97,7 @@ export async function buildNuScenesDatabase(
     sensors,
     instances,
     categories,
+    logs,
   ] = await Promise.all([
     readJsonFile<NuScenesScene>(jsonFiles, 'scene.json'),
     readJsonFile<NuScenesSample>(jsonFiles, 'sample.json'),
@@ -105,6 +108,7 @@ export async function buildNuScenesDatabase(
     readJsonFile<NuScenesSensor>(jsonFiles, 'sensor.json'),
     readJsonFile<NuScenesInstance>(jsonFiles, 'instance.json'),
     readJsonFile<NuScenesCategory>(jsonFiles, 'category.json'),
+    readJsonFile<NuScenesLog>(jsonFiles, 'log.json'),
   ])
 
   // Build token → entry maps
@@ -116,6 +120,7 @@ export async function buildNuScenesDatabase(
   const sensorByToken = new Map(sensors.map((s) => [s.token, s]))
   const instanceByToken = new Map(instances.map((i) => [i.token, i]))
   const categoryByToken = new Map(categories.map((c) => [c.token, c]))
+  const logByToken = new Map(logs.map((l) => [l.token, l]))
 
   // Build sample_token → annotations index
   const annotationsBySample = new Map<string, NuScenesSampleAnnotation[]>()
@@ -159,6 +164,7 @@ export async function buildNuScenesDatabase(
     sensorByToken,
     instanceByToken,
     categoryByToken,
+    logByToken,
     annotationsBySample,
     sampleDataBySample,
     instanceCategoryName,
@@ -168,6 +174,34 @@ export async function buildNuScenesDatabase(
 // ---------------------------------------------------------------------------
 // Scene metadata loader → MetadataBundle
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Location / time helpers
+// ---------------------------------------------------------------------------
+
+/** Capitalize nuScenes location slugs: "singapore-onenorth" → "Singapore OneNorth" */
+function formatNuScenesLocation(raw: string): string {
+  return raw
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/**
+ * Infer time of day from nuScenes logfile name.
+ * Format: "n015-2018-07-24-11-22-45+0800" → hour=11 → "Day"
+ */
+function inferTimeOfDay(logfile: string): string {
+  // Extract hour from logfile name: n015-YYYY-MM-DD-HH-MM-SS±ZZZZ
+  const parts = logfile.split('-')
+  // parts: ["n015", "2018", "07", "24", "11", "22", "45+0800"]
+  const hour = parts.length >= 5 ? parseInt(parts[4], 10) : -1
+  if (hour < 0) return 'Unknown'
+  if (hour >= 6 && hour < 8) return 'Dawn/Dusk'
+  if (hour >= 8 && hour < 17) return 'Day'
+  if (hour >= 17 && hour < 19) return 'Dawn/Dusk'
+  return 'Night'
+}
 
 /**
  * Load metadata for a specific nuScenes scene.
@@ -389,12 +423,15 @@ export function loadNuScenesSceneMetadata(
     vehiclePoseByFrame.set(ts, sensorFiles)
   }
 
-  // 8. Build scene metadata
+  // 8. Build scene metadata (from log.json + scene description)
+  const log = db.logByToken.get(scene.log_token)
+  const locationLabel = log ? formatNuScenesLocation(log.location) : 'Unknown'
+  const timeOfDay = log ? inferTimeOfDay(log.logfile) : 'Unknown'
   const sceneMeta = {
     segmentId: scene.name,
-    timeOfDay: 'Unknown',
-    location: 'Unknown',
-    weather: 'Unknown',
+    timeOfDay,
+    location: locationLabel,
+    weather: scene.description, // nuScenes has no weather field; use scene description
     objectCounts: {} as Record<number, number>,
   }
 
