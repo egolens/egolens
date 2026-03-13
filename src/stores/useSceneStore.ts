@@ -575,7 +575,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     play: () => {
       if (get().isPlaying) return
       set({ isPlaying: true })
-      const intervalMs = 100 / get().playbackSpeed
+      const fps = getManifest().frameRate // Waymo=10Hz, nuScenes=2Hz
+      const intervalMs = (1000 / fps) / get().playbackSpeed
       internal.playIntervalId = setInterval(async () => {
         const next = get().currentFrameIndex + 1
         if (next >= get().totalFrames) {
