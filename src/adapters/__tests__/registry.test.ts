@@ -322,9 +322,11 @@ describe('nuScenesManifest', () => {
     expect(nuScenesManifest.name).toBe('nuScenes')
   })
 
-  it('has 1 lidar sensor (LIDAR_TOP only)', () => {
-    expect(nuScenesManifest.lidarSensors).toHaveLength(1)
-    expect(nuScenesManifest.lidarSensors[0].label).toBe('TOP')
+  it('has 1 lidar + 5 radar sensors', () => {
+    expect(nuScenesManifest.lidarSensors).toHaveLength(6)
+    expect(nuScenesManifest.lidarSensors[0].label).toBe('LIDAR TOP')
+    // Radar sensors start at index 1
+    expect(nuScenesManifest.lidarSensors[1].label).toBe('RADAR FRONT')
   })
 
   it('has 6 camera sensors', () => {

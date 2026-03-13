@@ -43,6 +43,13 @@ export const colors = {
   sensorSideR: '#7B6FFF',     // indigo
   sensorRear: '#B490FF',      // lavender
 
+  /** Semantic — radar sensors (warm-tone family to distinguish from LiDAR) */
+  radarFront: '#FF6B6B',       // coral red
+  radarFrontLeft: '#FF9F43',   // orange
+  radarFrontRight: '#FECA57',  // yellow
+  radarBackLeft: '#FF6348',    // tomato
+  radarBackRight: '#EE5A24',   // vermilion
+
   /** Semantic — cameras (harmonized with sensors) */
   camFront: '#FFFFFF',
   camFrontLeft: '#00E89D',

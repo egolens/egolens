@@ -680,7 +680,9 @@ export default function LidarViewer() {
                 if (active.length === 1) return active[0].label
                 return `${active[0].label}+${active.length - 1}`
               })(),
-              { intensity: 'Int', range: 'Range', elongation: 'Elong' }[colormapMode],
+              ...((getManifest().colormapModes?.length ?? 3) > 1
+                ? [{ intensity: 'Int', range: 'Range', elongation: 'Elong' }[colormapMode]]
+                : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
             ].map((text, i, arr) => (
               <span key={i} style={{
@@ -814,39 +816,50 @@ export default function LidarViewer() {
             </div>
           )}
 
-          {/* Colormap */}
-          <div style={{
-            fontSize: '9px', fontFamily: fonts.sans, fontWeight: 600,
-            color: colors.textDim, letterSpacing: '1.2px', textTransform: 'uppercase',
-            padding: '2px 4px 2px',
-          }}>
-            Colormap
-          </div>
-
-          <div style={{
-            display: 'flex', borderRadius: radius.sm, overflow: 'hidden',
-            backgroundColor: 'rgba(255,255,255,0.04)',
-          }}>
-            {([['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong']] as [ColormapMode, string][]).map(([mode, label]) => {
-              const active = colormapMode === mode
-              return (
-                <button
-                  key={mode}
-                  onClick={() => setColormapMode(mode)}
-                  style={{
-                    flex: 1, padding: '4px 0', fontSize: '10px',
-                    fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
-                    border: 'none', cursor: 'pointer',
-                    backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
-                    color: active ? colors.accentBlue : colors.textDim,
-                    transition: 'all 0.15s', letterSpacing: '0.3px',
-                  }}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
+          {/* Colormap — hide when dataset only supports one mode */}
+          {(() => {
+            const allModes: [ColormapMode, string][] = [['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong']]
+            const manifest = getManifest()
+            const availableModes = manifest.colormapModes
+              ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))
+              : allModes
+            if (availableModes.length <= 1) return null
+            return (
+              <>
+                <div style={{
+                  fontSize: '9px', fontFamily: fonts.sans, fontWeight: 600,
+                  color: colors.textDim, letterSpacing: '1.2px', textTransform: 'uppercase',
+                  padding: '2px 4px 2px',
+                }}>
+                  Colormap
+                </div>
+                <div style={{
+                  display: 'flex', borderRadius: radius.sm, overflow: 'hidden',
+                  backgroundColor: 'rgba(255,255,255,0.04)',
+                }}>
+                  {availableModes.map(([mode, label]) => {
+                    const active = colormapMode === mode
+                    return (
+                      <button
+                        key={mode}
+                        onClick={() => setColormapMode(mode)}
+                        style={{
+                          flex: 1, padding: '4px 0', fontSize: '10px',
+                          fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
+                          border: 'none', cursor: 'pointer',
+                          backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
+                          color: active ? colors.accentBlue : colors.textDim,
+                          transition: 'all 0.15s', letterSpacing: '0.3px',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )
+          })()}
 
           {/* ── PERCEPTION section (hidden when no box data) ── */}
           {hasBoxData && <>

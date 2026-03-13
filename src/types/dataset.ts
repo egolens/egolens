@@ -131,6 +131,12 @@ export interface DatasetManifest {
   frameRate: number
   /** Number of floats per point in positions buffer (Waymo=6: xyz+intensity+range+elongation, nuScenes=4: xyz+intensity) */
   pointStride: number
+  /**
+   * Available colormap modes for this dataset's LiDAR data.
+   * If undefined, all modes are available (backwards compat for Waymo).
+   * Example: nuScenes only has ['intensity'] because range/elongation aren't in the data.
+   */
+  colormapModes?: string[]
   /** Per-sensor colormap for 3D frustum / UI accents (cameraId → color) */
   cameraColors: Record<number, string>
   /** POV label shown when a camera is active (cameraId → short name) */

@@ -93,15 +93,32 @@ const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
 
 /** Maximum points we'll ever allocate buffers for (avoids realloc). */
 const MAX_POINTS = 200_000
+/** Maximum radar points (5 sensors × ~100 pts each). */
+const MAX_RADAR_POINTS = 2_000
+/** Radar sensor IDs start at 10 (see nuScenes manifest). */
+const RADAR_SENSOR_ID_MIN = 10
+
+/** Velocity colormap: blue (static, 0 m/s) → cyan → green → yellow → red (fast, 15+ m/s) */
+const VELOCITY_STOPS: [number, number, number][] = [
+  [0.15, 0.30, 0.80],  // 0.0 — blue (static)
+  [0.10, 0.70, 0.85],  // 0.25 — cyan
+  [0.20, 0.85, 0.35],  // 0.5 — green
+  [0.95, 0.85, 0.15],  // 0.75 — yellow
+  [0.95, 0.25, 0.15],  // 1.0 — red (fast)
+]
+/** Max speed for normalization (m/s). ~15 m/s ≈ 54 km/h covers most urban traffic. */
+const VELOCITY_MAX = 15
 
 export default function PointCloud() {
   const currentFrame = useSceneStore((s) => s.currentFrame)
   const visibleSensors = useSceneStore((s) => s.visibleSensors)
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
   const colormapMode = useSceneStore((s) => s.colormapMode)
+  const worldMode = useSceneStore((s) => s.worldMode)
   const geometryRef = useRef<THREE.BufferGeometry>(null)
+  const radarGeometryRef = useRef<THREE.BufferGeometry>(null)
 
-  // Pre-allocate position & color buffers once
+  // Pre-allocate position & color buffers once (LiDAR)
   const { posAttr, colorAttr } = useMemo(() => {
     const pos = new THREE.Float32BufferAttribute(new Float32Array(MAX_POINTS * 3), 3)
     const col = new THREE.Float32BufferAttribute(new Float32Array(MAX_POINTS * 3), 3)
@@ -110,10 +127,19 @@ export default function PointCloud() {
     return { posAttr: pos, colorAttr: col }
   }, [])
 
+  // Pre-allocate radar buffers (separate for larger point rendering)
+  const { radarPosAttr, radarColorAttr } = useMemo(() => {
+    const pos = new THREE.Float32BufferAttribute(new Float32Array(MAX_RADAR_POINTS * 3), 3)
+    const col = new THREE.Float32BufferAttribute(new Float32Array(MAX_RADAR_POINTS * 3), 3)
+    pos.setUsage(THREE.DynamicDrawUsage)
+    col.setUsage(THREE.DynamicDrawUsage)
+    return { radarPosAttr: pos, radarColorAttr: col }
+  }, [])
+
   // Mark dirty when any input changes — actual buffer update happens in useFrame
   // to avoid R3F reconciler resetting needsUpdate between useEffect and render.
   const dirtyRef = useRef(true)
-  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode])
+  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode, worldMode])
 
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
@@ -121,19 +147,24 @@ export default function PointCloud() {
     dirtyRef.current = false
 
     const geom = geometryRef.current
-    if (!geom || !currentFrame) {
+    const radarGeom = radarGeometryRef.current
+    if (!currentFrame) {
       if (geom) geom.setDrawRange(0, 0)
+      if (radarGeom) radarGeom.setDrawRange(0, 0)
       return
     }
 
     const sensorClouds = currentFrame.sensorClouds
     if (!sensorClouds || sensorClouds.size === 0) {
-      geom.setDrawRange(0, 0)
+      if (geom) geom.setDrawRange(0, 0)
+      if (radarGeom) radarGeom.setDrawRange(0, 0)
       return
     }
 
     const posArr = posAttr.array as Float32Array
     const colArr = colorAttr.array as Float32Array
+    const radarPosArr = radarPosAttr.array as Float32Array
+    const radarColArr = radarColorAttr.array as Float32Array
     const stops = COLORMAP_STOPS[colormapMode]
     const attrOff = ATTR_OFFSET[colormapMode]
     const [attrMin, attrMax] = ATTR_RANGE[colormapMode]
@@ -141,49 +172,101 @@ export default function PointCloud() {
 
     const stride = getManifest().pointStride
 
-    let total = 0
+    let lidarTotal = 0
+    let radarTotal = 0
     for (const [laserName, cloud] of sensorClouds) {
       if (!visibleSensors.has(laserName)) continue
-      const count = Math.min(cloud.pointCount, MAX_POINTS - total)
       const { positions } = cloud
+      const isRadar = laserName >= RADAR_SENSOR_ID_MIN
 
-      for (let i = 0; i < count; i++) {
-        const src = i * stride
-        const dst = (total + i) * 3
-        posArr[dst] = positions[src]
-        posArr[dst + 1] = positions[src + 1]
-        posArr[dst + 2] = positions[src + 2]
-        // Attribute color: only read if the offset exists within stride
-        const raw = attrOff < stride ? positions[src + attrOff] : 0
-        const t = (raw - attrMin) / attrSpan
-        const [r, g, b] = colormapColor(stops, t)
-        colArr[dst] = r
-        colArr[dst + 1] = g
-        colArr[dst + 2] = b
+      if (isRadar) {
+        // Radar: velocity-based colormap, stride=5 (x,y,z,speedComp,speedRaw)
+        const RADAR_STRIDE = 5
+        // World mode → speedComp (offset 3): true object velocity
+        // Vehicle mode → speedRaw (offset 4): velocity relative to ego
+        const speedOffset = worldMode ? 3 : 4
+        const count = Math.min(cloud.pointCount, MAX_RADAR_POINTS - radarTotal)
+        for (let i = 0; i < count; i++) {
+          const src = i * RADAR_STRIDE
+          const dst = (radarTotal + i) * 3
+          radarPosArr[dst] = positions[src]
+          radarPosArr[dst + 1] = positions[src + 1]
+          radarPosArr[dst + 2] = positions[src + 2]
+          // Color by speed: 0 m/s → blue (static), 15+ m/s → red (fast)
+          const speed = positions[src + speedOffset]
+          const t = Math.min(speed / VELOCITY_MAX, 1)
+          const [r, g, b] = colormapColor(VELOCITY_STOPS, t)
+          radarColArr[dst] = r
+          radarColArr[dst + 1] = g
+          radarColArr[dst + 2] = b
+        }
+        radarTotal += count
+      } else {
+        // LiDAR: colormap-based
+        const count = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
+        for (let i = 0; i < count; i++) {
+          const src = i * stride
+          const dst = (lidarTotal + i) * 3
+          posArr[dst] = positions[src]
+          posArr[dst + 1] = positions[src + 1]
+          posArr[dst + 2] = positions[src + 2]
+          const raw = attrOff < stride ? positions[src + attrOff] : 0
+          const t = (raw - attrMin) / attrSpan
+          const [r, g, b] = colormapColor(stops, t)
+          colArr[dst] = r
+          colArr[dst + 1] = g
+          colArr[dst + 2] = b
+        }
+        lidarTotal += count
       }
-      total += count
     }
 
-    posAttr.needsUpdate = true
-    colorAttr.needsUpdate = true
-    geom.setDrawRange(0, total)
-    geom.computeBoundingSphere()
+    if (geom) {
+      posAttr.needsUpdate = true
+      colorAttr.needsUpdate = true
+      geom.setDrawRange(0, lidarTotal)
+      geom.computeBoundingSphere()
+    }
+    if (radarGeom) {
+      radarPosAttr.needsUpdate = true
+      radarColorAttr.needsUpdate = true
+      radarGeom.setDrawRange(0, radarTotal)
+      radarGeom.computeBoundingSphere()
+    }
   })
 
   return (
-    <points frustumCulled={false}>
-      <bufferGeometry ref={geometryRef}>
-        <primitive object={posAttr} attach="attributes-position" />
-        <primitive object={colorAttr} attach="attributes-color" />
-      </bufferGeometry>
-      <pointsMaterial
-        size={0.08}
-        sizeAttenuation
-        vertexColors
-        transparent
-        opacity={pointOpacity}
-        depthWrite={false}
-      />
-    </points>
+    <>
+      {/* LiDAR points — small, dense */}
+      <points frustumCulled={false}>
+        <bufferGeometry ref={geometryRef}>
+          <primitive object={posAttr} attach="attributes-position" />
+          <primitive object={colorAttr} attach="attributes-color" />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.08}
+          sizeAttenuation
+          vertexColors
+          transparent
+          opacity={pointOpacity}
+          depthWrite={false}
+        />
+      </points>
+      {/* Radar points — larger, sparse, sensor-colored */}
+      <points frustumCulled={false}>
+        <bufferGeometry ref={radarGeometryRef}>
+          <primitive object={radarPosAttr} attach="attributes-position" />
+          <primitive object={radarColorAttr} attach="attributes-color" />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.5}
+          sizeAttenuation
+          vertexColors
+          transparent
+          opacity={pointOpacity}
+          depthWrite={false}
+        />
+      </points>
+    </>
   )
 }

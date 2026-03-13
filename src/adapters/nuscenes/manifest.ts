@@ -5,7 +5,6 @@
  * for nuScenes v1.0 (mini / trainval / test).
  *
  * nuScenes has 6 cameras, 1 LiDAR, and 5 radars.
- * Initial implementation supports cameras + LiDAR only (no radar).
  * Keyframe rate is 2 Hz; sweep support is deferred.
  */
 
@@ -31,6 +30,18 @@ const LIDAR = {
 } as const
 
 /**
+ * Numeric IDs for nuScenes radars.
+ * IDs 10–14 to avoid collision with LiDAR (1) and cameras (1–6).
+ */
+const RADAR = {
+  FRONT: 10,
+  FRONT_LEFT: 11,
+  FRONT_RIGHT: 12,
+  BACK_LEFT: 13,
+  BACK_RIGHT: 14,
+} as const
+
+/**
  * Maps nuScenes sensor channel strings → numeric IDs used in the pipeline.
  * Channel strings come from sensor.json / sample_data filenames.
  */
@@ -42,6 +53,11 @@ export const NUSCENES_CHANNEL_TO_ID: Record<string, number> = {
   'CAM_BACK': CAM.BACK,
   'CAM_BACK_RIGHT': CAM.BACK_RIGHT,
   'LIDAR_TOP': LIDAR.TOP,
+  'RADAR_FRONT': RADAR.FRONT,
+  'RADAR_FRONT_LEFT': RADAR.FRONT_LEFT,
+  'RADAR_FRONT_RIGHT': RADAR.FRONT_RIGHT,
+  'RADAR_BACK_LEFT': RADAR.BACK_LEFT,
+  'RADAR_BACK_RIGHT': RADAR.BACK_RIGHT,
 }
 
 export const nuScenesManifest: DatasetManifest = {
@@ -59,7 +75,12 @@ export const nuScenesManifest: DatasetManifest = {
   requiredComponents: ['samples', 'v1.0-mini'],
 
   lidarSensors: [
-    { id: LIDAR.TOP, label: 'TOP', color: colors.sensorTop },
+    { id: LIDAR.TOP,        label: 'LIDAR TOP',    color: colors.sensorTop },
+    { id: RADAR.FRONT,      label: 'RADAR FRONT',  color: colors.radarFront },
+    { id: RADAR.FRONT_LEFT, label: 'RADAR FL',     color: colors.radarFrontLeft },
+    { id: RADAR.FRONT_RIGHT,label: 'RADAR FR',     color: colors.radarFrontRight },
+    { id: RADAR.BACK_LEFT,  label: 'RADAR BL',     color: colors.radarBackLeft },
+    { id: RADAR.BACK_RIGHT, label: 'RADAR BR',     color: colors.radarBackRight },
   ],
 
   cameraSensors: [
@@ -81,6 +102,7 @@ export const nuScenesManifest: DatasetManifest = {
 
   frameRate: 2,   // nuScenes keyframe rate
   pointStride: 4, // x, y, z, intensity
+  colormapModes: ['intensity'], // nuScenes LiDAR only has intensity (no range/elongation)
 
   cameraColors: {
     [CAM.FRONT]: colors.camFront,

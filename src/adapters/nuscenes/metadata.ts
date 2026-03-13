@@ -233,12 +233,12 @@ export function loadNuScenesSceneMetadata(
     }
   }
 
-  // 4. Build lidar calibrations
-  //    nuScenes has one LIDAR_TOP. We need its extrinsic as a LidarCalibration.
+  // 4. Build lidar + radar calibrations
+  //    Both LiDAR and radar sensors need extrinsics for sensor→ego transform.
   const lidarCalibrations = new Map<number, { laserName: number; extrinsic: number[] }>()
   for (const cs of db.calibratedSensorByToken.values()) {
     const sensor = db.sensorByToken.get(cs.sensor_token)
-    if (!sensor || sensor.modality !== 'lidar') continue
+    if (!sensor || (sensor.modality !== 'lidar' && sensor.modality !== 'radar')) continue
     const sensorId = NUSCENES_CHANNEL_TO_ID[sensor.channel]
     if (sensorId === undefined) continue
     lidarCalibrations.set(sensorId, {

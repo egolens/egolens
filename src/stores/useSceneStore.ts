@@ -43,7 +43,7 @@ import {
   loadNuScenesSceneMetadata,
   type NuScenesDatabase,
 } from '../adapters/nuscenes/metadata'
-import type { NuScenesFrameDescriptor } from '../workers/nuScenesLidarWorker'
+import type { NuScenesFrameDescriptor, NuScenesRadarFileDescriptor } from '../workers/nuScenesLidarWorker'
 import type {
   NuScenesCameraFrameDescriptor,
   NuScenesCameraImageDescriptor,
@@ -1048,11 +1048,18 @@ async function loadNuScenesScene(
 
     // 5. Init nuScenes workers in parallel
     //    Pass LiDAR extrinsic so the worker transforms points from sensor→ego frame
+    //    Pass radar extrinsics (sensor IDs 10-14) for radar sensor→ego transforms
     const lidarTopCalib = bundle.lidarCalibrations.get(1) // LIDAR_TOP = sensor ID 1
     const lidarExtrinsic = (lidarTopCalib?.extrinsic as number[] | undefined)
+    const radarExtrinsics: [number, number[]][] = []
+    for (const [sensorId, calib] of bundle.lidarCalibrations) {
+      if (sensorId >= 10) { // Radar sensor IDs are 10+
+        radarExtrinsics.push([sensorId, calib.extrinsic])
+      }
+    }
     set({ loadStep: 'workers' as LoadStep })
     await Promise.all([
-      initNuScenesLidarWorker(lidarBatches, lidarExtrinsic),
+      initNuScenesLidarWorker(lidarBatches, lidarExtrinsic, radarExtrinsics),
       initNuScenesCameraWorker(cameraBatches),
     ])
     set({ loadProgress: 0.5 })
@@ -1133,12 +1140,23 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
     const sensorFiles = bundle.vehiclePoseByFrame.get(ts) as Record<string, unknown>[] | undefined
     if (!sensorFiles) continue
 
-    // LiDAR frame
+    // LiDAR frame + radar files
     const lidarFile = sensorFiles.find(sf => sf.modality === 'lidar')
     if (lidarFile) {
+      // Collect radar files for this frame
+      const radarFiles: NuScenesRadarFileDescriptor[] = []
+      for (const sf of sensorFiles) {
+        if (sf.modality === 'radar') {
+          radarFiles.push({
+            sensorId: sf.sensorId as number,
+            filename: sf.filename as string,
+          })
+        }
+      }
       lidarFrames.push({
         timestamp: ts.toString(),
         filename: lidarFile.filename as string,
+        radarFiles: radarFiles.length > 0 ? radarFiles : undefined,
       })
     }
 
@@ -1174,18 +1192,22 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
   return { lidarBatches, cameraBatches }
 }
 
-/** Init nuScenes LiDAR worker pool with pre-built frame batches + file entries. */
+/** Init nuScenes LiDAR+Radar worker pool with pre-built frame batches + file entries. */
 async function initNuScenesLidarWorker(
   batches: NuScenesFrameDescriptor[][],
   lidarExtrinsic?: number[],
+  radarExtrinsics?: [number, number[]][],
 ) {
   if (!internal.nuScenesSampleFiles || batches.length === 0) return
 
-  // Collect only the files referenced by the batches
+  // Collect only the files referenced by the batches (LiDAR + radar)
   const neededFiles = new Set<string>()
   for (const batch of batches) {
     for (const frame of batch) {
       neededFiles.add(frame.filename)
+      if (frame.radarFiles) {
+        for (const rf of frame.radarFiles) neededFiles.add(rf.filename)
+      }
     }
   }
   const fileEntries: [string, File][] = []
@@ -1202,6 +1224,7 @@ async function initNuScenesLidarWorker(
     frameBatches: batches,
     fileEntries,
     lidarExtrinsic,
+    radarExtrinsics,
   })
 
   internal.workerPool = pool
