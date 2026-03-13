@@ -15,18 +15,14 @@
 
 import { create } from 'zustand'
 import type { ParquetRow } from '../utils/merge'
-import { groupIndexBy } from '../utils/merge'
 import {
   openParquetFile,
-  readAllRows,
-  buildFrameIndex,
   buildHeavyFileFrameIndex,
   readFrameData,
   type WaymoParquetFile,
   type FrameRowIndex,
 } from '../utils/parquet'
 import {
-  parseLidarCalibration,
   convertAllSensors,
   type LidarCalibration,
   type PointCloud,
@@ -41,8 +37,10 @@ import type {
 import { WorkerPool } from '../workers/workerPool'
 import { CameraWorkerPool } from '../workers/cameraWorkerPool'
 import type { SegmentMeta } from '../types/waymo'
+import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
 import { getManifest } from '../adapters/registry'
+import { loadWaymoMetadata } from '../adapters/waymo/metadata'
 
 // ---------------------------------------------------------------------------
 // Row-major 4×4 matrix helpers (for world-coordinate normalization)
@@ -61,21 +59,6 @@ function multiplyRowMajor4x4(a: number[], b: number[]): number[] {
     }
   }
   return r
-}
-
-/** Invert a row-major 4×4 rigid-body transform [R|t; 0 0 0 1] → [R^T | -R^T·t] */
-function invertRowMajor4x4(m: number[]): number[] {
-  // Transpose the 3×3 rotation part
-  const r00 = m[0], r01 = m[1], r02 = m[2], tx = m[3]
-  const r10 = m[4], r11 = m[5], r12 = m[6], ty = m[7]
-  const r20 = m[8], r21 = m[9], r22 = m[10], tz = m[11]
-  // inv = [R^T | -R^T * t]
-  return [
-    r00, r10, r20, -(r00 * tx + r10 * ty + r20 * tz),
-    r01, r11, r21, -(r01 * tx + r11 * ty + r21 * tz),
-    r02, r12, r22, -(r02 * tx + r12 * ty + r22 * tz),
-    0, 0, 0, 1,
-  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -873,175 +856,55 @@ async function loadFrameMainThread(
 }
 
 async function loadStartupData(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
-  // Vehicle pose → master frame list
-  const posePf = internal.parquetFiles.get('vehicle_pose')
-  if (posePf) {
-    const rows = await readAllRows(posePf)
-    const index = buildFrameIndex(rows)
-    internal.timestamps = index.timestamps
-    internal.timestampToFrame = index.frameByTimestamp
-    internal.vehiclePoseByFrame = groupIndexBy(rows, 'key.frame_timestamp_micros')
-    // Build poseByFrameIndex for world-mode trajectory trails (relative to frame 0)
-    // 1) Find frame 0 pose and compute its inverse
-    const frame0Ts = internal.timestamps[0]
-    const frame0Rows = internal.vehiclePoseByFrame.get(frame0Ts)
-    const frame0Pose = frame0Rows?.[0]?.['[VehiclePoseComponent].world_from_vehicle.transform'] as number[] | undefined
-    if (frame0Pose) {
-      internal.worldOriginInverse = invertRowMajor4x4(frame0Pose)
-    }
-    // 2) Store relative poses: inv(pose0) * poseN
-    for (const row of rows) {
-      const ts = row['key.frame_timestamp_micros'] as bigint
-      const fi = internal.timestampToFrame.get(ts)
-      const pose = row['[VehiclePoseComponent].world_from_vehicle.transform'] as number[] | undefined
-      if (fi !== undefined && pose) {
-        if (internal.worldOriginInverse) {
-          internal.poseByFrameIndex.set(fi, multiplyRowMajor4x4(internal.worldOriginInverse, pose))
-        } else {
-          internal.poseByFrameIndex.set(fi, pose)
-        }
-      }
-    }
-    set({ totalFrames: index.timestamps.length })
+  // Delegate to Waymo adapter (returns dataset-agnostic MetadataBundle)
+  const bundle = await loadWaymoMetadata(internal.parquetFiles)
+
+  // Unpack bundle into internal state
+  applyMetadataBundle(bundle, set, get)
+}
+
+/**
+ * Unpack a MetadataBundle into the store's internal state.
+ * This function is dataset-agnostic — any adapter's bundle works.
+ */
+function applyMetadataBundle(
+  bundle: MetadataBundle,
+  set: (partial: Partial<SceneState>) => void,
+  get: () => SceneState,
+) {
+  // Frame list
+  internal.timestamps = bundle.timestamps
+  internal.timestampToFrame = bundle.timestampToFrame
+
+  // Poses
+  internal.vehiclePoseByFrame = bundle.vehiclePoseByFrame
+  internal.worldOriginInverse = bundle.worldOriginInverse
+  internal.poseByFrameIndex = bundle.poseByFrameIndex
+
+  // Boxes + trajectories
+  internal.lidarBoxByFrame = bundle.lidarBoxByFrame
+  internal.cameraBoxByFrame = bundle.cameraBoxByFrame
+  internal.objectTrajectories = bundle.objectTrajectories
+
+  // Associations
+  internal.assocCamToLaser = bundle.assocCamToLaser
+  internal.assocLaserToCams = bundle.assocLaserToCams
+
+  // Zustand state updates
+  set({
+    totalFrames: bundle.timestamps.length,
+    lidarCalibrations: bundle.lidarCalibrations,
+    cameraCalibrations: bundle.cameraCalibrations,
+    hasBoxData: bundle.hasBoxData,
+  })
+
+  // Segment metadata
+  if (bundle.segmentMeta) {
+    const prev = get().segmentMetas
+    const next = new Map(prev)
+    next.set(bundle.segmentMeta.segmentId, bundle.segmentMeta)
+    set({ segmentMetas: next })
   }
-
-  // LiDAR calibration
-  const lidarCalibPf = internal.parquetFiles.get('lidar_calibration')
-  if (lidarCalibPf) {
-    const rows = await readAllRows(lidarCalibPf)
-    const calibMap = new Map<number, LidarCalibration>()
-    for (const row of rows) {
-      const calib = parseLidarCalibration(row)
-      calibMap.set(calib.laserName, calib)
-    }
-    set({ lidarCalibrations: calibMap })
-  }
-
-  // Camera calibration
-  const cameraCalibPf = internal.parquetFiles.get('camera_calibration')
-  if (cameraCalibPf) {
-    set({ cameraCalibrations: await readAllRows(cameraCalibPf) })
-  }
-
-  // LiDAR boxes (absent in test set — gracefully skip)
-  const lidarBoxPf = internal.parquetFiles.get('lidar_box')
-  if (lidarBoxPf) {
-    const rows = await readAllRows(lidarBoxPf)
-    internal.lidarBoxByFrame = groupIndexBy(rows, 'key.frame_timestamp_micros')
-    set({ hasBoxData: rows.length > 0 })
-
-    // Build object trajectory index (objectId → sorted positions by frame)
-    for (const row of rows) {
-      const objectId = row['key.laser_object_id'] as string | undefined
-      if (!objectId) continue
-      const cx = row['[LiDARBoxComponent].box.center.x'] as number | undefined
-      const cy = row['[LiDARBoxComponent].box.center.y'] as number | undefined
-      const cz = row['[LiDARBoxComponent].box.center.z'] as number | undefined
-      const type = (row['[LiDARBoxComponent].type'] as number) ?? 0
-      if (cx == null || cy == null || cz == null) continue
-
-      const ts = row['key.frame_timestamp_micros'] as bigint
-      const fi = internal.timestampToFrame.get(ts)
-      if (fi === undefined) continue
-
-      let trail = internal.objectTrajectories.get(objectId)
-      if (!trail) {
-        trail = []
-        internal.objectTrajectories.set(objectId, trail)
-      }
-      trail.push({ frameIndex: fi, x: cx, y: cy, z: cz, type })
-    }
-
-    // Sort each trajectory by frame index
-    for (const trail of internal.objectTrajectories.values()) {
-      trail.sort((a, b) => a.frameIndex - b.frameIndex)
-    }
-  }
-
-  // Camera boxes (2D bounding boxes for camera overlay)
-  const cameraBoxPf = internal.parquetFiles.get('camera_box')
-  if (cameraBoxPf) {
-    const rows = await readAllRows(cameraBoxPf)
-    internal.cameraBoxByFrame = groupIndexBy(rows, 'key.frame_timestamp_micros')
-  }
-
-  // Camera-to-LiDAR box association (links 2D camera boxes ↔ 3D laser boxes)
-  const assocPf = internal.parquetFiles.get('camera_to_lidar_box_association')
-  if (assocPf) {
-    const rows = await readAllRows(assocPf, [
-      'key.camera_object_id',
-      'key.laser_object_id',
-    ])
-    internal.assocCamToLaser.clear()
-    internal.assocLaserToCams.clear()
-    for (const row of rows) {
-      const camId = row['key.camera_object_id'] as string | undefined
-      const laserId = row['key.laser_object_id'] as string | undefined
-      if (!camId || !laserId) continue
-      internal.assocCamToLaser.set(camId, laserId)
-      let camSet = internal.assocLaserToCams.get(laserId)
-      if (!camSet) {
-        camSet = new Set()
-        internal.assocLaserToCams.set(laserId, camSet)
-      }
-      camSet.add(camId)
-    }
-  }
-
-  // Stats (segment metadata: time of day, location, weather, object counts)
-  const statsPf = internal.parquetFiles.get('stats')
-  if (statsPf) {
-    // Only read the first row — metadata is constant across frames
-    const rows = await readAllRows(statsPf, [
-      'key.segment_context_name',
-      '[StatsComponent].time_of_day',
-      '[StatsComponent].location',
-      '[StatsComponent].weather',
-      '[StatsComponent].lidar_object_counts.types',
-      '[StatsComponent].lidar_object_counts.counts',
-    ])
-    if (rows.length > 0) {
-      const row = rows[0]
-      const segmentId = row['key.segment_context_name'] as string
-      const types = (row['[StatsComponent].lidar_object_counts.types'] as number[]) ?? []
-      const counts = (row['[StatsComponent].lidar_object_counts.counts'] as number[]) ?? []
-
-      // Average object counts across all frames
-      const totalCounts: Record<number, number> = {}
-      for (let i = 0; i < types.length; i++) {
-        totalCounts[types[i]] = (counts[i] ?? 0)
-      }
-      // Compute per-frame averages from all rows
-      if (rows.length > 1) {
-        const frameCounts: Record<number, number[]> = {}
-        for (const r of rows) {
-          const ts = (r['[StatsComponent].lidar_object_counts.types'] as number[]) ?? []
-          const cs = (r['[StatsComponent].lidar_object_counts.counts'] as number[]) ?? []
-          for (let i = 0; i < ts.length; i++) {
-            if (!frameCounts[ts[i]]) frameCounts[ts[i]] = []
-            frameCounts[ts[i]].push(cs[i] ?? 0)
-          }
-        }
-        for (const [t, arr] of Object.entries(frameCounts)) {
-          totalCounts[Number(t)] = Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
-        }
-      }
-
-      const meta: SegmentMeta = {
-        segmentId,
-        timeOfDay: (row['[StatsComponent].time_of_day'] as string) ?? 'Unknown',
-        location: (row['[StatsComponent].location'] as string) ?? 'Unknown',
-        weather: (row['[StatsComponent].weather'] as string) ?? 'Unknown',
-        objectCounts: totalCounts,
-      }
-
-      const prev = get().segmentMetas
-      const next = new Map(prev)
-      next.set(segmentId, meta)
-      set({ segmentMetas: next })
-    }
-  }
-
 }
 
 // ---------------------------------------------------------------------------

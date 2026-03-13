@@ -35,6 +35,64 @@ export interface BoxTypeDef {
 }
 
 // ---------------------------------------------------------------------------
+// Trajectory point (used by both adapters)
+// ---------------------------------------------------------------------------
+
+export interface TrajectoryPoint {
+  frameIndex: number
+  x: number
+  y: number
+  z: number
+  type: number
+}
+
+// ---------------------------------------------------------------------------
+// Metadata bundle — unified output of any adapter's loadMetadata()
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a dataset adapter loads during the "startup data" phase.
+ * The store unpacks this into its internal structures without knowing
+ * which Parquet columns, JSON tables, or file formats were used.
+ */
+export interface MetadataBundle {
+  /** Sorted frame timestamps (master frame list) */
+  timestamps: bigint[]
+  /** Reverse lookup: timestamp → frame index */
+  timestampToFrame: Map<bigint, number>
+
+  /** Vehicle pose rows grouped by timestamp */
+  vehiclePoseByFrame: Map<unknown, import('../utils/merge').ParquetRow[]>
+  /** Inverse of frame 0's world_from_vehicle matrix */
+  worldOriginInverse: number[] | null
+  /** Relative pose per frame index (inv(pose0) × poseN) */
+  poseByFrameIndex: Map<number, number[]>
+
+  /** LiDAR calibrations keyed by sensor ID */
+  lidarCalibrations: Map<number, import('../utils/rangeImage').LidarCalibration>
+  /** Camera calibration rows (raw — consumed by parseCameraCalibrations) */
+  cameraCalibrations: import('../utils/merge').ParquetRow[]
+
+  /** 3D lidar boxes grouped by timestamp */
+  lidarBoxByFrame: Map<unknown, import('../utils/merge').ParquetRow[]>
+  /** 2D camera boxes grouped by timestamp */
+  cameraBoxByFrame: Map<unknown, import('../utils/merge').ParquetRow[]>
+
+  /** Object trajectory index: objectId → sorted positions */
+  objectTrajectories: Map<string, TrajectoryPoint[]>
+
+  /** Association: camera_object_id → laser_object_id */
+  assocCamToLaser: Map<string, string>
+  /** Association: laser_object_id → Set<camera_object_id> */
+  assocLaserToCams: Map<string, Set<string>>
+
+  /** Whether box data is available (false for test sets) */
+  hasBoxData: boolean
+  /** Segment metadata (time of day, location, weather, counts) */
+  segmentMeta: import('../types/waymo').SegmentMeta | null
+}
+
+// ---------------------------------------------------------------------------
 // Dataset manifest
 // ---------------------------------------------------------------------------
 
