@@ -94,9 +94,12 @@ export function parseCameraCalibrations(rows: ParquetRow[]): Map<number, CameraC
     )
     const qExtrinsic = new THREE.Quaternion().setFromRotationMatrix(m4)
 
-    // Compose: optical camera space → sensor space → vehicle space
-    // Q_final = Q_extrinsic × Q_optical_to_sensor
-    const quaternion = qExtrinsic.multiply(OPTICAL_TO_SENSOR)
+    // Waymo sensor frame is vehicle-aligned → need optical→sensor rotation.
+    // nuScenes sensor frame IS optical convention → skip the extra rotation.
+    const isOpticalFrame = !!row['__isOpticalFrame']
+    const quaternion = isOpticalFrame
+      ? qExtrinsic
+      : qExtrinsic.multiply(OPTICAL_TO_SENSOR)
 
     result.set(cameraName, {
       cameraName,

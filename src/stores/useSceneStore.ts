@@ -1043,9 +1043,12 @@ async function loadNuScenesScene(
     })
 
     // 5. Init nuScenes workers in parallel
+    //    Pass LiDAR extrinsic so the worker transforms points from sensor→ego frame
+    const lidarTopCalib = bundle.lidarCalibrations.get(1) // LIDAR_TOP = sensor ID 1
+    const lidarExtrinsic = (lidarTopCalib?.extrinsic as number[] | undefined)
     set({ loadStep: 'workers' as LoadStep })
     await Promise.all([
-      initNuScenesLidarWorker(lidarBatches),
+      initNuScenesLidarWorker(lidarBatches, lidarExtrinsic),
       initNuScenesCameraWorker(cameraBatches),
     ])
     set({ loadProgress: 0.5 })
@@ -1170,6 +1173,7 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
 /** Init nuScenes LiDAR worker pool with pre-built frame batches + file entries. */
 async function initNuScenesLidarWorker(
   batches: NuScenesFrameDescriptor[][],
+  lidarExtrinsic?: number[],
 ) {
   if (!internal.nuScenesSampleFiles || batches.length === 0) return
 
@@ -1193,6 +1197,7 @@ async function initNuScenesLidarWorker(
   const { numBatches } = await pool.init({
     frameBatches: batches,
     fileEntries,
+    lidarExtrinsic,
   })
 
   internal.workerPool = pool

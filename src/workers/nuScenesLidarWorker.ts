@@ -48,6 +48,12 @@ export interface NuScenesLidarWorkerInit extends WorkerInitBase {
    * The worker resolves filenames against this map.
    */
   fileEntries: [string, File][]
+  /**
+   * LiDAR sensor→ego extrinsic (row-major 4×4, 16 floats).
+   * Applied to every point to transform from sensor frame to ego (vehicle) frame.
+   * nuScenes LiDAR sensor frame: X=right, Y=forward, Z=up.
+   */
+  lidarExtrinsic?: number[]
 }
 
 export type NuScenesLidarWorkerRequest = NuScenesLidarWorkerInit | LidarBatchRequest
@@ -59,6 +65,8 @@ export type NuScenesLidarWorkerRequest = NuScenesLidarWorkerInit | LidarBatchReq
 let frameBatches: NuScenesFrameDescriptor[][] = []
 let fileMap = new Map<string, File>()
 let wMem = createWorkerMemoryLogger('worker-nuscenes-lidar-?')
+/** LiDAR sensor→ego extrinsic (row-major 4×4). null = identity (no transform). */
+let lidarExtrinsic: number[] | null = null
 
 // LIDAR_TOP sensor ID (from nuScenes manifest)
 const LIDAR_TOP_ID = 1
@@ -72,21 +80,35 @@ const LIDAR_TOP_ID = 1
  *
  * Input format: flat float32 array, 5 floats per point [x, y, z, intensity, ring_index].
  * Output: Float32Array with 4 floats per point [x, y, z, intensity] for the renderer.
+ *
+ * If lidarExtrinsic is set, each point is transformed from sensor frame to ego frame:
+ *   [x', y', z'] = R × [x, y, z] + t   (row-major 4×4)
  */
 function parsePcdBin(buffer: ArrayBuffer): { positions: Float32Array; pointCount: number } {
   const floats = new Float32Array(buffer)
   const pointCount = Math.floor(floats.length / NUSCENES_POINT_STRIDE)
 
   // Output: 4 floats per point [x, y, z, intensity]
-  // This matches the Waymo pipeline's POINT_STRIDE of 4
   const positions = new Float32Array(pointCount * 4)
+  const e = lidarExtrinsic
 
   for (let i = 0; i < pointCount; i++) {
     const srcOffset = i * NUSCENES_POINT_STRIDE
     const dstOffset = i * 4
-    positions[dstOffset] = floats[srcOffset]         // x
-    positions[dstOffset + 1] = floats[srcOffset + 1] // y
-    positions[dstOffset + 2] = floats[srcOffset + 2] // z
+    const sx = floats[srcOffset]
+    const sy = floats[srcOffset + 1]
+    const sz = floats[srcOffset + 2]
+
+    if (e) {
+      // Apply sensor→ego extrinsic: row-major 4×4 [R|t]
+      positions[dstOffset]     = e[0] * sx + e[1] * sy + e[2] * sz + e[3]
+      positions[dstOffset + 1] = e[4] * sx + e[5] * sy + e[6] * sz + e[7]
+      positions[dstOffset + 2] = e[8] * sx + e[9] * sy + e[10] * sz + e[11]
+    } else {
+      positions[dstOffset]     = sx
+      positions[dstOffset + 1] = sy
+      positions[dstOffset + 2] = sz
+    }
     positions[dstOffset + 3] = floats[srcOffset + 3] // intensity
   }
 
@@ -126,7 +148,8 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
       wMem.snap('init:start')
       frameBatches = msg.frameBatches
       fileMap = new Map(msg.fileEntries)
-      wMem.snap('init:complete', { note: `${frameBatches.length} batches, ${fileMap.size} files` })
+      lidarExtrinsic = msg.lidarExtrinsic ?? null
+      wMem.snap('init:complete', { note: `${frameBatches.length} batches, ${fileMap.size} files, extrinsic=${!!lidarExtrinsic}` })
 
       post.postMessage({
         type: 'ready',

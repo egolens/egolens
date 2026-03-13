@@ -25,7 +25,7 @@ import type {
   NuScenesSensor,
 } from '../../types/nuscenes'
 import { NUSCENES_CATEGORY_MAP } from '../../types/nuscenes'
-import { NUSCENES_CHANNEL_TO_ID } from './manifest'
+import { NUSCENES_CHANNEL_TO_ID, nuScenesManifest } from './manifest'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import { multiplyRowMajor4x4, invertRowMajor4x4 } from '../../utils/matrix'
 
@@ -247,18 +247,27 @@ export function loadNuScenesSceneMetadata(
     })
   }
 
-  // 5. Build camera calibrations (raw rows compatible with Waymo pattern)
+  // 5. Build camera calibrations (keyed to match parseCameraCalibrations expectations)
+  const CAM_PREFIX = '[CameraCalibrationComponent]'
   const cameraCalibrations: Record<string, unknown>[] = []
   for (const cs of db.calibratedSensorByToken.values()) {
     const sensor = db.sensorByToken.get(cs.sensor_token)
     if (!sensor || sensor.modality !== 'camera') continue
     const sensorId = NUSCENES_CHANNEL_TO_ID[sensor.channel]
     if (sensorId === undefined) continue
+    // Find matching manifest entry for width/height
+    const camDef = nuScenesManifest.cameraSensors.find(c => c.id === sensorId)
+    const intrinsic = cs.camera_intrinsic // 3×3 row-major
+    const f_u = intrinsic?.[0]?.[0] ?? 0
+    const f_v = intrinsic?.[1]?.[1] ?? 0
     cameraCalibrations.push({
       'key.camera_name': sensorId,
-      channel: sensor.channel,
-      intrinsic: cs.camera_intrinsic,
-      extrinsic: quaternionToMatrix4x4(cs.rotation, cs.translation),
+      [`${CAM_PREFIX}.extrinsic.transform`]: quaternionToMatrix4x4(cs.rotation, cs.translation),
+      [`${CAM_PREFIX}.width`]: camDef?.width ?? 1600,
+      [`${CAM_PREFIX}.height`]: camDef?.height ?? 900,
+      [`${CAM_PREFIX}.intrinsic.f_u`]: f_u,
+      [`${CAM_PREFIX}.intrinsic.f_v`]: f_v,
+      '__isOpticalFrame': true, // nuScenes sensor frame is already optical convention
     })
   }
 
@@ -304,7 +313,8 @@ export function loadNuScenesSceneMetadata(
         cx = boxVehicle[3]
         cy = boxVehicle[7]
         cz = boxVehicle[11]
-        heading = Math.atan2(boxVehicle[1], boxVehicle[0])
+        // Row-major 4×4: r10=matrix[4], r00=matrix[0] → atan2(sin θ, cos θ)
+        heading = Math.atan2(boxVehicle[4], boxVehicle[0])
       } else {
         cx = ann.translation[0]
         cy = ann.translation[1]
