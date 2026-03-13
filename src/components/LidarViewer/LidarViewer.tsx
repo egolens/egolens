@@ -36,8 +36,7 @@ const _resetPos = new THREE.Vector3()
 const _resetTarget = new THREE.Vector3()
 const _resetPoseMat = new THREE.Matrix4()
 
-/** Sensor info derived from the active dataset manifest (replaces hardcoded Waymo list) */
-const SENSOR_INFO = getManifest().lidarSensors
+/** Sensor info — read dynamically inside components via getManifest().lidarSensors */
 
 // ---------------------------------------------------------------------------
 // POV Camera Controller — animates the camera to a Waymo camera's viewpoint
@@ -676,7 +675,7 @@ export default function LidarViewer() {
             {[
               worldMode ? 'World' : 'Vehicle',
               (() => {
-                const active = SENSOR_INFO.filter(s => visibleSensors.has(s.id))
+                const active = getManifest().lidarSensors.filter(s => visibleSensors.has(s.id))
                 if (active.length === 0) return 'None'
                 if (active.length === 1) return active[0].label
                 return `${active[0].label}+${active.length - 1}`
@@ -759,7 +758,7 @@ export default function LidarViewer() {
             Sensor
           </div>
 
-          {SENSOR_INFO.map(({ id, label, color }) => {
+          {getManifest().lidarSensors.map(({ id, label, color }) => {
             const active = visibleSensors.has(id)
             const cloud = sensorClouds?.get(id)
             const pts = cloud ? cloud.pointCount.toLocaleString() : '—'

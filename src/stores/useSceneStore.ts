@@ -402,7 +402,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   cachedFrames: [],
   cameraLoadedCount: 0,
   cameraTotalCount: 0,
-  visibleSensors: new Set([1, 2, 3, 4, 5]),
+  visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
   boxMode: 'box' as BoxMode,
   trailLength: 10,
   pointOpacity: 0.85,
@@ -690,18 +690,22 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     selectSegment: async (segmentId: string) => {
-      const { actions, visibleSensors, boxMode, trailLength, pointOpacity } = get()
-      // Preserve UI panel settings across segment switches
-      const savedSettings = { visibleSensors: new Set(visibleSensors), boxMode, trailLength, pointOpacity }
+      const { actions, boxMode, trailLength, pointOpacity } = get()
       actions.reset()
-      set({ currentSegment: segmentId, ...savedSettings })
 
       // nuScenes path — scene selection (database already built in loadFromFiles)
       if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
         setManifest(nuScenesManifest)
+        // Use nuScenes manifest sensors (not preserved from previous dataset)
+        const visibleSensors = new Set(getManifest().lidarSensors.map(s => s.id))
+        set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, pointOpacity })
         await loadNuScenesScene(segmentId, set, get)
         return
       }
+
+      // Waymo path — preserve visible sensors within same dataset
+      const visibleSensors = new Set(get().visibleSensors.size > 0 ? get().visibleSensors : getManifest().lidarSensors.map(s => s.id))
+      set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, pointOpacity })
 
       // Waymo: file-based path (drag & drop / folder picker)
       if (internal.filesBySegment?.has(segmentId)) {
