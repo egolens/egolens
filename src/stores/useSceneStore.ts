@@ -28,12 +28,8 @@ import {
   type PointCloud,
   type RangeImage,
 } from '../utils/rangeImage'
-import type {
-  DataWorkerRowGroupResult,
-} from '../workers/dataWorker'
-import type {
-  CameraWorkerRowGroupResult,
-} from '../workers/cameraWorker'
+import type { LidarBatchResult } from '../workers/types'
+import type { CameraBatchResult } from '../workers/types'
 import { WorkerPool } from '../workers/workerPool'
 import { CameraWorkerPool } from '../workers/cameraWorkerPool'
 import type { SegmentMeta } from '../types/waymo'
@@ -180,15 +176,15 @@ const internal = {
    *  Stored independently so camera data is never lost due to lidar timing. */
   cameraImageCache: new Map<number, Map<number, ArrayBuffer>>(),
   playIntervalId: null as ReturnType<typeof setInterval> | null,
-  /** Worker pool for parallel row group loading (lidar) */
+  /** Worker pool for parallel batch loading (lidar) */
   workerPool: null as WorkerPool | null,
-  numRowGroups: 0,
-  /** Track which lidar row groups have been loaded or are in-flight */
+  numBatches: 0,
+  /** Track which lidar batches have been loaded or are in-flight */
   loadedRowGroups: new Set<number>(),
   /** Camera worker pool */
   cameraPool: null as CameraWorkerPool | null,
-  cameraNumRowGroups: 0,
-  /** Track which camera row groups have been loaded or are in-flight */
+  cameraNumBatches: 0,
+  /** Track which camera batches have been loaded or are in-flight */
   cameraLoadedRowGroups: new Set<number>(),
   cameraPrefetchStarted: false,
   /** Prevent duplicate prefetchAllRowGroups calls (React StrictMode) */
@@ -237,12 +233,12 @@ function resetInternal() {
     internal.workerPool.terminate()
     internal.workerPool = null
   }
-  internal.numRowGroups = 0
+  internal.numBatches = 0
   if (internal.cameraPool) {
     internal.cameraPool.terminate()
     internal.cameraPool = null
   }
-  internal.cameraNumRowGroups = 0
+  internal.cameraNumBatches = 0
   internal.cameraLoadedRowGroups.clear()
   internal.cameraPrefetchStarted = false
   // Revoke blob URLs to free memory
@@ -258,7 +254,7 @@ function resetInternal() {
 
 function requestRowGroup(
   rowGroupIndex: number,
-): Promise<DataWorkerRowGroupResult> {
+): Promise<LidarBatchResult> {
   if (!internal.workerPool) {
     return Promise.reject(new Error('Worker pool not initialized'))
   }
@@ -267,7 +263,7 @@ function requestRowGroup(
 
 /** Cache all frames from a row group result into internal.frameCache */
 function cacheRowGroupFrames(
-  result: DataWorkerRowGroupResult,
+  result: LidarBatchResult,
   set: (partial: Partial<SceneState>) => void,
 ) {
   for (const frame of result.frames) {
@@ -318,7 +314,7 @@ function cacheRowGroupFrames(
       }
     }
   }
-  memLog.snap(`cache:lidar-rg${result.rowGroupIndex}`, {
+  memLog.snap(`cache:lidar-rg${result.batchIndex}`, {
     dataSize: rgBytes,
     note: `${result.frames.length} frames, ${internal.frameCache.size} total cached`,
   })
@@ -328,7 +324,7 @@ function cacheRowGroupFrames(
 
 /** Cache all camera images from a camera row group result (separate cache) */
 function cacheCameraRowGroupFrames(
-  result: CameraWorkerRowGroupResult,
+  result: CameraBatchResult,
 ) {
   for (const frame of result.frames) {
     const timestamp = BigInt(frame.timestamp)
@@ -352,7 +348,7 @@ function cacheCameraRowGroupFrames(
       jpegBytes += img.jpeg.byteLength
     }
   }
-  memLog.snap(`cache:camera-rg${result.rowGroupIndex}`, {
+  memLog.snap(`cache:camera-rg${result.batchIndex}`, {
     dataSize: jpegBytes,
     note: `${result.frames.length} frames, ${internal.cameraImageCache.size} total cached`,
   })
@@ -460,7 +456,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const firstFramePromises: Promise<void>[] = []
         if (internal.workerPool?.isReady()) {
           firstFramePromises.push(loadAndCacheRowGroup(0, set))
-          if (internal.numRowGroups > 1) {
+          if (internal.numBatches > 1) {
             firstFramePromises.push(loadAndCacheRowGroup(1, set))
           }
         } else {
@@ -476,7 +472,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
         if (internal.cameraPool?.isReady()) {
           firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
-          if (internal.cameraNumRowGroups > 1) {
+          if (internal.cameraNumBatches > 1) {
             firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
           }
         }
@@ -903,13 +899,13 @@ async function initDataWorker(
   if (!lidarSource) return
 
   const pool = new WorkerPool(WORKER_CONCURRENCY)
-  const { numRowGroups } = await pool.init({
+  const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
   })
 
   internal.workerPool = pool
-  internal.numRowGroups = numRowGroups
+  internal.numBatches = numBatches
 }
 
 /** Initialize camera worker pool (separate from lidar pool) */
@@ -920,11 +916,11 @@ async function initCameraWorker(
   if (!cameraSource) return
 
   const pool = new CameraWorkerPool(2)
-  const { numRowGroups } = await pool.init({ cameraUrl: cameraSource })
+  const { numBatches } = await pool.init({ cameraUrl: cameraSource })
 
   internal.cameraPool = pool
-  internal.cameraNumRowGroups = numRowGroups
-  useSceneStore.setState({ cameraTotalCount: internal.cameraNumRowGroups })
+  internal.cameraNumBatches = numBatches
+  useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
 }
 
 /** Load + cache a single camera row group */
@@ -966,7 +962,7 @@ async function prefetchAllCameraRowGroups(
   set: (partial: Partial<SceneState>) => void,
 ) {
   const promises: Promise<void>[] = []
-  for (let rg = 0; rg < internal.cameraNumRowGroups; rg++) {
+  for (let rg = 0; rg < internal.cameraNumBatches; rg++) {
     if (internal.cameraLoadedRowGroups.has(rg)) continue
     promises.push(
       loadAndCacheCameraRowGroup(rg, set).catch(() => {}),
@@ -1008,7 +1004,7 @@ async function prefetchAllRowGroups(
 ) {
   const promises: Promise<void>[] = []
 
-  for (let rg = 0; rg < internal.numRowGroups; rg++) {
+  for (let rg = 0; rg < internal.numBatches; rg++) {
     if (internal.loadedRowGroups.has(rg)) continue
 
     promises.push(

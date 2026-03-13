@@ -1,7 +1,7 @@
 /**
- * Data Worker — runs Parquet I/O + LiDAR conversion off the main thread.
+ * Waymo LiDAR Worker — runs Parquet I/O + range image → xyz conversion off the main thread.
  *
- * Key optimization: reads an entire Parquet **row group** in one shot.
+ * Key optimization: reads an entire Parquet **row group** (= 1 batch) in one shot.
  * Parquet decompresses a full RG anyway (~256 rows, ~40 MB compressed),
  * so reading 5 rows costs the same as reading 256.
  * By processing the whole RG we cache ~51 frames per decompression pass —
@@ -24,6 +24,49 @@ import {
 } from '../utils/rangeImage'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 
+import type {
+  WorkerInitBase,
+  SensorCloudResult,
+  LidarFrameResult,
+  LidarBatchRequest,
+  LidarBatchResult,
+  LidarWorkerReady,
+  LidarWorkerError,
+  LidarWorkerResponse,
+} from './types'
+
+// Re-export shared types so existing consumers can migrate gradually
+export type {
+  SensorCloudResult,
+  LidarFrameResult,
+  LidarBatchResult,
+  LidarWorkerReady,
+  LidarWorkerError,
+  LidarWorkerResponse,
+} from './types'
+
+// ---------------------------------------------------------------------------
+// Waymo-specific init message (extends base)
+// ---------------------------------------------------------------------------
+
+export interface WaymoLidarWorkerInit extends WorkerInitBase {
+  lidarUrl: string | File
+  /** Serialized as [laserName, calibration][] since Map can't be postMessage'd */
+  calibrationEntries: [number, LidarCalibration][]
+}
+
+export type WaymoLidarWorkerRequest = WaymoLidarWorkerInit | LidarBatchRequest
+
+// Legacy aliases for gradual migration
+export type DataWorkerInit = WaymoLidarWorkerInit
+export type DataWorkerRequest = WaymoLidarWorkerRequest
+export type DataWorkerRowGroupResult = LidarBatchResult
+export type DataWorkerReady = LidarWorkerReady
+export type DataWorkerError = LidarWorkerError
+export type DataWorkerResponse = LidarWorkerResponse
+export type FrameResult = LidarFrameResult
+export type DataWorkerLoadRowGroup = LidarBatchRequest
+
 // ---------------------------------------------------------------------------
 // Worker state
 // ---------------------------------------------------------------------------
@@ -36,69 +79,7 @@ let calibrations = new Map<number, LidarCalibration>()
 let wMem = createWorkerMemoryLogger('worker-lidar-?')
 
 // ---------------------------------------------------------------------------
-// Message types
-// ---------------------------------------------------------------------------
-
-export interface DataWorkerInit {
-  type: 'init'
-  lidarUrl: string | File
-  /** Serialized as [laserName, calibration][] since Map can't be postMessage'd */
-  calibrationEntries: [number, LidarCalibration][]
-  /** Worker index for memory logging identification */
-  workerIndex?: number
-  /** Enable memory logging in this worker */
-  enableMemLog?: boolean
-}
-
-export interface DataWorkerLoadRowGroup {
-  type: 'loadRowGroup'
-  requestId: number
-  rowGroupIndex: number
-}
-
-export type DataWorkerRequest = DataWorkerInit | DataWorkerLoadRowGroup
-
-/** Per-sensor point cloud within a frame */
-export interface SensorCloudResult {
-  laserName: number
-  positions: Float32Array
-  pointCount: number
-}
-
-/** A single converted frame within a row group batch */
-export interface FrameResult {
-  /** bigint timestamp serialized as string */
-  timestamp: string
-  /** Per-sensor point clouds (no merged buffer — renderer merges on the fly) */
-  sensorClouds: SensorCloudResult[]
-  convertMs: number
-}
-
-export interface DataWorkerRowGroupResult {
-  type: 'rowGroupReady'
-  requestId: number
-  rowGroupIndex: number
-  frames: FrameResult[]
-  /** Total decompression + conversion time for the entire RG */
-  totalMs: number
-}
-
-export interface DataWorkerReady {
-  type: 'ready'
-  /** Number of row groups in the lidar file */
-  numRowGroups: number
-}
-
-export interface DataWorkerError {
-  type: 'error'
-  requestId?: number
-  message: string
-}
-
-export type DataWorkerResponse = DataWorkerReady | DataWorkerRowGroupResult | DataWorkerError
-
-// ---------------------------------------------------------------------------
-// Message handler
+// Waymo Parquet column names
 // ---------------------------------------------------------------------------
 
 const LIDAR_COLUMNS = [
@@ -108,17 +89,16 @@ const LIDAR_COLUMNS = [
   '[LiDARComponent].range_image_return1.values',
 ]
 
+// ---------------------------------------------------------------------------
+// Message handler
+// ---------------------------------------------------------------------------
+
 const post = self as unknown as {
-  postMessage(msg: DataWorkerResponse, transfer?: Transferable[]): void
+  postMessage(msg: LidarWorkerResponse, transfer?: Transferable[]): void
 }
 
-// ---------------------------------------------------------------------------
-// Sequential queue — async onmessage can fire while previous await is pending,
-// causing concurrent processing. This queue ensures strict FIFO ordering.
-// ---------------------------------------------------------------------------
-
 let processing = false
-const queue: DataWorkerRequest[] = []
+const queue: WaymoLidarWorkerRequest[] = []
 
 async function processQueue() {
   if (processing) return
@@ -132,7 +112,7 @@ async function processQueue() {
   processing = false
 }
 
-async function handleMessage(msg: DataWorkerRequest) {
+async function handleMessage(msg: WaymoLidarWorkerRequest) {
   try {
     if (msg.type === 'init') {
       // Configure memory logger
@@ -148,22 +128,22 @@ async function handleMessage(msg: DataWorkerRequest) {
 
       post.postMessage({
         type: 'ready',
-        numRowGroups: lidarPf.rowGroups.length,
+        numBatches: lidarPf.rowGroups.length,
       })
       return
     }
 
-    if (msg.type === 'loadRowGroup') {
+    if (msg.type === 'loadBatch') {
       if (!lidarPf || !lidarIndex) {
         throw new Error('Worker not initialized')
       }
 
       const t0 = performance.now()
-      wMem.snap(`rg${msg.rowGroupIndex}:fetch-start`)
+      wMem.snap(`rg${msg.batchIndex}:fetch-start`)
 
       // 1. Read entire row group — one decompression pass
-      const allRows = await readRowGroupRows(lidarPf, msg.rowGroupIndex, LIDAR_COLUMNS)
-      wMem.snap(`rg${msg.rowGroupIndex}:decompress-done`, {
+      const allRows = await readRowGroupRows(lidarPf, msg.batchIndex, LIDAR_COLUMNS)
+      wMem.snap(`rg${msg.batchIndex}:decompress-done`, {
         note: `${allRows.length} rows decompressed`,
       })
 
@@ -179,12 +159,12 @@ async function handleMessage(msg: DataWorkerRequest) {
         group.push(row)
       }
 
-      wMem.snap(`rg${msg.rowGroupIndex}:convert-start`, {
+      wMem.snap(`rg${msg.batchIndex}:convert-start`, {
         note: `${frameGroups.size} frames to convert`,
       })
 
       // 3. Convert each frame's range images → xyz point cloud
-      const frames: FrameResult[] = []
+      const frames: LidarFrameResult[] = []
       const transferBuffers: ArrayBuffer[] = []
 
       for (const [ts, rows] of frameGroups) {
@@ -221,15 +201,15 @@ async function handleMessage(msg: DataWorkerRequest) {
       // Calculate total transfer size
       let xferBytes = 0
       for (const buf of transferBuffers) xferBytes += buf.byteLength
-      wMem.snap(`rg${msg.rowGroupIndex}:complete`, {
+      wMem.snap(`rg${msg.batchIndex}:complete`, {
         dataSize: xferBytes,
         note: `${frames.length} frames, ${totalMs.toFixed(0)}ms, transferring ${transferBuffers.length} buffers`,
       })
 
       post.postMessage({
-        type: 'rowGroupReady',
+        type: 'batchReady',
         requestId: msg.requestId,
-        rowGroupIndex: msg.rowGroupIndex,
+        batchIndex: msg.batchIndex,
         frames,
         totalMs,
       }, transferBuffers)
@@ -237,13 +217,13 @@ async function handleMessage(msg: DataWorkerRequest) {
   } catch (err) {
     post.postMessage({
       type: 'error',
-      requestId: (msg as DataWorkerLoadRowGroup).requestId,
+      requestId: (msg as LidarBatchRequest).requestId,
       message: err instanceof Error ? err.message : String(err),
     })
   }
 }
 
-self.onmessage = (e: MessageEvent<DataWorkerRequest>) => {
+self.onmessage = (e: MessageEvent<WaymoLidarWorkerRequest>) => {
   queue.push(e.data)
   processQueue()
 }

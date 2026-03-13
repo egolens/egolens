@@ -1,9 +1,9 @@
 /**
- * Camera Worker — loads camera images from Parquet off the main thread.
+ * Waymo Camera Worker — loads camera images from Parquet off the main thread.
  *
  * Similar to dataWorker but much simpler: no range-image conversion needed.
- * Reads an entire row group at once (same BROTLI decompression cost whether
- * reading 5 rows or 256), yielding ~50 frames of camera images per pass.
+ * Reads an entire row group (= 1 batch) at once (same BROTLI decompression
+ * cost whether reading 5 rows or 256), yielding ~50 frames of camera images per pass.
  *
  * Camera data columns:
  *   key.frame_timestamp_micros — bigint timestamp
@@ -18,6 +18,43 @@ import {
 } from '../utils/parquet'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 
+import type {
+  WorkerInitBase,
+  CameraImageResult,
+  CameraFrameResult,
+  CameraBatchRequest,
+  CameraBatchResult,
+  CameraWorkerReady,
+  CameraWorkerError,
+  CameraWorkerResponse,
+} from './types'
+
+// Re-export shared types so existing consumers can migrate gradually
+export type {
+  CameraImageResult,
+  CameraFrameResult,
+  CameraBatchResult,
+  CameraWorkerReady,
+  CameraWorkerError,
+  CameraWorkerResponse,
+} from './types'
+
+// ---------------------------------------------------------------------------
+// Waymo-specific init message (extends base)
+// ---------------------------------------------------------------------------
+
+export interface WaymoCameraWorkerInit extends WorkerInitBase {
+  cameraUrl: string | File
+}
+
+export type WaymoCameraWorkerRequest = WaymoCameraWorkerInit | CameraBatchRequest
+
+// Legacy aliases for gradual migration
+export type CameraWorkerInit = WaymoCameraWorkerInit
+export type CameraWorkerRequest = WaymoCameraWorkerRequest
+export type CameraWorkerRowGroupResult = CameraBatchResult
+export type CameraWorkerLoadRowGroup = CameraBatchRequest
+
 // ---------------------------------------------------------------------------
 // Worker state
 // ---------------------------------------------------------------------------
@@ -28,65 +65,7 @@ let cameraPf: WaymoParquetFile | null = null
 let wMem = createWorkerMemoryLogger('worker-cam-?')
 
 // ---------------------------------------------------------------------------
-// Message types
-// ---------------------------------------------------------------------------
-
-export interface CameraWorkerInit {
-  type: 'init'
-  cameraUrl: string | File
-  /** Worker index for memory logging identification */
-  workerIndex?: number
-  /** Enable memory logging in this worker */
-  enableMemLog?: boolean
-}
-
-export interface CameraWorkerLoadRowGroup {
-  type: 'loadRowGroup'
-  requestId: number
-  rowGroupIndex: number
-}
-
-export type CameraWorkerRequest = CameraWorkerInit | CameraWorkerLoadRowGroup
-
-/** A single camera image within a frame */
-export interface CameraImageResult {
-  cameraName: number
-  jpeg: ArrayBuffer
-}
-
-/** A single frame's camera images within a row group batch */
-export interface CameraFrameResult {
-  /** bigint timestamp serialized as string */
-  timestamp: string
-  images: CameraImageResult[]
-}
-
-export interface CameraWorkerRowGroupResult {
-  type: 'rowGroupReady'
-  requestId: number
-  rowGroupIndex: number
-  frames: CameraFrameResult[]
-  totalMs: number
-}
-
-export interface CameraWorkerReady {
-  type: 'ready'
-  numRowGroups: number
-}
-
-export interface CameraWorkerError {
-  type: 'error'
-  requestId?: number
-  message: string
-}
-
-export type CameraWorkerResponse =
-  | CameraWorkerReady
-  | CameraWorkerRowGroupResult
-  | CameraWorkerError
-
-// ---------------------------------------------------------------------------
-// Columns to read
+// Waymo Parquet column names
 // ---------------------------------------------------------------------------
 
 const CAMERA_COLUMNS = [
@@ -95,16 +74,16 @@ const CAMERA_COLUMNS = [
   '[CameraImageComponent].image',
 ]
 
+// ---------------------------------------------------------------------------
+// Message handler
+// ---------------------------------------------------------------------------
+
 const post = self as unknown as {
   postMessage(msg: CameraWorkerResponse, transfer?: Transferable[]): void
 }
 
-// ---------------------------------------------------------------------------
-// Sequential queue (same pattern as dataWorker)
-// ---------------------------------------------------------------------------
-
 let processing = false
-const queue: CameraWorkerRequest[] = []
+const queue: WaymoCameraWorkerRequest[] = []
 
 async function processQueue() {
   if (processing) return
@@ -118,7 +97,7 @@ async function processQueue() {
   processing = false
 }
 
-async function handleMessage(msg: CameraWorkerRequest) {
+async function handleMessage(msg: WaymoCameraWorkerRequest) {
   try {
     if (msg.type === 'init') {
       const idx = msg.workerIndex ?? 0
@@ -131,22 +110,22 @@ async function handleMessage(msg: CameraWorkerRequest) {
 
       post.postMessage({
         type: 'ready',
-        numRowGroups: cameraPf.rowGroups.length,
+        numBatches: cameraPf.rowGroups.length,
       })
       return
     }
 
-    if (msg.type === 'loadRowGroup') {
+    if (msg.type === 'loadBatch') {
       if (!cameraPf) {
         throw new Error('Camera worker not initialized')
       }
 
       const t0 = performance.now()
-      wMem.snap(`rg${msg.rowGroupIndex}:fetch-start`)
+      wMem.snap(`rg${msg.batchIndex}:fetch-start`)
 
       // 1. Read entire row group (utf8:false → BYTE_ARRAY stays as Uint8Array, not string)
-      const allRows = await readRowGroupRows(cameraPf, msg.rowGroupIndex, CAMERA_COLUMNS, { utf8: false })
-      wMem.snap(`rg${msg.rowGroupIndex}:decompress-done`, {
+      const allRows = await readRowGroupRows(cameraPf, msg.batchIndex, CAMERA_COLUMNS, { utf8: false })
+      wMem.snap(`rg${msg.batchIndex}:decompress-done`, {
         note: `${allRows.length} rows decompressed`,
       })
 
@@ -200,16 +179,16 @@ async function handleMessage(msg: CameraWorkerRequest) {
 
       let xferBytes = 0
       for (const buf of transferBuffers) xferBytes += buf.byteLength
-      wMem.snap(`rg${msg.rowGroupIndex}:complete`, {
+      wMem.snap(`rg${msg.batchIndex}:complete`, {
         dataSize: xferBytes,
         note: `${frames.length} frames, ${totalMs.toFixed(0)}ms`,
       })
 
       post.postMessage(
         {
-          type: 'rowGroupReady',
+          type: 'batchReady',
           requestId: msg.requestId,
-          rowGroupIndex: msg.rowGroupIndex,
+          batchIndex: msg.batchIndex,
           frames,
           totalMs,
         },
@@ -219,13 +198,13 @@ async function handleMessage(msg: CameraWorkerRequest) {
   } catch (err) {
     post.postMessage({
       type: 'error',
-      requestId: (msg as CameraWorkerLoadRowGroup).requestId,
+      requestId: (msg as CameraBatchRequest).requestId,
       message: err instanceof Error ? err.message : String(err),
     })
   }
 }
 
-self.onmessage = (e: MessageEvent<CameraWorkerRequest>) => {
+self.onmessage = (e: MessageEvent<WaymoCameraWorkerRequest>) => {
   queue.push(e.data)
   processQueue()
 }

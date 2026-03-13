@@ -1,23 +1,25 @@
 /**
- * Worker Pool — manages N data workers for parallel row group decompression.
+ * LiDAR Worker Pool — manages N workers for parallel batch loading.
  *
- * Each worker independently opens the same Parquet file and can decompress
- * + convert row groups concurrently. Row groups are independent data blocks
- * so there are no data races.
+ * Each worker independently opens the same data source and can process
+ * batches concurrently. A "batch" maps to a Parquet row group for Waymo
+ * (~51 frames per batch) or a group of per-frame files for nuScenes.
  *
  * Usage:
  *   const pool = new WorkerPool(4)
  *   await pool.init({ lidarUrl, calibrationEntries })
- *   const result = await pool.requestRowGroup(0)  // dispatches to idle worker
+ *   const result = await pool.requestBatch(0)  // dispatches to idle worker
  *   pool.terminate()
  */
 
 import type {
-  DataWorkerRequest,
+  WaymoLidarWorkerRequest,
   DataWorkerResponse,
-  DataWorkerRowGroupResult,
-  DataWorkerReady,
 } from './dataWorker'
+import type {
+  LidarBatchResult,
+  LidarWorkerReady,
+} from './types'
 import type { LidarCalibration } from '../utils/rangeImage'
 import { memLog } from '../utils/memoryLogger'
 import type { MemorySnapshot } from '../utils/memoryLogger'
@@ -32,7 +34,7 @@ export interface WorkerPoolInitOptions {
 }
 
 interface PendingRequest {
-  resolve: (result: DataWorkerRowGroupResult) => void
+  resolve: (result: LidarBatchResult) => void
   reject: (err: Error) => void
 }
 
@@ -50,12 +52,12 @@ export class WorkerPool {
   private workers: PoolWorker[] = []
   private pendingRequests = new Map<number, PendingRequest>()
   private nextRequestId = 0
-  private numRowGroups = 0
-  /** Queue of row group requests waiting for an idle worker */
+  private numBatches = 0
+  /** Queue of batch requests waiting for an idle worker */
   private waitQueue: Array<{
     requestId: number
-    rowGroupIndex: number
-    resolve: (result: DataWorkerRowGroupResult) => void
+    batchIndex: number
+    resolve: (result: LidarBatchResult) => void
     reject: (err: Error) => void
   }> = []
 
@@ -66,11 +68,11 @@ export class WorkerPool {
   }
 
   /**
-   * Initialize all workers. Each opens the Parquet file independently.
+   * Initialize all workers. Each opens the data source independently.
    * Resolves when ALL workers are ready.
    */
-  async init(opts: WorkerPoolInitOptions): Promise<{ numRowGroups: number }> {
-    const readyPromises: Promise<DataWorkerReady>[] = []
+  async init(opts: WorkerPoolInitOptions): Promise<{ numBatches: number }> {
+    const readyPromises: Promise<LidarWorkerReady>[] = []
 
     for (let i = 0; i < this.concurrency; i++) {
       const worker = new Worker(
@@ -81,7 +83,7 @@ export class WorkerPool {
       const poolWorker: PoolWorker = { worker, busy: false, ready: false }
       this.workers.push(poolWorker)
 
-      const readyPromise = new Promise<DataWorkerReady>((resolve, reject) => {
+      const readyPromise = new Promise<LidarWorkerReady>((resolve, reject) => {
         worker.onmessage = (e: MessageEvent<DataWorkerResponse>) => {
           if (e.data.type === 'ready') {
             poolWorker.ready = true
@@ -103,7 +105,7 @@ export class WorkerPool {
         localStorage.getItem('waymo-memory-log') === 'true'
       )
 
-      const initMsg: DataWorkerRequest = {
+      const initMsg: WaymoLidarWorkerRequest = {
         type: 'init',
         lidarUrl: opts.lidarUrl,
         calibrationEntries: opts.calibrationEntries,
@@ -114,27 +116,27 @@ export class WorkerPool {
     }
 
     const results = await Promise.all(readyPromises)
-    this.numRowGroups = results[0].numRowGroups
-    return { numRowGroups: this.numRowGroups }
+    this.numBatches = results[0].numBatches
+    return { numBatches: this.numBatches }
   }
 
   /**
    * Re-initialize existing workers with a new file (skip worker creation).
    * Much faster than terminate + init — reuses WASM modules.
    */
-  async reinit(opts: WorkerPoolInitOptions): Promise<{ numRowGroups: number }> {
+  async reinit(opts: WorkerPoolInitOptions): Promise<{ numBatches: number }> {
     // Reject in-flight and queued promises so callers don't hang
     this.rejectAllPending('Worker pool reinitialized')
     this.nextRequestId = 0
 
-    const readyPromises: Promise<DataWorkerReady>[] = []
+    const readyPromises: Promise<LidarWorkerReady>[] = []
 
     for (let i = 0; i < this.workers.length; i++) {
       const pw = this.workers[i]
       pw.busy = false
       pw.ready = false
 
-      const readyPromise = new Promise<DataWorkerReady>((resolve, reject) => {
+      const readyPromise = new Promise<LidarWorkerReady>((resolve, reject) => {
         pw.worker.onmessage = (e: MessageEvent<DataWorkerResponse>) => {
           if (e.data.type === 'ready') {
             pw.ready = true
@@ -154,7 +156,7 @@ export class WorkerPool {
         localStorage.getItem('waymo-memory-log') === 'true'
       )
 
-      const initMsg: DataWorkerRequest = {
+      const initMsg: WaymoLidarWorkerRequest = {
         type: 'init',
         lidarUrl: opts.lidarUrl,
         calibrationEntries: opts.calibrationEntries,
@@ -165,13 +167,18 @@ export class WorkerPool {
     }
 
     const results = await Promise.all(readyPromises)
-    this.numRowGroups = results[0].numRowGroups
-    return { numRowGroups: this.numRowGroups }
+    this.numBatches = results[0].numBatches
+    return { numBatches: this.numBatches }
   }
 
-  /** Total row groups in the lidar file (available after init). */
+  /** Total batches available (row groups for Waymo). */
+  getNumBatches(): number {
+    return this.numBatches
+  }
+
+  // Legacy alias
   getNumRowGroups(): number {
-    return this.numRowGroups
+    return this.numBatches
   }
 
   /** Whether the pool is initialized and has at least one ready worker. */
@@ -180,22 +187,27 @@ export class WorkerPool {
   }
 
   /**
-   * Request a row group to be loaded. Dispatches to an idle worker,
+   * Request a batch to be loaded. Dispatches to an idle worker,
    * or queues the request if all workers are busy.
    */
-  requestRowGroup(rowGroupIndex: number): Promise<DataWorkerRowGroupResult> {
+  requestBatch(batchIndex: number): Promise<LidarBatchResult> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
 
       // Find an idle worker
       const idle = this.workers.find((w) => w.ready && !w.busy)
       if (idle) {
-        this.dispatchToWorker(idle, requestId, rowGroupIndex, resolve, reject)
+        this.dispatchToWorker(idle, requestId, batchIndex, resolve, reject)
       } else {
         // All busy — queue it
-        this.waitQueue.push({ requestId, rowGroupIndex, resolve, reject })
+        this.waitQueue.push({ requestId, batchIndex, resolve, reject })
       }
     })
+  }
+
+  // Legacy alias
+  requestRowGroup(batchIndex: number): Promise<LidarBatchResult> {
+    return this.requestBatch(batchIndex)
   }
 
   /** Terminate all workers. */
@@ -227,17 +239,17 @@ export class WorkerPool {
   private dispatchToWorker(
     pw: PoolWorker,
     requestId: number,
-    rowGroupIndex: number,
-    resolve: (result: DataWorkerRowGroupResult) => void,
+    batchIndex: number,
+    resolve: (result: LidarBatchResult) => void,
     reject: (err: Error) => void,
   ): void {
     pw.busy = true
     this.pendingRequests.set(requestId, { resolve, reject })
     pw.worker.postMessage({
-      type: 'loadRowGroup',
+      type: 'loadBatch',
       requestId,
-      rowGroupIndex,
-    } satisfies DataWorkerRequest)
+      batchIndex,
+    } satisfies WaymoLidarWorkerRequest)
   }
 
   private handleWorkerMessage(
@@ -254,7 +266,7 @@ export class WorkerPool {
 
     const pw = this.workers[workerIndex]
 
-    if (msg.type === 'rowGroupReady' || msg.type === 'error') {
+    if (msg.type === 'batchReady' || msg.type === 'error') {
       const rid = 'requestId' in msg ? msg.requestId : -1
       const pending = this.pendingRequests.get(rid ?? -1)
       if (pending) {
@@ -278,7 +290,7 @@ export class WorkerPool {
       if (!idle) break
 
       const next = this.waitQueue.shift()!
-      this.dispatchToWorker(idle, next.requestId, next.rowGroupIndex, next.resolve, next.reject)
+      this.dispatchToWorker(idle, next.requestId, next.batchIndex, next.resolve, next.reject)
     }
   }
 }

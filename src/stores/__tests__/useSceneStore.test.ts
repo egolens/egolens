@@ -29,7 +29,7 @@ vi.mock('../../workers/workerPool', () => {
     WorkerPool: class MockWorkerPool {
       private pf: unknown = null
       private calibrations = new Map<number, LidarCalibration>()
-      private _numRowGroups = 0
+      private _numBatches = 0
 
       constructor(public readonly concurrency: number) {}
 
@@ -41,17 +41,17 @@ vi.mock('../../workers/workerPool', () => {
           await import('../../utils/parquet')
         const { convertAllSensors } = await import('../../utils/rangeImage')
 
-        // Store references for requestRowGroup
+        // Store references for requestBatch
         this.calibrations = new Map(opts.calibrationEntries)
         this.pf = await openParquetFile('lidar', opts.lidarUrl as AsyncBuffer)
         const pfTyped = this.pf as Awaited<ReturnType<typeof openParquetFile>>
-        this._numRowGroups = pfTyped.rowGroups.length
+        this._numBatches = pfTyped.rowGroups.length
 
         // Attach modules for later use
         ;(this as any)._readRowGroupRows = readRowGroupRows
         ;(this as any)._convertAllSensors = convertAllSensors
 
-        return { numRowGroups: this._numRowGroups }
+        return { numBatches: this._numBatches }
       }
 
       async reinit(opts: {
@@ -61,15 +61,19 @@ vi.mock('../../workers/workerPool', () => {
         return this.init(opts)
       }
 
+      getNumBatches() {
+        return this._numBatches
+      }
+
       getNumRowGroups() {
-        return this._numRowGroups
+        return this._numBatches
       }
 
       isReady() {
         return this.pf !== null
       }
 
-      async requestRowGroup(rowGroupIndex: number) {
+      async requestBatch(batchIndex: number) {
         const readRowGroupRows = (this as any)._readRowGroupRows as typeof import('../../utils/parquet').readRowGroupRows
         const convertAllSensors = (this as any)._convertAllSensors as typeof import('../../utils/rangeImage').convertAllSensors
 
@@ -81,7 +85,7 @@ vi.mock('../../workers/workerPool', () => {
         ]
 
         const t0 = performance.now()
-        const allRows = await readRowGroupRows(this.pf as any, rowGroupIndex, LIDAR_COLUMNS)
+        const allRows = await readRowGroupRows(this.pf as any, batchIndex, LIDAR_COLUMNS)
 
         // Group by timestamp
         const frameGroups = new Map<bigint, typeof allRows>()
@@ -124,12 +128,17 @@ vi.mock('../../workers/workerPool', () => {
         }
 
         return {
-          type: 'rowGroupReady' as const,
+          type: 'batchReady' as const,
           requestId: 0,
-          rowGroupIndex,
+          batchIndex,
           frames,
           totalMs: performance.now() - t0,
         }
+      }
+
+      // Legacy alias
+      async requestRowGroup(batchIndex: number) {
+        return this.requestBatch(batchIndex)
       }
 
       terminate() { /* no-op */ }
@@ -142,14 +151,18 @@ vi.mock('../../workers/cameraWorkerPool', () => {
     CameraWorkerPool: class MockCameraWorkerPool {
       constructor(public readonly concurrency: number) {}
       async init() {
-        // No camera fixtures → init "fails" gracefully by returning 0 row groups
-        return { numRowGroups: 0 }
+        // No camera fixtures → init "fails" gracefully by returning 0 batches
+        return { numBatches: 0 }
       }
-      async reinit() { return { numRowGroups: 0 } }
+      async reinit() { return { numBatches: 0 } }
+      getNumBatches() { return 0 }
       getNumRowGroups() { return 0 }
       isReady() { return false }
-      async requestRowGroup(): Promise<never> {
+      async requestBatch(): Promise<never> {
         throw new Error('No camera data in test fixtures')
+      }
+      async requestRowGroup(): Promise<never> {
+        return this.requestBatch()
       }
       terminate() { /* no-op */ }
     },

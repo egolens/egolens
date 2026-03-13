@@ -1,17 +1,19 @@
 /**
  * Camera Worker Pool — manages N workers for parallel camera image loading.
  *
- * Same architecture as WorkerPool (lidar) but for camera_image Parquet.
+ * Same architecture as WorkerPool (lidar) but for camera data.
  * Camera images don't need CPU conversion (just BROTLI decompress + JPEG pass-through),
  * so the pool mainly parallelizes Parquet decompression.
  */
 
 import type {
-  CameraWorkerRequest,
+  WaymoCameraWorkerRequest,
   CameraWorkerResponse,
-  CameraWorkerRowGroupResult,
-  CameraWorkerReady,
 } from './cameraWorker'
+import type {
+  CameraBatchResult,
+  CameraWorkerReady,
+} from './types'
 import { memLog } from '../utils/memoryLogger'
 import type { MemorySnapshot } from '../utils/memoryLogger'
 
@@ -24,7 +26,7 @@ export interface CameraPoolInitOptions {
 }
 
 interface PendingRequest {
-  resolve: (result: CameraWorkerRowGroupResult) => void
+  resolve: (result: CameraBatchResult) => void
   reject: (err: Error) => void
 }
 
@@ -42,11 +44,11 @@ export class CameraWorkerPool {
   private workers: PoolWorker[] = []
   private pendingRequests = new Map<number, PendingRequest>()
   private nextRequestId = 0
-  private numRowGroups = 0
+  private numBatches = 0
   private waitQueue: Array<{
     requestId: number
-    rowGroupIndex: number
-    resolve: (result: CameraWorkerRowGroupResult) => void
+    batchIndex: number
+    resolve: (result: CameraBatchResult) => void
     reject: (err: Error) => void
   }> = []
 
@@ -56,7 +58,7 @@ export class CameraWorkerPool {
     this.concurrency = concurrency
   }
 
-  async init(opts: CameraPoolInitOptions): Promise<{ numRowGroups: number }> {
+  async init(opts: CameraPoolInitOptions): Promise<{ numBatches: number }> {
     const readyPromises: Promise<CameraWorkerReady>[] = []
 
     for (let i = 0; i < this.concurrency; i++) {
@@ -94,19 +96,19 @@ export class CameraWorkerPool {
         cameraUrl: opts.cameraUrl,
         workerIndex: i,
         enableMemLog,
-      } satisfies CameraWorkerRequest)
+      } satisfies WaymoCameraWorkerRequest)
     }
 
     const results = await Promise.all(readyPromises)
-    this.numRowGroups = results[0].numRowGroups
-    return { numRowGroups: this.numRowGroups }
+    this.numBatches = results[0].numBatches
+    return { numBatches: this.numBatches }
   }
 
   /**
    * Re-initialize existing workers with a new file (skip worker creation).
    * Much faster than terminate + init — reuses WASM modules.
    */
-  async reinit(opts: CameraPoolInitOptions): Promise<{ numRowGroups: number }> {
+  async reinit(opts: CameraPoolInitOptions): Promise<{ numBatches: number }> {
     this.rejectAllPending('Camera worker pool reinitialized')
     this.nextRequestId = 0
 
@@ -142,32 +144,42 @@ export class CameraWorkerPool {
         cameraUrl: opts.cameraUrl,
         workerIndex: i,
         enableMemLog,
-      } satisfies CameraWorkerRequest)
+      } satisfies WaymoCameraWorkerRequest)
     }
 
     const results = await Promise.all(readyPromises)
-    this.numRowGroups = results[0].numRowGroups
-    return { numRowGroups: this.numRowGroups }
+    this.numBatches = results[0].numBatches
+    return { numBatches: this.numBatches }
   }
 
+  getNumBatches(): number {
+    return this.numBatches
+  }
+
+  // Legacy alias
   getNumRowGroups(): number {
-    return this.numRowGroups
+    return this.numBatches
   }
 
   isReady(): boolean {
     return this.workers.some((w) => w.ready)
   }
 
-  requestRowGroup(rowGroupIndex: number): Promise<CameraWorkerRowGroupResult> {
+  requestBatch(batchIndex: number): Promise<CameraBatchResult> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
       const idle = this.workers.find((w) => w.ready && !w.busy)
       if (idle) {
-        this.dispatchToWorker(idle, requestId, rowGroupIndex, resolve, reject)
+        this.dispatchToWorker(idle, requestId, batchIndex, resolve, reject)
       } else {
-        this.waitQueue.push({ requestId, rowGroupIndex, resolve, reject })
+        this.waitQueue.push({ requestId, batchIndex, resolve, reject })
       }
     })
+  }
+
+  // Legacy alias
+  requestRowGroup(batchIndex: number): Promise<CameraBatchResult> {
+    return this.requestBatch(batchIndex)
   }
 
   terminate(): void {
@@ -198,17 +210,17 @@ export class CameraWorkerPool {
   private dispatchToWorker(
     pw: PoolWorker,
     requestId: number,
-    rowGroupIndex: number,
-    resolve: (result: CameraWorkerRowGroupResult) => void,
+    batchIndex: number,
+    resolve: (result: CameraBatchResult) => void,
     reject: (err: Error) => void,
   ): void {
     pw.busy = true
     this.pendingRequests.set(requestId, { resolve, reject })
     pw.worker.postMessage({
-      type: 'loadRowGroup',
+      type: 'loadBatch',
       requestId,
-      rowGroupIndex,
-    } satisfies CameraWorkerRequest)
+      batchIndex,
+    } satisfies WaymoCameraWorkerRequest)
   }
 
   private handleWorkerMessage(
@@ -225,7 +237,7 @@ export class CameraWorkerPool {
 
     const pw = this.workers[workerIndex]
 
-    if (msg.type === 'rowGroupReady' || msg.type === 'error') {
+    if (msg.type === 'batchReady' || msg.type === 'error') {
       const rid = 'requestId' in msg ? msg.requestId : -1
       const pending = this.pendingRequests.get(rid ?? -1)
       if (pending) {
@@ -247,7 +259,7 @@ export class CameraWorkerPool {
       const idle = this.workers.find((w) => w.ready && !w.busy)
       if (!idle) break
       const next = this.waitQueue.shift()!
-      this.dispatchToWorker(idle, next.requestId, next.rowGroupIndex, next.resolve, next.reject)
+      this.dispatchToWorker(idle, next.requestId, next.batchIndex, next.resolve, next.reject)
     }
   }
 }
