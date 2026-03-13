@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getManifest, setManifest, detectDataset, getAllKnownComponents } from '../registry'
 import { waymoManifest } from '../waymo/manifest'
+import { nuScenesManifest } from '../nuscenes/manifest'
 import type { DatasetManifest } from '../../types/dataset'
 
 /** Helper: create a minimal valid DatasetManifest for testing */
@@ -111,6 +112,23 @@ describe('detectDataset', () => {
     const result = detectDataset(['Vehicle_Pose', 'Lidar', 'Camera_Image'])
     expect(result).toBeNull()
   })
+
+  // nuScenes detection
+  it('detects nuScenes from required components', () => {
+    const result = detectDataset(['samples', 'sweeps', 'v1.0-mini', 'maps', 'LICENSE'])
+    expect(result).toBe(nuScenesManifest)
+  })
+
+  it('detects nuScenes with only required components', () => {
+    const result = detectDataset(['samples', 'v1.0-mini'])
+    expect(result).toBe(nuScenesManifest)
+  })
+
+  it('returns Waymo (not nuScenes) when both could match but Waymo is first', () => {
+    // This shouldn't happen in practice, but verifies first-match-wins ordering
+    const result = detectDataset(['vehicle_pose', 'lidar', 'camera_image', 'samples', 'v1.0-mini'])
+    expect(result).toBe(waymoManifest)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -133,6 +151,13 @@ describe('getAllKnownComponents', () => {
   it('includes all Waymo known components', () => {
     const known = getAllKnownComponents()
     for (const c of waymoManifest.knownComponents) {
+      expect(known.has(c)).toBe(true)
+    }
+  })
+
+  it('includes all nuScenes known components', () => {
+    const known = getAllKnownComponents()
+    for (const c of nuScenesManifest.knownComponents) {
       expect(known.has(c)).toBe(true)
     }
   })
@@ -288,6 +313,59 @@ describe('waymoManifest', () => {
 })
 
 // ---------------------------------------------------------------------------
+// nuScenes manifest: structural integrity
+// ---------------------------------------------------------------------------
+
+describe('nuScenesManifest', () => {
+  it('has correct id and name', () => {
+    expect(nuScenesManifest.id).toBe('nuscenes')
+    expect(nuScenesManifest.name).toBe('nuScenes')
+  })
+
+  it('has 1 lidar sensor (LIDAR_TOP only)', () => {
+    expect(nuScenesManifest.lidarSensors).toHaveLength(1)
+    expect(nuScenesManifest.lidarSensors[0].label).toBe('TOP')
+  })
+
+  it('has 6 camera sensors', () => {
+    expect(nuScenesManifest.cameraSensors).toHaveLength(6)
+  })
+
+  it('has 5 box types (same as Waymo)', () => {
+    expect(nuScenesManifest.boxTypes).toHaveLength(5)
+  })
+
+  it('has frameRate of 2 Hz (keyframes)', () => {
+    expect(nuScenesManifest.frameRate).toBe(2)
+  })
+
+  it('camera images are 1600×900', () => {
+    for (const cam of nuScenesManifest.cameraSensors) {
+      expect(cam.width).toBe(1600)
+      expect(cam.height).toBe(900)
+    }
+  })
+
+  it('camera sensor ids are unique', () => {
+    const ids = nuScenesManifest.cameraSensors.map(s => s.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('requiredComponents is a subset of knownComponents', () => {
+    const known = new Set(nuScenesManifest.knownComponents)
+    for (const c of nuScenesManifest.requiredComponents) {
+      expect(known.has(c)).toBe(true)
+    }
+  })
+
+  it('columnMap values are empty strings (nuScenes uses JSON, not Parquet)', () => {
+    for (const val of Object.values(nuScenesManifest.columnMap)) {
+      expect(val).toBe('')
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Manifest contract: generic validation helper
 // ---------------------------------------------------------------------------
 
@@ -320,6 +398,10 @@ describe('manifest contract validation', () => {
 
   it('waymoManifest passes contract validation', () => {
     validateManifest(waymoManifest)
+  })
+
+  it('nuScenesManifest passes contract validation', () => {
+    validateManifest(nuScenesManifest)
   })
 
   it('mock manifest passes contract validation', () => {

@@ -9,6 +9,7 @@
 
 import type { DatasetManifest } from '../types/dataset'
 import { waymoManifest } from './waymo/manifest'
+import { nuScenesManifest } from './nuscenes/manifest'
 
 // ---------------------------------------------------------------------------
 // Registry — all known dataset manifests
@@ -17,7 +18,7 @@ import { waymoManifest } from './waymo/manifest'
 /** Ordered list of all registered manifests. First match wins in detectDataset(). */
 const manifests: DatasetManifest[] = [
   waymoManifest,
-  // future: nuscenesManifest, ...
+  nuScenesManifest,
 ]
 
 // ---------------------------------------------------------------------------
