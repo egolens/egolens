@@ -50,10 +50,25 @@ const ELONGATION_STOPS: [number, number, number][] = [
   [0.80, 0.98, 0.55],  // 1.0 — bright lime
 ]
 
+/**
+ * Viridis-inspired ramp for distance (ego center → world).
+ * Matches nuScenes devkit's default distance-based coloring.
+ * Dark purple (close) → teal → yellow-green (far).
+ */
+const DISTANCE_STOPS: [number, number, number][] = [
+  [0.27, 0.00, 0.33],  // 0.0 — dark purple (close to ego)
+  [0.28, 0.17, 0.50],  // 0.2 — indigo
+  [0.13, 0.37, 0.56],  // 0.4 — teal blue
+  [0.15, 0.56, 0.46],  // 0.6 — teal green
+  [0.48, 0.76, 0.24],  // 0.8 — lime green
+  [0.99, 0.91, 0.14],  // 1.0 — bright yellow (far from ego)
+]
+
 const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = {
   intensity: INTENSITY_STOPS,
   range: RANGE_STOPS,
   elongation: ELONGATION_STOPS,
+  distance: DISTANCE_STOPS,
 }
 
 function colormapColor(stops: [number, number, number][], t: number): [number, number, number] {
@@ -73,11 +88,13 @@ function colormapColor(stops: [number, number, number][], t: number): [number, n
 // Attribute extraction helpers
 // ---------------------------------------------------------------------------
 
-/** Offset within the POINT_STRIDE-sized record for each attribute */
+/** Offset within the POINT_STRIDE-sized record for each attribute.
+ *  -1 means the value is computed from xyz (not stored in the buffer). */
 const ATTR_OFFSET: Record<ColormapMode, number> = {
   intensity: 3,   // positions[src + 3]
   range: 4,       // positions[src + 4]
   elongation: 5,  // positions[src + 5]
+  distance: -1,   // computed: sqrt(x² + y² + z²)
 }
 
 /** Normalization ranges per attribute (min, max) for mapping to 0..1 */
@@ -85,14 +102,16 @@ const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
   intensity: [0, 1],        // already 0..1 in Waymo data
   range: [0, 75],           // meters (max useful range ~75m for visualization)
   elongation: [0, 1],       // already 0..1 in Waymo data
+  distance: [0, 50],        // meters from ego center (devkit uses ~50m typical urban range)
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-/** Maximum points we'll ever allocate buffers for (avoids realloc). */
-const MAX_POINTS = 200_000
+/** Maximum points we'll ever allocate buffers for (avoids realloc).
+ *  nuScenes with 10-sweep accumulation: ~34K × 10 = ~340K points. */
+const MAX_POINTS = 400_000
 /** Maximum radar points (5 sensors × ~100 pts each). */
 const MAX_RADAR_POINTS = 2_000
 /** Radar sensor IDs start at 10 (see nuScenes manifest). */
@@ -115,6 +134,7 @@ export default function PointCloud() {
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const worldMode = useSceneStore((s) => s.worldMode)
+  const sweepCount = useSceneStore((s) => s.sweepCount)
   const geometryRef = useRef<THREE.BufferGeometry>(null)
   const radarGeometryRef = useRef<THREE.BufferGeometry>(null)
 
@@ -139,7 +159,7 @@ export default function PointCloud() {
   // Mark dirty when any input changes — actual buffer update happens in useFrame
   // to avoid R3F reconciler resetting needsUpdate between useEffect and render.
   const dirtyRef = useRef(true)
-  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode, worldMode])
+  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode, worldMode, sweepCount])
 
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
@@ -203,16 +223,57 @@ export default function PointCloud() {
         radarTotal += count
       } else {
         // LiDAR: colormap-based
-        const count = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
+        // If sweep data exists, limit points based on sweepCount slider
+        const cumCounts = cloud.sweepCumulativeCounts
+        let effectivePointCount = cloud.pointCount
+        if (cumCounts && cumCounts.length > 0) {
+          // sweepCount=0 → index 0 (keyframe only), sweepCount=N → index N
+          const idx = Math.min(sweepCount, cumCounts.length - 1)
+          effectivePointCount = cumCounts[idx]
+        }
+        const count = Math.min(effectivePointCount, MAX_POINTS - lidarTotal)
+
+        // Time-based fade: keyframe=full brightness, older sweeps fade darker.
+        // Pre-compute sweep boundary index for efficient per-point fade.
+        const hasSweepFade = cumCounts && cumCounts.length > 1 && sweepCount > 0
+        let sweepBoundaryIdx = 0
+        let nextBoundary = hasSweepFade ? cumCounts[0] : count
+        // Total number of active sweep layers (for fade normalization)
+        const activeSweepLayers = hasSweepFade ? Math.min(sweepCount, cumCounts.length - 1) : 0
+
         for (let i = 0; i < count; i++) {
+          // Advance sweep boundary when point index crosses it
+          if (hasSweepFade && i >= nextBoundary && sweepBoundaryIdx < activeSweepLayers) {
+            sweepBoundaryIdx++
+            nextBoundary = sweepBoundaryIdx < cumCounts.length
+              ? cumCounts[sweepBoundaryIdx] : count
+          }
+
           const src = i * stride
           const dst = (lidarTotal + i) * 3
-          posArr[dst] = positions[src]
-          posArr[dst + 1] = positions[src + 1]
-          posArr[dst + 2] = positions[src + 2]
-          const raw = attrOff < stride ? positions[src + attrOff] : 0
+          const px = positions[src]
+          const py = positions[src + 1]
+          const pz = positions[src + 2]
+          posArr[dst] = px
+          posArr[dst + 1] = py
+          posArr[dst + 2] = pz
+          // Distance mode: compute sqrt(x²+y²+z²) from xyz; others read from buffer
+          const raw = attrOff === -1
+            ? Math.sqrt(px * px + py * py + pz * pz)
+            : (attrOff < stride ? positions[src + attrOff] : 0)
           const t = (raw - attrMin) / attrSpan
-          const [r, g, b] = colormapColor(stops, t)
+          let [r, g, b] = colormapColor(stops, t)
+
+          // Fade sweep points: keyframe (idx 0) = 1.0, oldest sweep = 0.10
+          // Quadratic curve for aggressive drop-off on older sweeps
+          if (hasSweepFade && sweepBoundaryIdx > 0) {
+            const ratio = sweepBoundaryIdx / activeSweepLayers  // 0..1
+            const fade = 1.0 - ratio * ratio * 0.90  // quadratic: 1.0 → 0.10
+            r *= fade
+            g *= fade
+            b *= fade
+          }
+
           colArr[dst] = r
           colArr[dst + 1] = g
           colArr[dst + 2] = b

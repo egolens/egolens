@@ -32,6 +32,12 @@ export interface SensorCloudResult {
   laserName: number
   positions: Float32Array
   pointCount: number
+  /**
+   * Cumulative point counts for sweep accumulation (nuScenes only).
+   * Index 0 = keyframe-only count, 1 = keyframe + sweep1, ..., N = all sweeps.
+   * Used by the renderer to slice the draw range based on the sweep slider.
+   */
+  sweepCumulativeCounts?: number[]
 }
 
 /** A single converted LiDAR frame within a batch */

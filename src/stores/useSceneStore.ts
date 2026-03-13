@@ -43,7 +43,7 @@ import {
   loadNuScenesSceneMetadata,
   type NuScenesDatabase,
 } from '../adapters/nuscenes/metadata'
-import type { NuScenesFrameDescriptor, NuScenesRadarFileDescriptor } from '../workers/nuScenesLidarWorker'
+import type { NuScenesFrameDescriptor, NuScenesRadarFileDescriptor, NuScenesSweepDescriptor } from '../workers/nuScenesLidarWorker'
 import type {
   NuScenesCameraFrameDescriptor,
   NuScenesCameraImageDescriptor,
@@ -57,7 +57,7 @@ import { multiplyRowMajor4x4 } from '../utils/matrix'
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
-export type ColormapMode = 'intensity' | 'range' | 'elongation'
+export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance'
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -83,6 +83,7 @@ interface SceneActions {
   cycleBoxMode: () => void
   setBoxMode: (mode: BoxMode) => void
   setTrailLength: (len: number) => void
+  setSweepCount: (count: number) => void
   setPointOpacity: (opacity: number) => void
   setColormapMode: (mode: ColormapMode) => void
   setActiveCam: (cam: number | null) => void
@@ -138,6 +139,8 @@ export interface SceneState {
   boxMode: BoxMode
   /** Number of past frames to show in trajectory trail (0 = off) */
   trailLength: number
+  /** Number of LiDAR sweeps to accumulate (0 = keyframe only, 9 = full 10-sweep). nuScenes only. */
+  sweepCount: number
   /** Point cloud opacity (0..1) */
   pointOpacity: number
   /** Point cloud colormap mode */
@@ -304,7 +307,11 @@ function cacheRowGroupFrames(
     const sensorClouds = new Map<number, PointCloud>()
     if (frame.sensorClouds) {
       for (const sc of frame.sensorClouds) {
-        sensorClouds.set(sc.laserName, { positions: sc.positions, pointCount: sc.pointCount })
+        sensorClouds.set(sc.laserName, {
+          positions: sc.positions,
+          pointCount: sc.pointCount,
+          sweepCumulativeCounts: sc.sweepCumulativeCounts,
+        })
       }
     }
 
@@ -405,6 +412,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
   boxMode: 'box' as BoxMode,
   trailLength: 10,
+  sweepCount: 9,
   pointOpacity: 0.85,
   colormapMode: 'intensity' as ColormapMode,
   hasBoxData: false,
@@ -638,6 +646,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set({ trailLength: Math.max(0, Math.min(50, len)) })
     },
 
+    setSweepCount: (count: number) => {
+      set({ sweepCount: Math.max(0, Math.min(9, count)) })
+    },
+
     setPointOpacity: (opacity: number) => {
       set({ pointOpacity: Math.max(0.1, Math.min(1, opacity)) })
     },
@@ -691,7 +703,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     selectSegment: async (segmentId: string) => {
-      const { actions, boxMode, trailLength, pointOpacity } = get()
+      const { actions, boxMode, trailLength, sweepCount, pointOpacity } = get()
       actions.reset()
 
       // nuScenes path — scene selection (database already built in loadFromFiles)
@@ -699,14 +711,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         setManifest(nuScenesManifest)
         // Use nuScenes manifest sensors (not preserved from previous dataset)
         const visibleSensors = new Set(getManifest().lidarSensors.map(s => s.id))
-        set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, pointOpacity })
+        set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, sweepCount, pointOpacity })
         await loadNuScenesScene(segmentId, set, get)
         return
       }
 
       // Waymo path — preserve visible sensors within same dataset
       const visibleSensors = new Set(get().visibleSensors.size > 0 ? get().visibleSensors : getManifest().lidarSensors.map(s => s.id))
-      set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, pointOpacity })
+      set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, sweepCount, pointOpacity })
 
       // Waymo: file-based path (drag & drop / folder picker)
       if (internal.filesBySegment?.has(segmentId)) {
@@ -810,7 +822,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         boxMode: 'box' as BoxMode,
         trailLength: 10,
         pointOpacity: 0.85,
-        colormapMode: 'intensity' as ColormapMode,
+        colormapMode: (getManifest().colormapModes?.[0] ?? 'intensity') as ColormapMode,
         hasBoxData: false,
         activeCam: null,
         hoveredCam: null,
@@ -1141,7 +1153,7 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
     const sensorFiles = bundle.vehiclePoseByFrame.get(ts) as Record<string, unknown>[] | undefined
     if (!sensorFiles) continue
 
-    // LiDAR frame + radar files
+    // LiDAR frame + radar files + sweep files
     const lidarFile = sensorFiles.find(sf => sf.modality === 'lidar')
     if (lidarFile) {
       // Collect radar files for this frame
@@ -1154,10 +1166,16 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
           })
         }
       }
+      // Extract sweep descriptors (pre-computed in metadata)
+      const rawSweeps = lidarFile.sweeps as { filename: string; transform: number[] }[] | undefined
+      const sweepFiles: NuScenesSweepDescriptor[] | undefined = rawSweeps && rawSweeps.length > 0
+        ? rawSweeps
+        : undefined
       lidarFrames.push({
         timestamp: ts.toString(),
         filename: lidarFile.filename as string,
         radarFiles: radarFiles.length > 0 ? radarFiles : undefined,
+        sweepFiles,
       })
     }
 
@@ -1201,13 +1219,16 @@ async function initNuScenesLidarWorker(
 ) {
   if (!internal.nuScenesSampleFiles || batches.length === 0) return
 
-  // Collect only the files referenced by the batches (LiDAR + radar)
+  // Collect only the files referenced by the batches (LiDAR + radar + sweeps)
   const neededFiles = new Set<string>()
   for (const batch of batches) {
     for (const frame of batch) {
       neededFiles.add(frame.filename)
       if (frame.radarFiles) {
         for (const rf of frame.radarFiles) neededFiles.add(rf.filename)
+      }
+      if (frame.sweepFiles) {
+        for (const sf of frame.sweepFiles) neededFiles.add(sf.filename)
       }
     }
   }

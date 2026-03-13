@@ -432,6 +432,8 @@ export default function LidarViewer() {
   const setBoxMode = useSceneStore((s) => s.actions.setBoxMode)
   const trailLength = useSceneStore((s) => s.trailLength)
   const setTrailLength = useSceneStore((s) => s.actions.setTrailLength)
+  const sweepCount = useSceneStore((s) => s.sweepCount)
+  const setSweepCount = useSceneStore((s) => s.actions.setSweepCount)
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
   const setPointOpacity = useSceneStore((s) => s.actions.setPointOpacity)
   const colormapMode = useSceneStore((s) => s.colormapMode)
@@ -681,7 +683,7 @@ export default function LidarViewer() {
                 return `${active[0].label}+${active.length - 1}`
               })(),
               ...((getManifest().colormapModes?.length ?? 3) > 1
-                ? [{ intensity: 'Int', range: 'Range', elongation: 'Elong' }[colormapMode]]
+                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong' }[colormapMode]]
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
             ].map((text, i, arr) => (
@@ -816,9 +818,34 @@ export default function LidarViewer() {
             </div>
           )}
 
+          {/* Sweep accumulation slider — under Sensor section for datasets with sweep support */}
+          {(() => {
+            const ms = getManifest().maxSweeps
+            if (!ms || ms <= 0) return null
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
+                <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                  Sweeps
+                </span>
+                <input
+                  type="range" min={0} max={ms}
+                  value={sweepCount}
+                  onChange={(e) => setSweepCount(Number(e.target.value))}
+                  style={{ width: 52, height: 2, accentColor: colors.accentBlue }}
+                />
+                <span style={{
+                  fontSize: '10px', fontFamily: fonts.mono, color: colors.textPrimary,
+                  minWidth: 16, textAlign: 'right',
+                }}>
+                  {sweepCount}
+                </span>
+              </div>
+            )
+          })()}
+
           {/* Colormap — hide when dataset only supports one mode */}
           {(() => {
-            const allModes: [ColormapMode, string][] = [['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong']]
+            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong']]
             const manifest = getManifest()
             const availableModes = manifest.colormapModes
               ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))
@@ -940,6 +967,7 @@ export default function LidarViewer() {
                   </span>
                 </div>
               )}
+
             </>)}
           </>}
         </>}

@@ -102,7 +102,8 @@ export const nuScenesManifest: DatasetManifest = {
 
   frameRate: 2,   // nuScenes keyframe rate
   pointStride: 4, // x, y, z, intensity
-  colormapModes: ['intensity'], // nuScenes LiDAR only has intensity (no range/elongation)
+  colormapModes: ['distance', 'intensity'], // distance (viridis, devkit default) + intensity
+  maxSweeps: 9, // 10-sweep accumulation (1 keyframe + 9 sweeps = 0.5s at 20Hz)
 
   cameraColors: {
     [CAM.FRONT]: colors.camFront,

@@ -122,16 +122,18 @@ async function scanNuScenesDirectoryHandle(
     break // Only use the first metadata directory found
   }
 
-  // Read sample data files recursively from samples/ (one level of sensor subdirectories)
-  const samplesDir = componentDirs.get('samples')
-  if (samplesDir) {
-    for await (const [sensorName, handle] of samplesDir as any) {
+  // Read sample/sweep data files recursively (one level of sensor subdirectories)
+  // Both samples/ and sweeps/ share the same structure: {dir}/{sensorName}/{file}
+  for (const dirName of ['samples', 'sweeps'] as const) {
+    const dir = componentDirs.get(dirName)
+    if (!dir) continue
+    for await (const [sensorName, handle] of dir as any) {
       if ((handle as FileSystemHandle).kind !== 'directory') continue
       const sensorDir = handle as FileSystemDirectoryHandle
       for await (const [fileName, fileHandle] of sensorDir as any) {
         if ((fileHandle as FileSystemHandle).kind !== 'file') continue
         allFiles.set(
-          `samples/${sensorName}/${fileName}`,
+          `${dirName}/${sensorName}/${fileName}`,
           await (fileHandle as FileSystemFileHandle).getFile(),
         )
       }

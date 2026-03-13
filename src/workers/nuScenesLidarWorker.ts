@@ -36,6 +36,13 @@ export interface NuScenesRadarFileDescriptor {
   filename: string
 }
 
+/** A single LiDAR sweep file with its pre-computed transform into the keyframe's ego frame. */
+export interface NuScenesSweepDescriptor {
+  filename: string
+  /** Row-major 4×4 matrix: inv(kf_ego) × sweep_ego × lidar_extrinsic */
+  transform: number[]
+}
+
 export interface NuScenesFrameDescriptor {
   /** Frame timestamp as string (bigint serialized) */
   timestamp: string
@@ -43,6 +50,8 @@ export interface NuScenesFrameDescriptor {
   filename: string
   /** Radar files for this frame (one per radar sensor). */
   radarFiles?: NuScenesRadarFileDescriptor[]
+  /** LiDAR sweep files to accumulate (up to 9 preceding non-keyframe scans). */
+  sweepFiles?: NuScenesSweepDescriptor[]
 }
 
 export interface NuScenesLidarWorkerInit extends WorkerInitBase {
@@ -127,6 +136,36 @@ function parsePcdBin(buffer: ArrayBuffer): { positions: Float32Array; pointCount
       positions[dstOffset + 1] = sy
       positions[dstOffset + 2] = sz
     }
+    positions[dstOffset + 3] = floats[srcOffset + 3] // intensity
+  }
+
+  return { positions, pointCount }
+}
+
+/**
+ * Parse a .pcd.bin sweep file and transform points using a pre-computed 4×4 matrix.
+ * The transform maps each point directly from sensor frame to the keyframe's ego frame.
+ * Output: Float32Array with 4 floats per point [x, y, z, intensity].
+ */
+function parseSweepPcdBin(
+  buffer: ArrayBuffer,
+  transform: number[],
+): { positions: Float32Array; pointCount: number } {
+  const floats = new Float32Array(buffer)
+  const pointCount = Math.floor(floats.length / NUSCENES_POINT_STRIDE)
+  const positions = new Float32Array(pointCount * 4)
+  const e = transform
+
+  for (let i = 0; i < pointCount; i++) {
+    const srcOffset = i * NUSCENES_POINT_STRIDE
+    const dstOffset = i * 4
+    const sx = floats[srcOffset]
+    const sy = floats[srcOffset + 1]
+    const sz = floats[srcOffset + 2]
+
+    positions[dstOffset]     = e[0] * sx + e[1] * sy + e[2] * sz + e[3]
+    positions[dstOffset + 1] = e[4] * sx + e[5] * sy + e[6] * sz + e[7]
+    positions[dstOffset + 2] = e[8] * sx + e[9] * sy + e[10] * sz + e[11]
     positions[dstOffset + 3] = floats[srcOffset + 3] // intensity
   }
 
@@ -266,7 +305,7 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
       for (const frameDesc of batch) {
         const sensorClouds: SensorCloudResult[] = []
 
-        // 1. Parse LiDAR .pcd.bin
+        // 1. Parse keyframe LiDAR .pcd.bin
         const lidarFile = fileMap.get(frameDesc.filename)
         if (!lidarFile) {
           console.warn(`[nuScenes LiDAR] File not found: ${frameDesc.filename}`)
@@ -274,8 +313,48 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
         }
         const lidarBuffer = await lidarFile.arrayBuffer()
         const { positions: lidarPos, pointCount: lidarPts } = parsePcdBin(lidarBuffer)
-        sensorClouds.push({ laserName: LIDAR_TOP_ID, positions: lidarPos, pointCount: lidarPts })
-        transferBuffers.push(lidarPos.buffer as ArrayBuffer)
+
+        // 2. Parse sweep files and merge into single point cloud
+        if (frameDesc.sweepFiles && frameDesc.sweepFiles.length > 0) {
+          const sweepResults: { positions: Float32Array; pointCount: number }[] = []
+          let totalSweepPts = 0
+          for (const sweep of frameDesc.sweepFiles) {
+            const sweepFile = fileMap.get(sweep.filename)
+            if (!sweepFile) continue
+            const sweepBuffer = await sweepFile.arrayBuffer()
+            const result = parseSweepPcdBin(sweepBuffer, sweep.transform)
+            sweepResults.push(result)
+            totalSweepPts += result.pointCount
+          }
+
+          // Build cumulative point counts: [keyframe, +sweep1, +sweep2, ...]
+          const sweepCumulativeCounts: number[] = [lidarPts]
+          let cumulative = lidarPts
+          for (const sr of sweepResults) {
+            cumulative += sr.pointCount
+            sweepCumulativeCounts.push(cumulative)
+          }
+
+          // Merge keyframe + sweeps into one buffer
+          const totalPts = lidarPts + totalSweepPts
+          const merged = new Float32Array(totalPts * 4)
+          merged.set(lidarPos)
+          let offset = lidarPts * 4
+          for (const sr of sweepResults) {
+            merged.set(sr.positions, offset)
+            offset += sr.pointCount * 4
+          }
+          sensorClouds.push({
+            laserName: LIDAR_TOP_ID,
+            positions: merged,
+            pointCount: totalPts,
+            sweepCumulativeCounts,
+          })
+          transferBuffers.push(merged.buffer as ArrayBuffer)
+        } else {
+          sensorClouds.push({ laserName: LIDAR_TOP_ID, positions: lidarPos, pointCount: lidarPts })
+          transferBuffers.push(lidarPos.buffer as ArrayBuffer)
+        }
 
         // 2. Parse radar .pcd files (if present)
         if (frameDesc.radarFiles) {

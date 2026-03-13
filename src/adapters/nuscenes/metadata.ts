@@ -203,6 +203,46 @@ function inferTimeOfDay(logfile: string): string {
   return 'Night'
 }
 
+// ---------------------------------------------------------------------------
+// LiDAR sweep accumulation
+// ---------------------------------------------------------------------------
+
+/** Max number of previous sweeps to collect per keyframe (10 total incl. keyframe). */
+const NUSCENES_MAX_SWEEPS = 9
+
+/**
+ * Walk the LIDAR_TOP sample_data `prev` linked list to collect sweep files.
+ * For each sweep, pre-computes the transform: inv(kf_ego) × sweep_ego × lidar_extrinsic.
+ * This single 4×4 matrix transforms a sweep point directly into the keyframe's ego frame.
+ */
+function collectLidarSweeps(
+  db: NuScenesDatabase,
+  keyframeSd: NuScenesSampleData,
+  invKfEgo: number[],
+  lidarExtrinsic: number[],
+): { filename: string; transform: number[] }[] {
+  const sweeps: { filename: string; transform: number[] }[] = []
+  let curToken = keyframeSd.prev
+  for (let i = 0; i < NUSCENES_MAX_SWEEPS && curToken; i++) {
+    const sd = db.sampleDataByToken.get(curToken)
+    if (!sd) break
+    // Stop at next keyframe boundary (we only want non-keyframe sweeps)
+    if (sd.is_key_frame) break
+
+    const egoPose = db.egoPoseByToken.get(sd.ego_pose_token)
+    if (egoPose) {
+      const sweepEgo = quaternionToMatrix4x4(egoPose.rotation, egoPose.translation)
+      // Combined: inv(kf_ego) × sweep_ego × lidar_extrinsic
+      const sweepEgoTimesExt = multiplyRowMajor4x4(sweepEgo, lidarExtrinsic)
+      const transform = multiplyRowMajor4x4(invKfEgo, sweepEgoTimesExt)
+      sweeps.push({ filename: sd.filename, transform })
+    }
+
+    curToken = sd.prev
+  }
+  return sweeps
+}
+
 /**
  * Load metadata for a specific nuScenes scene.
  * Walks the sample linked list and resolves all sensor data, poses, and annotations.
@@ -394,9 +434,13 @@ export function loadNuScenesSceneMetadata(
     trail.sort((a, b) => a.frameIndex - b.frameIndex)
   }
 
-  // 7. Build sensor file paths per frame (for workers to fetch)
+  // 7. Build sensor file paths per frame + LiDAR sweep data
   //    Store sample_data grouped by sample for later use by workers.
   //    This is stored as vehiclePoseByFrame (repurposed) keyed by timestamp.
+  //    Also collects LiDAR sweep data (up to 9 prev sweeps per keyframe).
+  const lidarTopCalib = lidarCalibrations.get(1) // LIDAR_TOP = sensor ID 1
+  const lidarExt = lidarTopCalib?.extrinsic ?? null
+
   const vehiclePoseByFrame = new Map<bigint, Record<string, unknown>[]>()
   for (let fi = 0; fi < orderedSamples.length; fi++) {
     const sample = orderedSamples[fi]
@@ -412,13 +456,25 @@ export function loadNuScenesSceneMetadata(
       const sensorId = NUSCENES_CHANNEL_TO_ID[sensor.channel]
       if (sensorId === undefined) continue
 
-      sensorFiles.push({
+      const entry: Record<string, unknown> = {
         channel: sensor.channel,
         sensorId,
         modality: sensor.modality,
         filename: sd.filename,
         ego_pose_token: sd.ego_pose_token,
-      })
+      }
+
+      // For LIDAR_TOP, collect sweep data (9 prev non-keyframe scans)
+      if (sensor.channel === 'LIDAR_TOP' && lidarExt) {
+        const kfEgoPose = db.egoPoseByToken.get(sd.ego_pose_token)
+        if (kfEgoPose) {
+          const kfEgoMatrix = quaternionToMatrix4x4(kfEgoPose.rotation, kfEgoPose.translation)
+          const invKfEgo = invertRowMajor4x4(kfEgoMatrix)
+          entry.sweeps = collectLidarSweeps(db, sd, invKfEgo, lidarExt)
+        }
+      }
+
+      sensorFiles.push(entry)
     }
     vehiclePoseByFrame.set(ts, sensorFiles)
   }
