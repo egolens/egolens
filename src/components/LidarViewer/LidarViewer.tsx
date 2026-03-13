@@ -20,9 +20,9 @@ import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
-import { BOX_TYPE_COLORS, BoxType } from '../../types/waymo'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { colors, fonts, radius } from '../../theme'
+import { getManifest } from '../../adapters/registry'
 
 // ---------------------------------------------------------------------------
 // Chase-cam defaults + reusable temp objects
@@ -36,13 +36,8 @@ const _resetPos = new THREE.Vector3()
 const _resetTarget = new THREE.Vector3()
 const _resetPoseMat = new THREE.Matrix4()
 
-const SENSOR_INFO: { id: number; label: string; color: string }[] = [
-  { id: 1, label: 'TOP', color: colors.sensorTop },
-  { id: 2, label: 'FRONT', color: colors.sensorFront },
-  { id: 3, label: 'SIDE_L', color: colors.sensorSideL },
-  { id: 4, label: 'SIDE_R', color: colors.sensorSideR },
-  { id: 5, label: 'REAR', color: colors.sensorRear },
-]
+/** Sensor info derived from the active dataset manifest (replaces hardcoded Waymo list) */
+const SENSOR_INFO = getManifest().lidarSensors
 
 // ---------------------------------------------------------------------------
 // POV Camera Controller — animates the camera to a Waymo camera's viewpoint
@@ -899,16 +894,11 @@ export default function LidarViewer() {
             {boxMode !== 'off' && (<>
               {/* Class legend */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', padding: '4px 8px' }}>
-                {([
-                  [BoxType.TYPE_VEHICLE, 'Vehicle'],
-                  [BoxType.TYPE_PEDESTRIAN, 'Pedestrian'],
-                  [BoxType.TYPE_CYCLIST, 'Cyclist'],
-                  [BoxType.TYPE_SIGN, 'Sign'],
-                ] as const).map(([type, label]) => (
-                  <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {getManifest().boxTypes.filter(bt => bt.id !== 0).map(({ id, label, color }) => (
+                  <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <span style={{
                       width: 6, height: 6, borderRadius: '1px',
-                      backgroundColor: BOX_TYPE_COLORS[type],
+                      backgroundColor: color,
                       display: 'inline-block', flexShrink: 0,
                     }} />
                     <span style={{ fontSize: '9px', fontFamily: fonts.sans, color: colors.textSecondary }}>
@@ -964,7 +954,7 @@ export default function LidarViewer() {
             borderRadius: radius.sm,
             backdropFilter: 'blur(8px)',
           }}>
-            CAM {['', 'FRONT', 'FL', 'FR', 'SL', 'SR'][activeCam] ?? activeCam}
+            CAM {getManifest().cameraPovLabels[activeCam] ?? activeCam}
           </span>
           <button
             onClick={() => setActiveCam(null)}

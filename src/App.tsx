@@ -4,6 +4,7 @@ import LidarViewer from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import { colors, fonts, radius, gradients } from './theme'
 import { LOCATION_LABELS } from './types/waymo'
+import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import MemoryOverlay from './components/MemoryOverlay'
 
@@ -244,7 +245,7 @@ function Header() {
           letterSpacing: '-0.01em',
           color: colors.textPrimary,
         }}>
-          Perception Studio <span style={{ fontWeight: 400, opacity: 0.5, fontSize: '12px' }}>for Waymo Open Dataset</span>
+          Perception Studio <span style={{ fontWeight: 400, opacity: 0.5, fontSize: '12px' }}>for {getManifest().name}</span>
         </h1>
       </div>
 

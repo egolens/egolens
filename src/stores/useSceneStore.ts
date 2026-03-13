@@ -42,6 +42,7 @@ import { WorkerPool } from '../workers/workerPool'
 import { CameraWorkerPool } from '../workers/cameraWorkerPool'
 import type { SegmentMeta } from '../types/waymo'
 import { memLog } from '../utils/memoryLogger'
+import { getManifest } from '../adapters/registry'
 
 // ---------------------------------------------------------------------------
 // Row-major 4×4 matrix helpers (for world-coordinate normalization)
@@ -771,7 +772,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         cachedFrames: [],
         cameraLoadedCount: 0,
         cameraTotalCount: 0,
-        visibleSensors: new Set([1, 2, 3, 4, 5]),
+        visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
         boxMode: 'box' as BoxMode,
         trailLength: 10,
         pointOpacity: 0.85,

@@ -13,30 +13,13 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
-import { CameraName } from '../../types/waymo'
 import type { ParquetRow } from '../../utils/merge'
 import { colors, fonts, radius, shadows } from '../../theme'
+import { getManifest } from '../../adapters/registry'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
-
-// Camera display order: surround view left-to-right
-const CAMERA_ORDER: { id: number; label: string }[] = [
-  { id: CameraName.SIDE_LEFT, label: 'SIDE LEFT' },
-  { id: CameraName.FRONT_LEFT, label: 'FRONT LEFT' },
-  { id: CameraName.FRONT, label: 'FRONT' },
-  { id: CameraName.FRONT_RIGHT, label: 'FRONT RIGHT' },
-  { id: CameraName.SIDE_RIGHT, label: 'SIDE RIGHT' },
-]
 
 /** Height of the camera strip in pixels */
 const STRIP_HEIGHT = 160
-
-const CAMERA_COLORS: Record<number, string> = {
-  [CameraName.FRONT]: colors.camFront,
-  [CameraName.FRONT_LEFT]: colors.camFrontLeft,
-  [CameraName.FRONT_RIGHT]: colors.camFrontRight,
-  [CameraName.SIDE_LEFT]: colors.camSideLeft,
-  [CameraName.SIDE_RIGHT]: colors.camSideRight,
-}
 
 export default function CameraPanel() {
   const cameraImages = useSceneStore((s) => s.currentFrame?.cameraImages)
@@ -73,7 +56,7 @@ export default function CameraPanel() {
       borderTop: `1px solid ${colors.borderSubtle}`,
       overflow: 'hidden',
     }}>
-      {CAMERA_ORDER.map(({ id, label }) => (
+      {getManifest().cameraSensors.map(({ id, label }) => (
         <CameraView
           key={id}
           cameraName={id}
@@ -148,10 +131,11 @@ function CameraView({ cameraName, label, imageBuffer, boxes, active, onTogglePov
     }
   }, [imageBuffer])
 
-  // FRONT camera gets slightly more space
-  const isFront = cameraName === CameraName.FRONT
-  const flex = isFront ? 1.3 : 1
-  const accentColor = CAMERA_COLORS[cameraName] ?? '#888'
+  // Derive flex and color from manifest
+  const manifest = getManifest()
+  const camDef = manifest.cameraSensors.find(c => c.id === cameraName)
+  const flex = camDef?.flex ?? 1
+  const accentColor = manifest.cameraColors[cameraName] ?? '#888'
 
   return (
     <div

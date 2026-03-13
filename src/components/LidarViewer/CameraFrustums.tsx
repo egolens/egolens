@@ -8,22 +8,13 @@
 import { useMemo } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, buildFrustumBase, buildFrustumEdges, type CameraCalib } from '../../utils/cameraCalibration'
-import { CameraName } from '../../types/waymo'
-import { colors } from '../../theme'
+import { getManifest } from '../../adapters/registry'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const FRUSTUM_FAR = 2
-
-const CAMERA_COLORS: Record<number, string> = {
-  [CameraName.FRONT]: colors.camFront,
-  [CameraName.FRONT_LEFT]: colors.camFrontLeft,
-  [CameraName.FRONT_RIGHT]: colors.camFrontRight,
-  [CameraName.SIDE_LEFT]: colors.camSideLeft,
-  [CameraName.SIDE_RIGHT]: colors.camSideRight,
-}
 
 // ---------------------------------------------------------------------------
 // Single frustum
@@ -38,7 +29,7 @@ function CameraFrustum({
   active: boolean
   hovered: boolean
 }) {
-  const color = CAMERA_COLORS[calib.cameraName] ?? '#888888'
+  const color = getManifest().cameraColors[calib.cameraName] ?? '#888888'
 
   const basePositions = useMemo(
     () => buildFrustumBase(calib.hFov, calib.vFov, FRUSTUM_FAR),
