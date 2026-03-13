@@ -34,8 +34,20 @@ import { WorkerPool } from '../workers/workerPool'
 import type { SegmentMeta } from '../types/waymo'
 import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
-import { getManifest } from '../adapters/registry'
+import { getManifest, setManifest } from '../adapters/registry'
+import { waymoManifest } from '../adapters/waymo/manifest'
 import { loadWaymoMetadata } from '../adapters/waymo/metadata'
+import { nuScenesManifest } from '../adapters/nuscenes/manifest'
+import {
+  buildNuScenesDatabase,
+  loadNuScenesSceneMetadata,
+  type NuScenesDatabase,
+} from '../adapters/nuscenes/metadata'
+import type { NuScenesFrameDescriptor } from '../workers/nuScenesLidarWorker'
+import type {
+  NuScenesCameraFrameDescriptor,
+  NuScenesCameraImageDescriptor,
+} from '../workers/nuScenesCameraWorker'
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 
@@ -206,6 +218,13 @@ const internal = {
   filesBySegment: null as Map<string, Map<string, File>> | null,
   /** Blob URLs created for workers — revoke on reset to free memory */
   blobUrls: [] as string[],
+  // -- nuScenes-specific state (persists across scene switches, like filesBySegment) --
+  /** Active dataset type */
+  datasetId: 'waymo' as string,
+  /** Parsed nuScenes database (built once from JSON, reused across scene switches) */
+  nuScenesDb: null as NuScenesDatabase | null,
+  /** nuScenes sample data files keyed by relative path (e.g. "samples/LIDAR_TOP/xxx.pcd.bin") */
+  nuScenesSampleFiles: null as Map<string, File> | null,
 }
 
 function resetInternal() {
@@ -275,10 +294,12 @@ function cacheRowGroupFrames(
     const cameraBoxes = internal.cameraBoxByFrame.get(timestamp) ?? []
     const poseRows = internal.vehiclePoseByFrame.get(timestamp)
     const poseCol = getManifest().columnMap.vehiclePose
-    const rawPose = (poseRows?.[0]?.[poseCol] as number[]) ?? null
+    // For Waymo: read pose from Parquet column. For nuScenes (empty poseCol): null.
+    const rawPose = poseCol ? (poseRows?.[0]?.[poseCol] as number[]) ?? null : null
+    // Waymo: multiply by worldOriginInverse. nuScenes: fall back to pre-computed poseByFrameIndex.
     const vehiclePose = rawPose && internal.worldOriginInverse
       ? multiplyRowMajor4x4(internal.worldOriginInverse, rawPose)
-      : rawPose
+      : rawPose ?? (internal.poseByFrameIndex.get(frameIndex) ?? null)
 
     const sensorClouds = new Map<number, PointCloud>()
     if (frame.sensorClouds) {
@@ -675,7 +696,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       actions.reset()
       set({ currentSegment: segmentId, ...savedSettings })
 
-      // File-based path (drag & drop / folder picker)
+      // nuScenes path — scene selection (database already built in loadFromFiles)
+      if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
+        setManifest(nuScenesManifest)
+        await loadNuScenesScene(segmentId, set, get)
+        return
+      }
+
+      // Waymo: file-based path (drag & drop / folder picker)
       if (internal.filesBySegment?.has(segmentId)) {
         const fileMap = internal.filesBySegment.get(segmentId)!
         // Pass File objects directly — workers can receive them via postMessage
@@ -684,7 +712,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      // URL-based path (Vite dev server)
+      // Waymo: URL-based path (Vite dev server)
       const components = [
         'vehicle_pose', 'lidar_calibration', 'camera_calibration',
         'lidar_box', 'camera_box', 'camera_to_lidar_box_association',
@@ -702,7 +730,46 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
-      // Store file references for later use by selectSegment
+      // Check for nuScenes sentinel key (produced by folder scanner)
+      if (segments.has('__nuscenes__')) {
+        const allFiles = segments.get('__nuscenes__')!
+
+        // Separate JSON metadata from sample data files
+        const jsonFiles = new Map<string, File>()
+        const sampleFiles = new Map<string, File>()
+        for (const [path, file] of allFiles) {
+          if (path.endsWith('.json')) {
+            jsonFiles.set(path, file)
+          } else {
+            sampleFiles.set(path, file)
+          }
+        }
+
+        // Initialize nuScenes state
+        internal.datasetId = 'nuscenes'
+        internal.nuScenesSampleFiles = sampleFiles
+        setManifest(nuScenesManifest)
+
+        // Build one-time database from JSON tables
+        set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
+        internal.nuScenesDb = await buildNuScenesDatabase(jsonFiles)
+
+        // Discover scenes as available "segments"
+        const sceneNames = internal.nuScenesDb.scenes.map(s => s.name).sort()
+        set({ availableSegments: sceneNames, loadProgress: 0.1 })
+
+        // Auto-select first scene
+        if (sceneNames.length > 0) {
+          await get().actions.selectSegment(sceneNames[0])
+        }
+        return
+      }
+
+      // Waymo path — store file references for later use by selectSegment
+      internal.datasetId = 'waymo'
+      internal.nuScenesDb = null
+      internal.nuScenesSampleFiles = null
+      setManifest(waymoManifest)
       internal.filesBySegment = segments
       const segmentIds = [...segments.keys()].sort()
       set({ availableSegments: segmentIds })
@@ -922,6 +989,245 @@ async function initCameraWorker(
     () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
   )
   const { numBatches } = await pool.init({ cameraUrl: cameraSource })
+
+  internal.cameraPool = pool
+  internal.cameraNumBatches = numBatches
+  useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+}
+
+// ---------------------------------------------------------------------------
+// nuScenes scene loading
+// ---------------------------------------------------------------------------
+
+/**
+ * Load a nuScenes scene — the nuScenes equivalent of loadDataset.
+ * Called from selectSegment when the active dataset is nuScenes.
+ */
+async function loadNuScenesScene(
+  sceneName: string,
+  set: (partial: Partial<SceneState>) => void,
+  get: () => SceneState,
+) {
+  if (!internal.nuScenesDb || !internal.nuScenesSampleFiles) {
+    throw new Error('nuScenes database not loaded')
+  }
+
+  set({
+    status: 'loading',
+    error: null,
+    loadProgress: 0,
+    loadStep: 'parsing' as LoadStep,
+    availableComponents: ['samples', 'v1.0-mini'],
+    cachedFrames: [],
+  })
+
+  try {
+    // 1. Find scene by name
+    const scene = internal.nuScenesDb.scenes.find(s => s.name === sceneName)
+    if (!scene) throw new Error(`Scene not found: ${sceneName}`)
+    memLog.snap('nuscenes:scene-start', { note: sceneName })
+
+    // 2. Load scene metadata → MetadataBundle
+    const bundle = loadNuScenesSceneMetadata(internal.nuScenesDb, scene.token)
+    set({ loadProgress: 0.2 })
+
+    // 3. Extract frame batch info BEFORE applying bundle
+    //    (vehiclePoseByFrame contains sensor file paths for nuScenes)
+    const { lidarBatches, cameraBatches } = buildNuScenesFrameBatches(bundle)
+
+    // 4. Apply metadata bundle to internal state
+    applyMetadataBundle(bundle, set, get)
+    set({ loadProgress: 0.3 })
+    memLog.snap('nuscenes:metadata-applied', {
+      note: `${bundle.timestamps.length} frames, ${lidarBatches.length} lidar batches, ${cameraBatches.length} camera batches`,
+    })
+
+    // 5. Init nuScenes workers in parallel
+    set({ loadStep: 'workers' as LoadStep })
+    await Promise.all([
+      initNuScenesLidarWorker(lidarBatches),
+      initNuScenesCameraWorker(cameraBatches),
+    ])
+    set({ loadProgress: 0.5 })
+    memLog.snap('nuscenes:workers-initialized')
+
+    // 6. Load first batches (LiDAR + Camera in parallel)
+    set({ loadStep: 'first-frame' as LoadStep })
+    const rgT0 = performance.now()
+    const firstFramePromises: Promise<void>[] = []
+    if (internal.workerPool?.isReady()) {
+      firstFramePromises.push(loadAndCacheRowGroup(0, set))
+      if (internal.numBatches > 1) {
+        firstFramePromises.push(loadAndCacheRowGroup(1, set))
+      }
+    }
+    if (internal.cameraPool?.isReady()) {
+      firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
+      if (internal.cameraNumBatches > 1) {
+        firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
+      }
+    }
+    await Promise.all(firstFramePromises)
+    const rgMs = performance.now() - rgT0
+    memLog.snap('nuscenes:first-batches-loaded', {
+      note: `${rgMs.toFixed(0)}ms`,
+    })
+
+    // 7. Show first frame
+    const firstFrame = internal.frameCache.get(0)
+    if (firstFrame) {
+      const camData = internal.cameraImageCache.get(0)
+      set({
+        currentFrameIndex: 0,
+        currentFrame: {
+          ...firstFrame,
+          cameraImages: camData ? new Map(camData) : new Map(),
+        },
+        lastFrameLoadMs: rgMs,
+        lastConvertMs: internal.lastConvertMs,
+      })
+    }
+
+    set({ status: 'ready', loadProgress: 1 })
+    memLog.snap('nuscenes:first-frame-rendered')
+    get().actions.play()
+
+    // 8. Prefetch remaining batches
+    if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
+      internal.prefetchStarted = true
+      prefetchAllRowGroups(set, get)
+    }
+    if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
+      internal.cameraPrefetchStarted = true
+      prefetchAllCameraRowGroups(set)
+    }
+  } catch (e) {
+    console.error('[loadNuScenesScene] Error:', e)
+    set({
+      status: 'error',
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}
+
+/** Number of frames per worker batch for nuScenes */
+const NUSCENES_BATCH_SIZE = 10
+
+/**
+ * Extract frame descriptors from nuScenes MetadataBundle and group into batches.
+ * Must be called BEFORE applyMetadataBundle (which moves data into internal state).
+ */
+function buildNuScenesFrameBatches(bundle: MetadataBundle) {
+  const lidarFrames: NuScenesFrameDescriptor[] = []
+  const cameraFrames: NuScenesCameraFrameDescriptor[] = []
+
+  for (let fi = 0; fi < bundle.timestamps.length; fi++) {
+    const ts = bundle.timestamps[fi]
+    const sensorFiles = bundle.vehiclePoseByFrame.get(ts) as Record<string, unknown>[] | undefined
+    if (!sensorFiles) continue
+
+    // LiDAR frame
+    const lidarFile = sensorFiles.find(sf => sf.modality === 'lidar')
+    if (lidarFile) {
+      lidarFrames.push({
+        timestamp: ts.toString(),
+        filename: lidarFile.filename as string,
+      })
+    }
+
+    // Camera frame (all cameras for this sample)
+    const camImages: NuScenesCameraImageDescriptor[] = []
+    for (const sf of sensorFiles) {
+      if (sf.modality === 'camera') {
+        camImages.push({
+          cameraId: sf.sensorId as number,
+          filename: sf.filename as string,
+        })
+      }
+    }
+    if (camImages.length > 0) {
+      cameraFrames.push({
+        timestamp: ts.toString(),
+        images: camImages,
+      })
+    }
+  }
+
+  // Group into batches
+  const lidarBatches: NuScenesFrameDescriptor[][] = []
+  for (let i = 0; i < lidarFrames.length; i += NUSCENES_BATCH_SIZE) {
+    lidarBatches.push(lidarFrames.slice(i, i + NUSCENES_BATCH_SIZE))
+  }
+
+  const cameraBatches: NuScenesCameraFrameDescriptor[][] = []
+  for (let i = 0; i < cameraFrames.length; i += NUSCENES_BATCH_SIZE) {
+    cameraBatches.push(cameraFrames.slice(i, i + NUSCENES_BATCH_SIZE))
+  }
+
+  return { lidarBatches, cameraBatches }
+}
+
+/** Init nuScenes LiDAR worker pool with pre-built frame batches + file entries. */
+async function initNuScenesLidarWorker(
+  batches: NuScenesFrameDescriptor[][],
+) {
+  if (!internal.nuScenesSampleFiles || batches.length === 0) return
+
+  // Collect only the files referenced by the batches
+  const neededFiles = new Set<string>()
+  for (const batch of batches) {
+    for (const frame of batch) {
+      neededFiles.add(frame.filename)
+    }
+  }
+  const fileEntries: [string, File][] = []
+  for (const filename of neededFiles) {
+    const file = internal.nuScenesSampleFiles.get(filename)
+    if (file) fileEntries.push([filename, file])
+  }
+
+  const pool = new WorkerPool(
+    WORKER_CONCURRENCY,
+    () => new Worker(new URL('../workers/nuScenesLidarWorker.ts', import.meta.url), { type: 'module' }),
+  )
+  const { numBatches } = await pool.init({
+    frameBatches: batches,
+    fileEntries,
+  })
+
+  internal.workerPool = pool
+  internal.numBatches = numBatches
+}
+
+/** Init nuScenes camera worker pool with pre-built frame batches + file entries. */
+async function initNuScenesCameraWorker(
+  batches: NuScenesCameraFrameDescriptor[][],
+) {
+  if (!internal.nuScenesSampleFiles || batches.length === 0) return
+
+  // Collect only the files referenced by the batches
+  const neededFiles = new Set<string>()
+  for (const batch of batches) {
+    for (const frame of batch) {
+      for (const img of frame.images) {
+        neededFiles.add(img.filename)
+      }
+    }
+  }
+  const fileEntries: [string, File][] = []
+  for (const filename of neededFiles) {
+    const file = internal.nuScenesSampleFiles.get(filename)
+    if (file) fileEntries.push([filename, file])
+  }
+
+  const pool = new WorkerPool(
+    2,
+    () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
+  )
+  const { numBatches } = await pool.init({
+    frameBatches: batches,
+    fileEntries,
+  })
 
   internal.cameraPool = pool
   internal.cameraNumBatches = numBatches

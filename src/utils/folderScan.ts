@@ -14,7 +14,7 @@
  * Returns: Map<segmentId, Map<component, File>>
  */
 
-import { getAllKnownComponents } from '../adapters/registry'
+import { getAllKnownComponents, detectDataset } from '../adapters/registry'
 
 // ---------------------------------------------------------------------------
 // FileSystemDirectoryHandle path (Chrome, Edge — best UX)
@@ -61,6 +61,12 @@ export async function scanDirectoryHandle(
 
   if (componentDirs.size === 0) return segments
 
+  // Detect dataset type — nuScenes requires different scanning strategy
+  const detectedManifest = detectDataset([...componentDirs.keys()])
+  if (detectedManifest?.id === 'nuscenes') {
+    return scanNuScenesDirectoryHandle(componentDirs)
+  }
+
   // Scan each component directory for .parquet files
   for (const [component, compDir] of componentDirs) {
     if (!getAllKnownComponents().has(component)) continue
@@ -79,6 +85,60 @@ export async function scanDirectoryHandle(
   }
 
   return segments
+}
+
+// ---------------------------------------------------------------------------
+// nuScenes-specific directory scanning
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan a nuScenes dataset root for JSON metadata + sample data files.
+ * Returns a single entry with sentinel key '__nuscenes__' containing all files.
+ *
+ * Structure expected:
+ *   {root}/
+ *   ├── v1.0-mini/  (or v1.0-trainval, v1.0-test)
+ *   │   ├── scene.json, sample.json, ...
+ *   ├── samples/
+ *   │   ├── LIDAR_TOP/xxx.pcd.bin
+ *   │   ├── CAM_FRONT/xxx.jpg
+ *   │   └── ...
+ */
+async function scanNuScenesDirectoryHandle(
+  componentDirs: Map<string, FileSystemDirectoryHandle>,
+): Promise<Map<string, Map<string, File>>> {
+  const allFiles = new Map<string, File>()
+
+  // Read JSON files from metadata directory (v1.0-mini, v1.0-trainval, v1.0-test)
+  const metaDirNames = ['v1.0-mini', 'v1.0-trainval', 'v1.0-test']
+  for (const name of metaDirNames) {
+    const dir = componentDirs.get(name)
+    if (!dir) continue
+    for await (const [fileName, handle] of dir as any) {
+      if ((handle as FileSystemHandle).kind === 'file' && fileName.endsWith('.json')) {
+        allFiles.set(fileName, await (handle as FileSystemFileHandle).getFile())
+      }
+    }
+    break // Only use the first metadata directory found
+  }
+
+  // Read sample data files recursively from samples/ (one level of sensor subdirectories)
+  const samplesDir = componentDirs.get('samples')
+  if (samplesDir) {
+    for await (const [sensorName, handle] of samplesDir as any) {
+      if ((handle as FileSystemHandle).kind !== 'directory') continue
+      const sensorDir = handle as FileSystemDirectoryHandle
+      for await (const [fileName, fileHandle] of sensorDir as any) {
+        if ((fileHandle as FileSystemHandle).kind !== 'file') continue
+        allFiles.set(
+          `samples/${sensorName}/${fileName}`,
+          await (fileHandle as FileSystemFileHandle).getFile(),
+        )
+      }
+    }
+  }
+
+  return new Map([['__nuscenes__', allFiles]])
 }
 
 // ---------------------------------------------------------------------------
