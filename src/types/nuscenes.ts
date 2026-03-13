@@ -109,7 +109,8 @@ export interface NuScenesSampleAnnotation {
   next: string
   num_lidar_pts: number
   num_radar_pts: number
-  category_name: string                       // e.g. "vehicle.car"
+  // Note: category_name is NOT on the raw JSON.
+  // Resolved via instance_token → instance → category_token → category.name
 }
 
 /** Object instance — links annotations across samples for tracking. */
