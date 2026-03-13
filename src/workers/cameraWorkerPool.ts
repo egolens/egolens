@@ -12,6 +12,8 @@ import type {
   CameraWorkerRowGroupResult,
   CameraWorkerReady,
 } from './cameraWorker'
+import { memLog } from '../utils/memoryLogger'
+import type { MemorySnapshot } from '../utils/memoryLogger'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,9 +84,16 @@ export class CameraWorkerPool {
 
       readyPromises.push(readyPromise)
 
+      const enableMemLog = typeof window !== 'undefined' && (
+        (window as Window).__WAYMO_MEMORY_LOG === true ||
+        localStorage.getItem('waymo-memory-log') === 'true'
+      )
+
       worker.postMessage({
         type: 'init',
         cameraUrl: opts.cameraUrl,
+        workerIndex: i,
+        enableMemLog,
       } satisfies CameraWorkerRequest)
     }
 
@@ -123,9 +132,16 @@ export class CameraWorkerPool {
 
       readyPromises.push(readyPromise)
 
+      const enableMemLog = typeof window !== 'undefined' && (
+        (window as Window).__WAYMO_MEMORY_LOG === true ||
+        localStorage.getItem('waymo-memory-log') === 'true'
+      )
+
       pw.worker.postMessage({
         type: 'init',
         cameraUrl: opts.cameraUrl,
+        workerIndex: i,
+        enableMemLog,
       } satisfies CameraWorkerRequest)
     }
 
@@ -197,9 +213,16 @@ export class CameraWorkerPool {
 
   private handleWorkerMessage(
     workerIndex: number,
-    e: MessageEvent<CameraWorkerResponse>,
+    e: MessageEvent<CameraWorkerResponse | { type: '__memorySnapshot'; snapshot: MemorySnapshot }>,
   ): void {
     const msg = e.data
+
+    // Forward worker memory snapshots to main thread logger
+    if (msg.type === '__memorySnapshot' && 'snapshot' in msg) {
+      memLog.addWorkerSnapshot(msg.snapshot)
+      return
+    }
+
     const pw = this.workers[workerIndex]
 
     if (msg.type === 'rowGroupReady' || msg.type === 'error') {

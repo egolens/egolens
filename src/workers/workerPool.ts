@@ -19,6 +19,8 @@ import type {
   DataWorkerReady,
 } from './dataWorker'
 import type { LidarCalibration } from '../utils/rangeImage'
+import { memLog } from '../utils/memoryLogger'
+import type { MemorySnapshot } from '../utils/memoryLogger'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,10 +97,18 @@ export class WorkerPool {
 
       readyPromises.push(readyPromise)
 
+      // Check if memory logging is enabled on main thread
+      const enableMemLog = typeof window !== 'undefined' && (
+        (window as Window).__WAYMO_MEMORY_LOG === true ||
+        localStorage.getItem('waymo-memory-log') === 'true'
+      )
+
       const initMsg: DataWorkerRequest = {
         type: 'init',
         lidarUrl: opts.lidarUrl,
         calibrationEntries: opts.calibrationEntries,
+        workerIndex: i,
+        enableMemLog,
       }
       worker.postMessage(initMsg)
     }
@@ -139,10 +149,17 @@ export class WorkerPool {
 
       readyPromises.push(readyPromise)
 
+      const enableMemLog = typeof window !== 'undefined' && (
+        (window as Window).__WAYMO_MEMORY_LOG === true ||
+        localStorage.getItem('waymo-memory-log') === 'true'
+      )
+
       const initMsg: DataWorkerRequest = {
         type: 'init',
         lidarUrl: opts.lidarUrl,
         calibrationEntries: opts.calibrationEntries,
+        workerIndex: i,
+        enableMemLog,
       }
       pw.worker.postMessage(initMsg)
     }
@@ -225,9 +242,16 @@ export class WorkerPool {
 
   private handleWorkerMessage(
     workerIndex: number,
-    e: MessageEvent<DataWorkerResponse>,
+    e: MessageEvent<DataWorkerResponse | { type: '__memorySnapshot'; snapshot: MemorySnapshot }>,
   ): void {
     const msg = e.data
+
+    // Forward worker memory snapshots to main thread logger
+    if (msg.type === '__memorySnapshot' && 'snapshot' in msg) {
+      memLog.addWorkerSnapshot(msg.snapshot)
+      return
+    }
+
     const pw = this.workers[workerIndex]
 
     if (msg.type === 'rowGroupReady' || msg.type === 'error') {

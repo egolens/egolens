@@ -41,6 +41,7 @@ import type {
 import { WorkerPool } from '../workers/workerPool'
 import { CameraWorkerPool } from '../workers/cameraWorkerPool'
 import type { SegmentMeta } from '../types/waymo'
+import { memLog } from '../utils/memoryLogger'
 
 // ---------------------------------------------------------------------------
 // Row-major 4×4 matrix helpers (for world-coordinate normalization)
@@ -340,6 +341,20 @@ function cacheRowGroupFrames(
     }
   }
 
+  // Measure how much memory the cached point clouds occupy
+  let rgBytes = 0
+  for (const frame of result.frames) {
+    if (frame.sensorClouds) {
+      for (const sc of frame.sensorClouds) {
+        rgBytes += sc.positions.buffer.byteLength
+      }
+    }
+  }
+  memLog.snap(`cache:lidar-rg${result.rowGroupIndex}`, {
+    dataSize: rgBytes,
+    note: `${result.frames.length} frames, ${internal.frameCache.size} total cached`,
+  })
+
   syncCachedFrames(set)
 }
 
@@ -361,6 +376,18 @@ function cacheCameraRowGroupFrames(
       camMap.set(img.cameraName, img.jpeg)
     }
   }
+
+  // Measure cached JPEG sizes
+  let jpegBytes = 0
+  for (const frame of result.frames) {
+    for (const img of frame.images) {
+      jpegBytes += img.jpeg.byteLength
+    }
+  }
+  memLog.snap(`cache:camera-rg${result.rowGroupIndex}`, {
+    dataSize: jpegBytes,
+    note: `${result.frames.length} frames, ${internal.cameraImageCache.size} total cached`,
+  })
 }
 
 /** Update the cachedFrames state for the buffer bar UI */
@@ -423,6 +450,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const totalSteps = sources.size + 2
         let completed = 0
 
+        memLog.snap('pipeline:start', { note: `${sources.size} components` })
+
         // 1. Open all Parquet files (footer only — lightweight, main thread OK)
         for (const [component, source] of sources) {
           try {
@@ -435,12 +464,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           completed++
           set({ loadProgress: completed / totalSteps })
         }
+        memLog.snap('phase1:footers-opened', { note: `${sources.size} parquet footers` })
 
         // 2. Load startup data (small files: poses, calibrations, boxes)
         set({ loadStep: 'parsing' as LoadStep })
         await loadStartupData(set, get)
         completed++
         set({ loadProgress: completed / totalSteps })
+        memLog.snap('phase2:startup-data-loaded', { note: 'poses, calibrations, boxes, associations' })
 
         // 3. Init LiDAR + Camera workers in parallel
         set({ loadStep: 'workers' as LoadStep })
@@ -450,6 +481,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         ])
         completed++
         set({ loadProgress: completed / totalSteps })
+        memLog.snap('phase3:workers-initialized', {
+          note: `${WORKER_CONCURRENCY} lidar + 2 camera workers`,
+        })
 
         // 4. Load first 2 row groups: LiDAR + Camera in parallel
         //    Loading 2 RGs prevents a stall at the RG boundary when autoplay starts.
@@ -480,6 +514,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
         await Promise.all(firstFramePromises)
         const rgMs = performance.now() - rgT0
+        memLog.snap('phase4:first-rgs-loaded', {
+          note: `2 lidar + 2 camera RGs in ${rgMs.toFixed(0)}ms`,
+        })
 
         // Show first frame with camera images ready
         const firstFrame = internal.frameCache.get(0)
@@ -497,6 +534,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
 
         set({ status: 'ready', loadProgress: 1 })
+        memLog.snap('phase5:first-frame-rendered', {
+          note: `${internal.frameCache.size} frames cached`,
+        })
         get().actions.play()
 
         // 5. Prefetch remaining row groups in background (LiDAR + Camera)
@@ -1086,6 +1126,22 @@ async function prefetchAllCameraRowGroups(
     )
   }
   await Promise.all(promises)
+
+  // Compute total cached JPEG sizes
+  let totalJpegBytes = 0
+  for (const camMap of internal.cameraImageCache.values()) {
+    for (const jpeg of camMap.values()) {
+      totalJpegBytes += jpeg.byteLength
+    }
+  }
+  memLog.snap('prefetch:camera-complete', {
+    dataSize: totalJpegBytes,
+    note: `${internal.cameraImageCache.size} frames × cameras cached`,
+  })
+
+  // Print full summary when everything is done
+  memLog.snap('pipeline:all-prefetch-complete')
+  memLog.printSummary()
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,6 +1172,18 @@ async function prefetchAllRowGroups(
   }
 
   await Promise.all(promises)
+
+  // Compute total cached sizes
+  let totalLidarBytes = 0
+  for (const frame of internal.frameCache.values()) {
+    for (const cloud of frame.sensorClouds.values()) {
+      totalLidarBytes += cloud.positions.buffer.byteLength
+    }
+  }
+  memLog.snap('prefetch:lidar-complete', {
+    dataSize: totalLidarBytes,
+    note: `${internal.frameCache.size} frames fully cached`,
+  })
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import CameraPanel from './components/CameraPanel/CameraPanel'
 import { colors, fonts, radius, gradients } from './theme'
 import { LOCATION_LABELS } from './types/waymo'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
+import MemoryOverlay from './components/MemoryOverlay'
 
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,9 @@ function App() {
       fontFamily: fonts.sans,
       overflow: 'hidden',
     }}>
+      {/* Memory debug overlay (enable: localStorage.setItem('waymo-memory-log','true') or press M) */}
+      <MemoryOverlay />
+
       {/* Header */}
       <Header />
 

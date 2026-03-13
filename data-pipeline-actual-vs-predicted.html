@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Analysis — Actual vs Predicted</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e8;
+    padding: 32px;
+    line-height: 1.6;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  h2 { font-size: 16px; font-weight: 600; color: #4ecdc4; margin: 32px 0 12px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 28px; }
+
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+  .card {
+    background: #111118; border: 1px solid #222; border-radius: 10px; padding: 14px;
+  }
+  .card .label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+  .card .val { font-size: 24px; font-weight: 700; }
+  .card .note { font-size: 11px; color: #555; margin-top: 2px; }
+  .card.bad .val { color: #ef4444; }
+  .card.ok .val { color: #10b981; }
+  .card.warn .val { color: #f59e0b; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th {
+    text-align: left; padding: 8px 10px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 1px; color: #666; border-bottom: 1px solid #333;
+  }
+  td { padding: 8px 10px; border-bottom: 1px solid #1a1a24; }
+  tr:hover td { background: #14141e; }
+  .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .red { color: #ef4444; }
+  .green { color: #10b981; }
+  .yellow { color: #f59e0b; }
+  .dim { color: #555; }
+
+  .insight {
+    background: #14141e; border-left: 3px solid; padding: 12px 16px;
+    border-radius: 0 8px 8px 0; margin: 12px 0; font-size: 13px;
+  }
+  .insight.critical { border-color: #ef4444; }
+  .insight.warn { border-color: #f59e0b; }
+  .insight.info { border-color: #4ecdc4; }
+  .insight.good { border-color: #10b981; }
+  .insight strong { color: #fff; }
+
+  .bar-chart { margin: 16px 0; }
+  .bar-row { display: flex; align-items: center; margin: 6px 0; }
+  .bar-label { width: 160px; font-size: 12px; color: #999; text-align: right; padding-right: 12px; }
+  .bar-track { flex: 1; height: 28px; background: #1a1a24; border-radius: 4px; position: relative; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px; font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.9); }
+  .bar-predicted { position: absolute; top: 0; height: 100%; border-right: 2px dashed #fff; opacity: 0.5; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; }
+  .tag-red { background: #3b1010; color: #ef4444; }
+  .tag-green { background: #0a2e1a; color: #10b981; }
+  .tag-yellow { background: #2e2a0a; color: #f59e0b; }
+
+  svg text { font-family: 'Inter', -apple-system, sans-serif; }
+  .code { font-family: monospace; background: #1a1a24; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Memory Analysis: 실측 vs 예측</h1>
+<p class="sub">실제 <code class="code">performance.memory</code> 측정 결과와 코드 분석 기반 예측 비교 · Segment: 10455472356147194054</p>
+
+<!-- ============================================================ -->
+<!-- Summary Cards -->
+<!-- ============================================================ -->
+<div class="cards">
+  <div class="card bad">
+    <div class="label">실측 Steady-State</div>
+    <div class="val">3.29 GB</div>
+    <div class="note">예측 890 MB → <strong style="color:#ef4444">3.7× 오차</strong></div>
+  </div>
+  <div class="card bad">
+    <div class="label">LiDAR Cache 실측</div>
+    <div class="val">2.87 GB</div>
+    <div class="note">예측 500 MB → <strong style="color:#ef4444">5.7× 오차</strong></div>
+  </div>
+  <div class="card ok">
+    <div class="label">Camera Cache 실측</div>
+    <div class="val">309.8 MB</div>
+    <div class="note">예측 300 MB → <strong style="color:#10b981">1.03×</strong></div>
+  </div>
+  <div class="card warn">
+    <div class="label">Buffer 낭비율</div>
+    <div class="val">73%</div>
+    <div class="note">유효 데이터 802 MB / 할당 2,959 MB</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Finding 1: The Big Surprise -->
+<!-- ============================================================ -->
+<h2>🔴 발견 1: subarray().buffer 가 2.16 GB를 낭비하고 있다</h2>
+
+<div class="insight critical">
+  <strong>핵심 원인:</strong> <code class="code">convertRangeImageToPointCloud()</code>에서
+  <code class="code">new Float32Array(maxPoints × POINT_STRIDE)</code>로 최대 크기를 할당한 후
+  <code class="code">output.subarray(0, pointCount × POINT_STRIDE)</code>로 유효 부분만 참조하지만,
+  <code class="code">cloud.positions.buffer</code>로 transfer할 때 <strong>전체 underlying ArrayBuffer가 전송</strong>된다.
+  빈 픽셀(range=0)이 차지하는 공간이 그대로 메모리에 남는다.
+</div>
+
+<div class="bar-chart">
+  <div class="bar-row">
+    <div class="bar-label">유효 데이터 (168K pts)</div>
+    <div class="bar-track">
+      <div class="bar-fill" style="width:27%; background:linear-gradient(135deg,#10b981,#059669)">
+        802 MB (27%)
+      </div>
+    </div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">빈 픽셀 (range=0)</div>
+    <div class="bar-track">
+      <div class="bar-fill" style="width:73%; background:linear-gradient(135deg,#ef4444,#dc2626)">
+        2,157 MB 낭비 (73%)
+      </div>
+    </div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label">전체 할당</div>
+    <div class="bar-track">
+      <div class="bar-fill" style="width:100%; background:linear-gradient(135deg,#333,#222)">
+        2,959 MB total (199 frames × 5 sensors × maxPoints buffer)
+      </div>
+    </div>
+  </div>
+</div>
+
+<table>
+  <tr><th>센서</th><th>Range Image</th><th>maxPoints</th><th>Buffer/frame</th><th>Valid pts (추정)</th><th>Valid/frame</th><th>낭비율</th></tr>
+  <tr>
+    <td>TOP (1)</td>
+    <td>64 × 2650</td>
+    <td class="v">169,600</td>
+    <td class="v red">3.88 MB</td>
+    <td class="v">~100K</td>
+    <td class="v green">2.29 MB</td>
+    <td class="v yellow">~41%</td>
+  </tr>
+  <tr>
+    <td>FRONT (2)</td>
+    <td colspan="2">~110K maxPoints *</td>
+    <td class="v red">2.52 MB</td>
+    <td class="v">~17K</td>
+    <td class="v green">0.39 MB</td>
+    <td class="v yellow">~85%</td>
+  </tr>
+  <tr>
+    <td>SIDE_LEFT (3)</td>
+    <td colspan="2">~110K maxPoints *</td>
+    <td class="v red">2.52 MB</td>
+    <td class="v">~17K</td>
+    <td class="v green">0.39 MB</td>
+    <td class="v yellow">~85%</td>
+  </tr>
+  <tr>
+    <td>SIDE_RIGHT (4)</td>
+    <td colspan="2">~110K maxPoints *</td>
+    <td class="v red">2.52 MB</td>
+    <td class="v">~17K</td>
+    <td class="v green">0.39 MB</td>
+    <td class="v yellow">~85%</td>
+  </tr>
+  <tr>
+    <td>REAR (5)</td>
+    <td colspan="2">~110K maxPoints *</td>
+    <td class="v red">2.52 MB</td>
+    <td class="v">~17K</td>
+    <td class="v green">0.39 MB</td>
+    <td class="v yellow">~85%</td>
+  </tr>
+  <tr style="background:#14141e; font-weight:700">
+    <td colspan="3">합계 (per frame)</td>
+    <td class="v red">~14.0 MB</td>
+    <td></td>
+    <td class="v green">~3.85 MB</td>
+    <td class="v yellow">73%</td>
+  </tr>
+</table>
+<p style="font-size:11px; color:#555">* 비-TOP 센서의 정확한 shape은 실행 시 확인 필요. 실측 평균 2.65 MB/buffer에서 역산.</p>
+
+<div class="insight warn">
+  <strong>수정 방법 (1줄):</strong> <code class="code">rangeImage.ts</code>의 return 직전에 trimmed copy 생성:<br>
+  <code class="code">const trimmed = new Float32Array(output.buffer, 0, pointCount * POINT_STRIDE)</code> →
+  <code class="code">const trimmed = output.slice(0, pointCount * POINT_STRIDE)</code><br>
+  이렇게 하면 <strong>2.16 GB → 0</strong> 낭비 제거. Steady-state: 3.29 GB → ~1.1 GB 예상.
+</div>
+
+<!-- ============================================================ -->
+<!-- Finding 2: Worker performance.memory = 0 -->
+<!-- ============================================================ -->
+<h2>⚠️ 발견 2: Worker에서 performance.memory가 동작하지 않음</h2>
+
+<div class="insight warn">
+  <strong>모든 Worker 스냅샷이 0 B를 보고.</strong>
+  <code class="code">performance.memory</code>는 Chrome의 main thread 전용 API.
+  Web Worker에서는 <code class="code">undefined</code>를 반환하여 0으로 fallback된다.
+  Worker의 실제 메모리(BROTLI 해제 중 ~100-160 MB/worker)는 측정 불가.
+</div>
+
+<table>
+  <tr><th>대안</th><th>방법</th><th>정확도</th></tr>
+  <tr>
+    <td><strong>crossOriginIsolated + measureUserAgentSpecificMemory()</strong></td>
+    <td>COOP/COEP 헤더 설정 후 비동기 API 사용 (전체 프로세스 메모리)</td>
+    <td class="v green">높음 (Workers 포함)</td>
+  </tr>
+  <tr>
+    <td><strong>Chrome DevTools Performance Monitor</strong></td>
+    <td>DevTools → Performance Monitor → JS Heap Size</td>
+    <td class="v green">높음</td>
+  </tr>
+  <tr>
+    <td><strong>data size 역산</strong></td>
+    <td>Worker가 처리한 데이터 크기(이미 로깅됨)로 메모리 추정</td>
+    <td class="v yellow">중간</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- Finding 3: Timing analysis -->
+<!-- ============================================================ -->
+<h2>🟢 발견 3: 타이밍 프로파일 정확성</h2>
+
+<table>
+  <tr><th>Phase</th><th>Heap Used</th><th>Delta</th><th>실측 시간</th><th>분석</th></tr>
+  <tr>
+    <td>pipeline:start</td>
+    <td class="v">3.37 GB *</td>
+    <td class="dim">—</td>
+    <td>0s</td>
+    <td>이전 세그먼트 잔여 데이터 (GC 전)</td>
+  </tr>
+  <tr>
+    <td>phase1:footers</td>
+    <td class="v">3.37 GB</td>
+    <td class="v dim">+0</td>
+    <td>~240ms</td>
+    <td class="green">예측 정확 — footer만 읽어 메모리 변화 없음</td>
+  </tr>
+  <tr>
+    <td>phase2:startup</td>
+    <td class="v">170 MB</td>
+    <td class="v green">−3.2 GB</td>
+    <td>~400ms</td>
+    <td>resetInternal() + GC가 이전 데이터 해제</td>
+  </tr>
+  <tr>
+    <td>phase3:workers</td>
+    <td class="v">158 MB</td>
+    <td class="v green">−12 MB</td>
+    <td>~100ms</td>
+    <td>Worker 생성은 main heap 영향 미미</td>
+  </tr>
+  <tr>
+    <td>cache:camera-rg0</td>
+    <td class="v">149 MB</td>
+    <td class="v dim">−9 MB</td>
+    <td>+377ms</td>
+    <td>Camera JPEG 79.3 MB 수신 — GC로 heap 감소?</td>
+  </tr>
+  <tr>
+    <td>cache:lidar-rg1</td>
+    <td class="v red">990 MB</td>
+    <td class="v red">+841 MB</td>
+    <td>+4.4s</td>
+    <td><strong>LiDAR RG 1개 = +761 MB buffer + overhead</strong></td>
+  </tr>
+  <tr>
+    <td>cache:lidar-rg0</td>
+    <td class="v red">1.71 GB</td>
+    <td class="v red">+720 MB</td>
+    <td>+4.7s</td>
+    <td>LiDAR RG 2번째 = 거의 동일한 증가</td>
+  </tr>
+  <tr>
+    <td>phase4 완료</td>
+    <td class="v">1.71 GB</td>
+    <td></td>
+    <td>4.7s</td>
+    <td>103 frames cached (52+51)</td>
+  </tr>
+  <tr>
+    <td>camera-rg2,3</td>
+    <td class="v">1.88 GB</td>
+    <td class="v yellow">+170 MB</td>
+    <td>+1s</td>
+    <td>나머지 Camera ~160 MB JPEG</td>
+  </tr>
+  <tr>
+    <td>lidar-rg3</td>
+    <td class="v red">2.54 GB</td>
+    <td class="v red">+660 MB</td>
+    <td>+4.9s</td>
+    <td>46 frames × 674 MB buffers</td>
+  </tr>
+  <tr>
+    <td>lidar-rg2</td>
+    <td class="v red">3.29 GB</td>
+    <td class="v red">+750 MB</td>
+    <td>+5.7s</td>
+    <td>52 frames × 761 MB buffers</td>
+  </tr>
+  <tr style="background:#14141e; font-weight:700">
+    <td>최종 Steady</td>
+    <td class="v red">3.29 GB</td>
+    <td></td>
+    <td>~15s total</td>
+    <td>199 frames 전부 캐시 완료</td>
+  </tr>
+</table>
+
+<p style="font-size:11px; color:#555; margin-top:4px">
+  * pipeline:start의 3.37 GB는 이전 세그먼트 잔여. phase2에서 GC 후 170 MB로 정상화.
+</p>
+
+<!-- ============================================================ -->
+<!-- Finding 4: Accurate predictions -->
+<!-- ============================================================ -->
+<h2>✅ 예측이 정확했던 부분</h2>
+
+<table>
+  <tr><th>항목</th><th>예측</th><th>실측</th><th>오차</th></tr>
+  <tr>
+    <td>Camera JPEG 전체</td>
+    <td class="v">~300 MB</td>
+    <td class="v">309.8 MB</td>
+    <td class="v green">+3% ✓</td>
+  </tr>
+  <tr>
+    <td>Phase 1 메모리 영향</td>
+    <td class="v">~0 (footer only)</td>
+    <td class="v">+0 MB</td>
+    <td class="v green">정확 ✓</td>
+  </tr>
+  <tr>
+    <td>Phase 2 startup data</td>
+    <td class="v">~17 MB</td>
+    <td class="v">~170 MB (GC중)</td>
+    <td class="v yellow">heap 전체 측정이라 GC 타이밍에 의존</td>
+  </tr>
+  <tr>
+    <td>Worker 초기화 영향</td>
+    <td class="v">main에 미미</td>
+    <td class="v">−12 MB</td>
+    <td class="v green">정확 ✓ (Worker는 별도 heap)</td>
+  </tr>
+  <tr>
+    <td>파이프라인 병렬성</td>
+    <td class="v">LiDAR∥Camera 동시</td>
+    <td class="v">Camera 먼저 완료 (377ms vs 4.7s)</td>
+    <td class="v green">예측 맞음 ✓</td>
+  </tr>
+  <tr>
+    <td>Camera RG당 JPEG</td>
+    <td class="v">~80 MB</td>
+    <td class="v">79.3 / 80.0 / 79.5 / 71.0 MB</td>
+    <td class="v green">정확 ✓</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- Finding 5: What was wrong -->
+<!-- ============================================================ -->
+<h2>❌ 예측이 빗나간 부분</h2>
+
+<table>
+  <tr><th>항목</th><th>예측</th><th>실측</th><th>오차 배수</th><th>원인</th></tr>
+  <tr>
+    <td><strong>LiDAR frameCache</strong></td>
+    <td class="v">~500 MB</td>
+    <td class="v red">2,870 MB</td>
+    <td class="v red">5.7×</td>
+    <td>subarray().buffer가 전체 maxPoints 배열 전송</td>
+  </tr>
+  <tr>
+    <td><strong>Steady-state 전체</strong></td>
+    <td class="v">~890 MB</td>
+    <td class="v red">3,290 MB</td>
+    <td class="v red">3.7×</td>
+    <td>위 LiDAR 오차가 지배적</td>
+  </tr>
+  <tr>
+    <td><strong>Per-frame 크기</strong></td>
+    <td class="v">~4 MB</td>
+    <td class="v red">~14.7 MB</td>
+    <td class="v red">3.7×</td>
+    <td>유효 4 MB + 빈 픽셀 10.7 MB</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SVG: Actual Memory Timeline -->
+<!-- ============================================================ -->
+<h2>실측 기반 Memory Timeline</h2>
+
+<svg viewBox="0 0 900 300" style="width:100%; height:300px; background:#111118; border-radius:10px; border:1px solid #222; margin:12px 0">
+  <defs>
+    <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ef4444" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#ef4444" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Y axis -->
+  <text x="40" y="30" fill="#666" font-size="9" text-anchor="end">3.5 GB</text>
+  <text x="40" y="80" fill="#666" font-size="9" text-anchor="end">2.5 GB</text>
+  <text x="40" y="130" fill="#666" font-size="9" text-anchor="end">1.5 GB</text>
+  <text x="40" y="180" fill="#666" font-size="9" text-anchor="end">0.5 GB</text>
+  <text x="40" y="230" fill="#666" font-size="9" text-anchor="end">0</text>
+  <line x1="50" y1="25" x2="880" y2="25" stroke="#222" stroke-dasharray="3"/>
+  <line x1="50" y1="75" x2="880" y2="75" stroke="#222" stroke-dasharray="3"/>
+  <line x1="50" y1="125" x2="880" y2="125" stroke="#222" stroke-dasharray="3"/>
+  <line x1="50" y1="175" x2="880" y2="175" stroke="#222" stroke-dasharray="3"/>
+  <line x1="50" y1="225" x2="880" y2="225" stroke="#444"/>
+
+  <!-- X axis time -->
+  <text x="50" y="255" fill="#666" font-size="8">0s</text>
+  <text x="200" y="255" fill="#666" font-size="8">~1s</text>
+  <text x="380" y="255" fill="#666" font-size="8">~5s</text>
+  <text x="560" y="255" fill="#666" font-size="8">~10s</text>
+  <text x="800" y="255" fill="#666" font-size="8">~15s</text>
+
+  <!-- Actual memory path (scaled: 3.5GB = y:25, 0 = y:225) -->
+  <!-- 1px = ~0.0175 GB vertically, 1px ≈ 0.018s horizontally -->
+  <!-- Points: start(3.37GB), phase2(0.17), phase3(0.158), cam-rg0(0.149), lidar-rg1(0.99), lidar-rg0(1.71), cam-rg3(1.80), cam-rg2(1.88), lidar-rg3(2.54), lidar-rg2(3.29) -->
+  <path d="
+    M 50,29
+    L 80,29
+    L 100,194
+    L 130,197
+    L 200,199
+    L 380,80
+    L 410,55
+    L 420,55
+    L 440,52
+    L 560,48
+    L 700,42
+    L 780,31
+    L 850,21
+    L 880,21
+  " fill="url(#ag)"/>
+  <path d="
+    M 50,29
+    L 80,29
+    L 100,194
+    L 130,197
+    L 200,199
+    L 380,80
+    L 410,55
+    L 420,55
+    L 440,52
+    L 560,48
+    L 700,42
+    L 780,31
+    L 850,21
+    L 880,21
+  " fill="none" stroke="#ef4444" stroke-width="2"/>
+
+  <!-- Annotations -->
+  <circle cx="100" cy="194" r="3" fill="#10b981"/>
+  <text x="105" y="210" fill="#10b981" font-size="8" font-weight="600">resetInternal()</text>
+  <text x="105" y="220" fill="#888" font-size="7">170 MB (GC 후)</text>
+
+  <circle cx="380" cy="80" r="3" fill="#ef4444"/>
+  <text x="340" y="97" fill="#ef4444" font-size="8" font-weight="600">+lidar RG1</text>
+  <text x="340" y="107" fill="#888" font-size="7">990 MB (+761 MB buf)</text>
+
+  <circle cx="410" cy="55" r="3" fill="#ef4444"/>
+  <text x="420" y="70" fill="#ef4444" font-size="8" font-weight="600">+lidar RG0</text>
+  <text x="420" y="80" fill="#888" font-size="7">1.71 GB</text>
+
+  <circle cx="850" cy="21" r="4" fill="#ef4444"/>
+  <rect x="760" y="8" width="82" height="16" rx="3" fill="#1a1a24" stroke="#ef4444"/>
+  <text x="801" y="19" fill="#ef4444" font-size="9" font-weight="700" text-anchor="middle">3.29 GB</text>
+
+  <!-- "If fixed" projected line -->
+  <path d="
+    M 50,29 L 80,29 L 100,194 L 130,197 L 200,199
+    L 380,172 L 410,158 L 440,150 L 560,145 L 700,137 L 780,128 L 850,118 L 880,118
+  " fill="none" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3"/>
+
+  <rect x="770" y="106" width="100" height="16" rx="3" fill="#1a1a24" stroke="#10b981"/>
+  <text x="820" y="117" fill="#10b981" font-size="9" font-weight="700" text-anchor="middle">~1.1 GB (fixed)</text>
+
+  <!-- Legend -->
+  <circle cx="60" cy="275" r="3" fill="#ef4444"/>
+  <text x="67" y="278" fill="#999" font-size="9">실측 (현재)</text>
+  <line x1="150" y1="275" x2="170" y2="275" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="175" y="278" fill="#999" font-size="9">수정 후 예상 (slice 적용)</text>
+</svg>
+
+<!-- ============================================================ -->
+<!-- Fix Recommendation -->
+<!-- ============================================================ -->
+<h2>🛠 수정 제안: Float32Array.slice() — 2.16 GB 절약</h2>
+
+<div class="insight info">
+  <strong>rangeImage.ts</strong> 의 <code class="code">convertRangeImageToPointCloud()</code> 마지막 부분:<br><br>
+  현재 (subarray — buffer 공유):<br>
+  <code class="code" style="color:#ef4444">const positions = output.subarray(0, pointCount * POINT_STRIDE)</code><br><br>
+  수정 (slice — 독립 복사본):<br>
+  <code class="code" style="color:#10b981">const positions = output.slice(0, pointCount * POINT_STRIDE)</code><br><br>
+  <strong>효과:</strong> 유효 포인트만 포함한 새 Float32Array 생성. 원본 maxPoints 배열은 GC 대상이 됨.<br>
+  Worker 내부에서 잠시 두 배 메모리(원본 + 복사본)가 존재하지만, transfer 후 원본은 즉시 해제.<br>
+  <strong>예상 절감: 3.29 GB → ~1.1 GB</strong> (−2.16 GB, −66%)
+</div>
+
+<div style="margin-top:32px; color:#444; font-size:11px; text-align:center">
+  Measured with Chrome performance.memory API · --enable-precise-memory-info flag recommended for higher accuracy
+</div>
+
+</body>
+</html>

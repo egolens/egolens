@@ -22,6 +22,7 @@ import {
   type LidarCalibration,
   type RangeImage,
 } from '../utils/rangeImage'
+import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 
 // ---------------------------------------------------------------------------
 // Worker state
@@ -30,6 +31,9 @@ import {
 let lidarPf: WaymoParquetFile | null = null
 let lidarIndex: FrameRowIndex | null = null
 let calibrations = new Map<number, LidarCalibration>()
+
+/** Worker-local memory logger — posts snapshots to main thread */
+let wMem = createWorkerMemoryLogger('worker-lidar-?')
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -40,6 +44,10 @@ export interface DataWorkerInit {
   lidarUrl: string | File
   /** Serialized as [laserName, calibration][] since Map can't be postMessage'd */
   calibrationEntries: [number, LidarCalibration][]
+  /** Worker index for memory logging identification */
+  workerIndex?: number
+  /** Enable memory logging in this worker */
+  enableMemLog?: boolean
 }
 
 export interface DataWorkerLoadRowGroup {
@@ -127,9 +135,17 @@ async function processQueue() {
 async function handleMessage(msg: DataWorkerRequest) {
   try {
     if (msg.type === 'init') {
+      // Configure memory logger
+      const idx = msg.workerIndex ?? 0
+      wMem = createWorkerMemoryLogger(`worker-lidar-${idx}`)
+      if (msg.enableMemLog) wMem.setEnabled(true)
+
+      wMem.snap('init:start')
       lidarPf = await openParquetFile('lidar', msg.lidarUrl)
       lidarIndex = await buildHeavyFileFrameIndex(lidarPf)
       calibrations = new Map(msg.calibrationEntries)
+      wMem.snap('init:complete', { note: `${lidarPf.rowGroups.length} RGs` })
+
       post.postMessage({
         type: 'ready',
         numRowGroups: lidarPf.rowGroups.length,
@@ -143,9 +159,13 @@ async function handleMessage(msg: DataWorkerRequest) {
       }
 
       const t0 = performance.now()
+      wMem.snap(`rg${msg.rowGroupIndex}:fetch-start`)
 
       // 1. Read entire row group — one decompression pass
       const allRows = await readRowGroupRows(lidarPf, msg.rowGroupIndex, LIDAR_COLUMNS)
+      wMem.snap(`rg${msg.rowGroupIndex}:decompress-done`, {
+        note: `${allRows.length} rows decompressed`,
+      })
 
       // 2. Group rows by frame timestamp
       const frameGroups = new Map<bigint, typeof allRows>()
@@ -158,6 +178,10 @@ async function handleMessage(msg: DataWorkerRequest) {
         }
         group.push(row)
       }
+
+      wMem.snap(`rg${msg.rowGroupIndex}:convert-start`, {
+        note: `${frameGroups.size} frames to convert`,
+      })
 
       // 3. Convert each frame's range images → xyz point cloud
       const frames: FrameResult[] = []
@@ -193,6 +217,14 @@ async function handleMessage(msg: DataWorkerRequest) {
       }
 
       const totalMs = performance.now() - t0
+
+      // Calculate total transfer size
+      let xferBytes = 0
+      for (const buf of transferBuffers) xferBytes += buf.byteLength
+      wMem.snap(`rg${msg.rowGroupIndex}:complete`, {
+        dataSize: xferBytes,
+        note: `${frames.length} frames, ${totalMs.toFixed(0)}ms, transferring ${transferBuffers.length} buffers`,
+      })
 
       post.postMessage({
         type: 'rowGroupReady',

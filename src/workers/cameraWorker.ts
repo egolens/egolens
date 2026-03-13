@@ -16,12 +16,16 @@ import {
   readRowGroupRows,
   type WaymoParquetFile,
 } from '../utils/parquet'
+import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 
 // ---------------------------------------------------------------------------
 // Worker state
 // ---------------------------------------------------------------------------
 
 let cameraPf: WaymoParquetFile | null = null
+
+/** Worker-local memory logger */
+let wMem = createWorkerMemoryLogger('worker-cam-?')
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -30,6 +34,10 @@ let cameraPf: WaymoParquetFile | null = null
 export interface CameraWorkerInit {
   type: 'init'
   cameraUrl: string | File
+  /** Worker index for memory logging identification */
+  workerIndex?: number
+  /** Enable memory logging in this worker */
+  enableMemLog?: boolean
 }
 
 export interface CameraWorkerLoadRowGroup {
@@ -113,7 +121,14 @@ async function processQueue() {
 async function handleMessage(msg: CameraWorkerRequest) {
   try {
     if (msg.type === 'init') {
+      const idx = msg.workerIndex ?? 0
+      wMem = createWorkerMemoryLogger(`worker-cam-${idx}`)
+      if (msg.enableMemLog) wMem.setEnabled(true)
+
+      wMem.snap('init:start')
       cameraPf = await openParquetFile('camera_image', msg.cameraUrl)
+      wMem.snap('init:complete', { note: `${cameraPf.rowGroups.length} RGs` })
+
       post.postMessage({
         type: 'ready',
         numRowGroups: cameraPf.rowGroups.length,
@@ -127,9 +142,13 @@ async function handleMessage(msg: CameraWorkerRequest) {
       }
 
       const t0 = performance.now()
+      wMem.snap(`rg${msg.rowGroupIndex}:fetch-start`)
 
       // 1. Read entire row group (utf8:false → BYTE_ARRAY stays as Uint8Array, not string)
       const allRows = await readRowGroupRows(cameraPf, msg.rowGroupIndex, CAMERA_COLUMNS, { utf8: false })
+      wMem.snap(`rg${msg.rowGroupIndex}:decompress-done`, {
+        note: `${allRows.length} rows decompressed`,
+      })
 
       // 2. Group by frame timestamp
       const frameGroups = new Map<bigint, typeof allRows>()
@@ -178,6 +197,13 @@ async function handleMessage(msg: CameraWorkerRequest) {
       }
 
       const totalMs = performance.now() - t0
+
+      let xferBytes = 0
+      for (const buf of transferBuffers) xferBytes += buf.byteLength
+      wMem.snap(`rg${msg.rowGroupIndex}:complete`, {
+        dataSize: xferBytes,
+        note: `${frames.length} frames, ${totalMs.toFixed(0)}ms`,
+      })
 
       post.postMessage(
         {

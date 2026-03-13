@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waymo Perception Studio — Data Pipeline Memory Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e8;
+    padding: 32px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; color: #fff; }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+  .legend {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    margin-bottom: 24px; font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot {
+    width: 12px; height: 12px; border-radius: 3px;
+  }
+
+  /* Pipeline Container */
+  .pipeline {
+    position: relative;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Phase sections */
+  .phase {
+    margin-bottom: 40px;
+    border-left: 3px solid #333;
+    padding-left: 20px;
+    position: relative;
+  }
+  .phase::before {
+    content: '';
+    position: absolute;
+    left: -7px; top: 0;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: #555;
+    border: 2px solid #0a0a0f;
+  }
+  .phase.active::before { background: #4ecdc4; }
+  .phase-header {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .phase-num {
+    font-size: 11px; font-weight: 700;
+    color: #4ecdc4; text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  .phase-title {
+    font-size: 16px; font-weight: 600; color: #fff;
+  }
+  .phase-time {
+    font-size: 12px; color: #666;
+    margin-left: auto;
+  }
+
+  /* Parallel swim lanes */
+  .swim-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .swim-lane {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-height: 44px;
+  }
+  .lane-label {
+    width: 180px; min-width: 180px;
+    font-size: 11px; color: #999;
+    text-align: right; padding-right: 12px;
+    font-weight: 500;
+  }
+  .lane-bar-container {
+    flex: 1;
+    position: relative;
+    height: 36px;
+  }
+  .lane-bar {
+    position: absolute;
+    height: 36px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.9);
+    transition: opacity 0.2s;
+    cursor: default;
+    overflow: hidden;
+  }
+  .lane-bar:hover {
+    opacity: 0.85;
+    z-index: 10;
+  }
+  .lane-bar .mem-tag {
+    position: absolute;
+    right: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    background: rgba(0,0,0,0.4);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  /* Colors */
+  .c-fetch     { background: linear-gradient(135deg, #2d5aa0, #1e3d6f); }
+  .c-decomp    { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+  .c-parse     { background: linear-gradient(135deg, #f59e0b, #d97706); }
+  .c-convert   { background: linear-gradient(135deg, #ef4444, #dc2626); }
+  .c-cache     { background: linear-gradient(135deg, #10b981, #059669); }
+  .c-worker    { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+  .c-gpu       { background: linear-gradient(135deg, #f472b6, #ec4899); }
+
+  /* Memory chart */
+  .memory-chart {
+    margin-top: 40px;
+    background: #111118;
+    border-radius: 12px;
+    padding: 24px;
+    border: 1px solid #222;
+  }
+  .chart-title {
+    font-size: 15px; font-weight: 600; color: #fff;
+    margin-bottom: 16px;
+  }
+  .chart-svg {
+    width: 100%; height: 380px;
+  }
+
+  /* Memory table */
+  .mem-table {
+    margin-top: 24px;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .mem-table th {
+    text-align: left; padding: 8px 12px;
+    color: #888; font-weight: 600;
+    border-bottom: 1px solid #333;
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .mem-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #1a1a24;
+  }
+  .mem-table tr:hover td { background: #14141e; }
+  .mem-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mem-peak { color: #ef4444; }
+  .mem-retained { color: #10b981; }
+  .thread-tag {
+    display: inline-block;
+    font-size: 10px; font-weight: 700;
+    padding: 2px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .thread-main { background: #1e3a5f; color: #60a5fa; }
+  .thread-worker { background: #3b1764; color: #a78bfa; }
+  .thread-cam { background: #164e3a; color: #34d399; }
+
+  /* Parallel indicator */
+  .parallel-bracket {
+    border: 2px dashed #4ecdc4;
+    border-radius: 8px;
+    padding: 8px;
+    margin: 4px 0;
+    position: relative;
+  }
+  .parallel-label {
+    position: absolute;
+    top: -10px; left: 12px;
+    background: #0a0a0f;
+    padding: 0 6px;
+    font-size: 10px;
+    color: #4ecdc4;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .note {
+    background: #14141e;
+    border-left: 3px solid #4ecdc4;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #aaa;
+    margin: 8px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .note strong { color: #fff; }
+
+  /* Summary cards */
+  .summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .summary-card {
+    background: #111118;
+    border: 1px solid #222;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .summary-card .label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .summary-card .value { font-size: 28px; font-weight: 700; color: #fff; }
+  .summary-card .unit { font-size: 14px; color: #888; font-weight: 400; }
+  .summary-card.peak .value { color: #ef4444; }
+  .summary-card.final .value { color: #10b981; }
+</style>
+</head>
+<body>
+
+<h1>Waymo Perception Studio — Data Pipeline & Memory Map</h1>
+<p class="subtitle">세그먼트 1개 (199 frames) 로딩 시 메모리 사용량 분석 · 9 Parquet 파일 · 3 LiDAR Workers + 2 Camera Workers</p>
+
+<div class="summary-cards">
+  <div class="summary-card">
+    <div class="label">Compressed on Disk</div>
+    <div class="value">~502 <span class="unit">MB</span></div>
+  </div>
+  <div class="summary-card peak">
+    <div class="label">Peak Memory (All Threads)</div>
+    <div class="value">~1.38 <span class="unit">GB</span></div>
+  </div>
+  <div class="summary-card final">
+    <div class="label">Steady-State (Cached)</div>
+    <div class="value">~890 <span class="unit">MB</span></div>
+  </div>
+  <div class="summary-card">
+    <div class="label">Frames × Sensors</div>
+    <div class="value">199 <span class="unit">× 5</span></div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#2d5aa0"></div> Fetch / File I/O</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div> BROTLI Decompress</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Parse (Parquet→Objects)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> Spherical→Cartesian 변환</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div> Cache / Transfer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#06b6d4"></div> Worker Init</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f472b6"></div> Three.js / GPU Upload</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 1: Open Parquet Files -->
+<!-- ============================================================ -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-num">Phase 1</span>
+    <span class="phase-title">Open Parquet Files (Footer Only)</span>
+    <span class="phase-time">~50ms</span>
+  </div>
+  <div class="note">
+    <strong>9개 파일</strong> footer만 읽음 (Range Request). 데이터 본체 미로딩.
+    메모리 영향 최소 — 메타데이터만 (~50KB 총합).
+  </div>
+  <div class="swim-lanes">
+    <div class="swim-lane">
+      <div class="lane-label">Main Thread</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-fetch" style="left:0; width:85%">
+          9× openParquetFile() — footer parse only
+          <span class="mem-tag">~50 KB</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <br>
+  <table class="mem-table">
+    <tr><th>Component</th><th>File Size (Compressed)</th><th>Footer Read</th><th>Memory</th></tr>
+    <tr><td>vehicle_pose</td><td>~30 KB</td><td>~1 KB</td><td class="mem-val">~5 KB</td></tr>
+    <tr><td>lidar_calibration</td><td>~5 KB</td><td>~1 KB</td><td class="mem-val">~3 KB</td></tr>
+    <tr><td>camera_calibration</td><td>~9 KB</td><td>~1 KB</td><td class="mem-val">~4 KB</td></tr>
+    <tr><td>lidar_box</td><td>~1.9 MB</td><td>~2 KB</td><td class="mem-val">~8 KB</td></tr>
+    <tr><td>camera_box</td><td>~450 KB</td><td>~2 KB</td><td class="mem-val">~6 KB</td></tr>
+    <tr><td>camera_to_lidar_box_association</td><td>~26 KB</td><td>~1 KB</td><td class="mem-val">~3 KB</td></tr>
+    <tr><td>lidar</td><td>~170 MB</td><td>~4 KB</td><td class="mem-val">~10 KB</td></tr>
+    <tr><td>camera_image</td><td>~330 MB</td><td>~4 KB</td><td class="mem-val">~10 KB</td></tr>
+    <tr><td>stats</td><td>~24 KB</td><td>~1 KB</td><td class="mem-val">~3 KB</td></tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 2: Load Startup Data (Small Files) -->
+<!-- ============================================================ -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-num">Phase 2</span>
+    <span class="phase-title">loadStartupData() — Small Files Full Read</span>
+    <span class="phase-time">~200-400ms</span>
+  </div>
+  <div class="note">
+    <strong>순차적으로</strong> 7개 소형 파일을 readAllRows(). 각각 BROTLI 해제 → Parquet 파싱 → JS 객체.
+    lidar_box가 가장 큰 ~1.9MB compressed → 해제 시 ~8MB.
+  </div>
+  <div class="swim-lanes">
+    <div class="swim-lane">
+      <div class="lane-label">vehicle_pose</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-decomp" style="left:0; width:12%">
+          BROTLI
+          <span class="mem-tag">30KB→200KB</span>
+        </div>
+        <div class="lane-bar c-parse" style="left:13%; width:15%">
+          readAllRows → 199 rows + buildFrameIndex + poseByFrameIndex
+          <span class="mem-tag">~600 KB retained</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">lidar_calibration</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-decomp" style="left:29%; width:4%">
+          <span class="mem-tag">5KB→15KB</span>
+        </div>
+        <div class="lane-bar c-parse" style="left:34%; width:4%">
+          5 calibrations
+          <span class="mem-tag">~10 KB</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">camera_calibration</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-decomp" style="left:39%; width:4%">
+          <span class="mem-tag">9KB→25KB</span>
+        </div>
+        <div class="lane-bar c-parse" style="left:44%; width:4%">
+          5 calibrations
+          <span class="mem-tag">~15 KB</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">lidar_box ★</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-decomp" style="left:49%; width:12%">
+          BROTLI 1.9MB
+          <span class="mem-tag">→ ~8 MB</span>
+        </div>
+        <div class="lane-bar c-parse" style="left:62%; width:14%">
+          ~3000 boxes + trajectory index + groupIndexBy
+          <span class="mem-tag">~12 MB retained</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">camera_box</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-decomp" style="left:77%; width:6%">
+          450KB
+          <span class="mem-tag">→ ~2 MB</span>
+        </div>
+        <div class="lane-bar c-parse" style="left:84%; width:6%">
+          ~5000 boxes + groupIndexBy
+          <span class="mem-tag">~4 MB</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">association</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-parse" style="left:91%; width:4%">
+          cam↔laser maps
+          <span class="mem-tag">~200 KB</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">stats</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-parse" style="left:96%; width:3%">
+          1 row meta
+          <span class="mem-tag">~5 KB</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note" style="margin-top:12px">
+    <strong>Phase 2 종료 시 Main Thread 누적 메모리: ~17 MB</strong><br>
+    (vehicle_pose 600KB + lidar_box 12MB + camera_box 4MB + assoc 200KB + calibrations 25KB + stats 5KB)
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 3: Worker Pool Init -->
+<!-- ============================================================ -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-num">Phase 3</span>
+    <span class="phase-title">Worker Pool 초기화 (LiDAR ∥ Camera)</span>
+    <span class="phase-time">~100-300ms</span>
+  </div>
+  <div class="note">
+    <strong>병렬</strong>: 3 LiDAR Workers + 2 Camera Workers가 동시에 초기화됨.
+    각 Worker가 독립적으로 Parquet 파일을 open (footer 재파싱).
+    Worker 자체 메모리 오버헤드 + JS 엔진 복제.
+  </div>
+  <div class="parallel-bracket">
+    <span class="parallel-label">Promise.all — 병렬 실행</span>
+    <div class="swim-lanes" style="padding-top:8px">
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W1</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-worker" style="left:0; width:80%">
+            openParquetFile('lidar') + buildHeavyFileFrameIndex
+            <span class="mem-tag">~5 MB (Worker heap + metadata + key index)</span>
+          </div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W2</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-worker" style="left:0; width:80%">
+            openParquetFile('lidar') + buildHeavyFileFrameIndex
+            <span class="mem-tag">~5 MB</span>
+          </div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W3</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-worker" style="left:0; width:80%">
+            openParquetFile('lidar') + buildHeavyFileFrameIndex
+            <span class="mem-tag">~5 MB</span>
+          </div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-cam">Camera W1</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-worker" style="left:0; width:60%; background:linear-gradient(135deg,#059669,#047857)">
+            openParquetFile('camera_image')
+            <span class="mem-tag">~3 MB (Worker heap + metadata)</span>
+          </div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-cam">Camera W2</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-worker" style="left:0; width:60%; background:linear-gradient(135deg,#059669,#047857)">
+            openParquetFile('camera_image')
+            <span class="mem-tag">~3 MB</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note" style="margin-top:12px">
+    <strong>Phase 3 종료 시 전체 메모리: ~38 MB</strong><br>
+    Main: 17 MB + 3× LiDAR Worker: 15 MB + 2× Camera Worker: 6 MB
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 4: First 2 Row Groups (Blocking) -->
+<!-- ============================================================ -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-num">Phase 4</span>
+    <span class="phase-title">First 2 Row Groups — LiDAR + Camera (Blocking)</span>
+    <span class="phase-time">~800-1500ms</span>
+  </div>
+  <div class="note">
+    <strong>⚡ Peak Memory 도달 구간</strong>. LiDAR RG0+RG1과 Camera RG0+RG1이 동시에 처리됨.
+    각 LiDAR RG는 ~51 frames × 5 sensors = ~255 range images.
+    BROTLI 해제 시 compressed ~42MB → decompressed ~100MB per RG (일시적).
+  </div>
+
+  <div class="parallel-bracket">
+    <span class="parallel-label">Promise.all — LiDAR RG0, RG1 ∥ Camera RG0, RG1</span>
+    <div class="swim-lanes" style="padding-top:8px">
+
+      <!-- LiDAR RG0 on Worker 1 -->
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W1</span> RG0</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-fetch" style="left:0; width:10%">
+            fetch
+            <span class="mem-tag">~42 MB</span>
+          </div>
+          <div class="lane-bar c-decomp" style="left:11%; width:25%">
+            BROTLI decompress (~255 rows)
+            <span class="mem-tag">→ ~100 MB transient</span>
+          </div>
+          <div class="lane-bar c-parse" style="left:37%; width:10%">
+            parse rows
+            <span class="mem-tag">~60 MB</span>
+          </div>
+          <div class="lane-bar c-convert" style="left:48%; width:25%">
+            spherical→xyz (51 frames × 5 sensors)
+            <span class="mem-tag">~24 MB Float32</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:74%; width:10%">
+            transfer→main
+            <span class="mem-tag">→ 0 (transferred)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- LiDAR RG1 on Worker 2 -->
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W2</span> RG1</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-fetch" style="left:0; width:10%">
+            fetch
+            <span class="mem-tag">~42 MB</span>
+          </div>
+          <div class="lane-bar c-decomp" style="left:11%; width:25%">
+            BROTLI decompress
+            <span class="mem-tag">→ ~100 MB transient</span>
+          </div>
+          <div class="lane-bar c-parse" style="left:37%; width:10%">
+            parse
+            <span class="mem-tag">~60 MB</span>
+          </div>
+          <div class="lane-bar c-convert" style="left:48%; width:25%">
+            spherical→xyz
+            <span class="mem-tag">~24 MB Float32</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:74%; width:10%">
+            transfer
+            <span class="mem-tag">→ 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Camera RG0 on Camera Worker 1 -->
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-cam">Camera W1</span> RG0</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-fetch" style="left:0; width:12%; background:linear-gradient(135deg,#2d7a5a,#1e5a3f)">
+            fetch
+            <span class="mem-tag">~80 MB</span>
+          </div>
+          <div class="lane-bar c-decomp" style="left:13%; width:30%; background:linear-gradient(135deg,#059669,#047857)">
+            BROTLI → JPEG extract (50 frames × 5 cams)
+            <span class="mem-tag">~85 MB transient</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:44%; width:8%">
+            transfer JPEGs
+            <span class="mem-tag">→ 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Camera RG1 on Camera Worker 2 -->
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-cam">Camera W2</span> RG1</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-fetch" style="left:0; width:12%; background:linear-gradient(135deg,#2d7a5a,#1e5a3f)">
+            fetch
+            <span class="mem-tag">~80 MB</span>
+          </div>
+          <div class="lane-bar c-decomp" style="left:13%; width:30%; background:linear-gradient(135deg,#059669,#047857)">
+            BROTLI → JPEG extract
+            <span class="mem-tag">~85 MB transient</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:44%; width:8%">
+            transfer
+            <span class="mem-tag">→ 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main thread receiving -->
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-main">Main Thread</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-cache" style="left:74%; width:24%">
+            cacheRowGroupFrames + cacheCameraRowGroupFrames (frameCache + cameraImageCache)
+            <span class="mem-tag">+48 MB lidar + 160 MB JPEG → Main</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:12px; border-left-color:#ef4444">
+    <strong style="color:#ef4444">🔴 Peak Memory 발생 시점:</strong> LiDAR W1 + W2 동시 BROTLI 해제 + Camera W1 + W2 동시 해제 시<br>
+    <strong>Workers 일시 메모리:</strong> 2× LiDAR (~200 MB) + 2× Camera (~170 MB) = <strong>~370 MB transient</strong><br>
+    <strong>Main thread 기존:</strong> 38 MB + 수신 중 cached data ~100 MB<br>
+    <strong>→ Peak Total: ~1.38 GB</strong> (17 MB startup + 320 MB LiDAR workers + 330 MB Camera workers + 210 MB partial cache + 25 MB worker base)
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 5: First Frame Render -->
+<!-- ============================================================ -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-num">Phase 5</span>
+    <span class="phase-title">First Frame Render → GPU Upload</span>
+    <span class="phase-time">~16ms (1 frame)</span>
+  </div>
+  <div class="swim-lanes">
+    <div class="swim-lane">
+      <div class="lane-label"><span class="thread-tag thread-main">Main Thread</span></div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-gpu" style="left:0; width:40%">
+          frameCache.get(0) → set currentFrame
+          <span class="mem-tag">~240 KB (1 frame points ref)</span>
+        </div>
+        <div class="lane-bar c-gpu" style="left:42%; width:55%">
+          Three.js BufferGeometry upload → GPU (positions + colors)
+          <span class="mem-tag">~2 MB VRAM (168K pts × 12 bytes)</span>
+        </div>
+      </div>
+    </div>
+    <div class="swim-lane">
+      <div class="lane-label">Camera Images</div>
+      <div class="lane-bar-container">
+        <div class="lane-bar c-gpu" style="left:0; width:80%">
+          5× JPEG → &lt;img&gt; src=blob: → GPU texture
+          <span class="mem-tag">5× ~200KB JPEG ≈ 1 MB CPU + ~15 MB decoded VRAM</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note">
+    <strong>status = 'ready'</strong>, autoplay 시작. 화면에 첫 프레임 표시.
+    GPU VRAM ~17 MB 추가 (point cloud + 5 camera textures).
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PHASE 6: Background Prefetch -->
+<!-- ============================================================ -->
+<div class="phase active">
+  <div class="phase-header">
+    <span class="phase-num">Phase 6</span>
+    <span class="phase-title">Background Prefetch (RG2, RG3 — 나머지 ~100 frames)</span>
+    <span class="phase-time">~2-4s (background, non-blocking)</span>
+  </div>
+  <div class="note">
+    LiDAR: RG2, RG3를 WorkerPool(3) 큐에 dispatch (RG0,RG1 이미 완료).
+    Camera: RG2, RG3를 CameraPool(2) 큐에 dispatch.
+    Worker들이 idle 상태가 되면 순차적으로 처리. <strong>Main thread는 프리 — 60fps 렌더링 유지.</strong>
+  </div>
+
+  <div class="parallel-bracket">
+    <span class="parallel-label">Background — 렌더링과 병행</span>
+    <div class="swim-lanes" style="padding-top:8px">
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W1</span> RG2</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-decomp" style="left:0; width:35%">
+            BROTLI + parse + convert (~51 frames)
+            <span class="mem-tag">~100 MB transient → 24 MB cached</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:36%; width:5%">xfer</div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W2</span> RG3</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-decomp" style="left:0; width:35%">
+            BROTLI + parse + convert (~46 frames)
+            <span class="mem-tag">~100 MB transient → 22 MB cached</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:36%; width:5%">xfer</div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-cam">Camera W1</span> RG2</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-decomp" style="left:0; width:40%; background:linear-gradient(135deg,#059669,#047857)">
+            BROTLI → JPEG (~50 frames × 5 cams)
+            <span class="mem-tag">~85 MB transient → 80 MB JPEG cached</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:41%; width:5%">xfer</div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-cam">Camera W2</span> RG3</div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-decomp" style="left:0; width:40%; background:linear-gradient(135deg,#059669,#047857)">
+            BROTLI → JPEG (~49 frames × 5 cams)
+            <span class="mem-tag">~85 MB transient → 78 MB JPEG cached</span>
+          </div>
+          <div class="lane-bar c-cache" style="left:41%; width:5%">xfer</div>
+        </div>
+      </div>
+      <div class="swim-lane">
+        <div class="lane-label"><span class="thread-tag thread-main">Main Thread</span></div>
+        <div class="lane-bar-container">
+          <div class="lane-bar c-gpu" style="left:0; width:95%; background: linear-gradient(90deg, #f472b6 0%, #f472b6 50%, #10b981 50%, #10b981 100%)">
+            🎬 렌더링 중 (60fps) + 수신된 RG data를 frameCache/cameraImageCache에 적재
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Memory Timeline Chart (SVG) -->
+<!-- ============================================================ -->
+<div class="memory-chart">
+  <div class="chart-title">Memory Timeline — 전체 스레드 합산 (Main + 3 LiDAR Workers + 2 Camera Workers)</div>
+  <svg class="chart-svg" viewBox="0 0 1000 380" preserveAspectRatio="xMidYMid meet">
+    <!-- Grid -->
+    <defs>
+      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ef4444" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="#ef4444" stop-opacity="0.02"/>
+      </linearGradient>
+      <linearGradient id="steadyGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#10b981" stop-opacity="0.2"/>
+        <stop offset="100%" stop-color="#10b981" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+
+    <!-- Y axis labels -->
+    <text x="45" y="25" fill="#666" font-size="10" text-anchor="end">1.6 GB</text>
+    <text x="45" y="75" fill="#666" font-size="10" text-anchor="end">1.2 GB</text>
+    <text x="45" y="135" fill="#666" font-size="10" text-anchor="end">800 MB</text>
+    <text x="45" y="195" fill="#666" font-size="10" text-anchor="end">400 MB</text>
+    <text x="45" y="255" fill="#666" font-size="10" text-anchor="end">200 MB</text>
+    <text x="45" y="315" fill="#666" font-size="10" text-anchor="end">0 MB</text>
+
+    <!-- Grid lines -->
+    <line x1="55" y1="20" x2="980" y2="20" stroke="#222" stroke-dasharray="3"/>
+    <line x1="55" y1="70" x2="980" y2="70" stroke="#222" stroke-dasharray="3"/>
+    <line x1="55" y1="130" x2="980" y2="130" stroke="#222" stroke-dasharray="3"/>
+    <line x1="55" y1="190" x2="980" y2="190" stroke="#222" stroke-dasharray="3"/>
+    <line x1="55" y1="250" x2="980" y2="250" stroke="#222" stroke-dasharray="3"/>
+    <line x1="55" y1="310" x2="980" y2="310" stroke="#444"/>
+
+    <!-- X axis time labels -->
+    <text x="55" y="340" fill="#666" font-size="10">0s</text>
+    <text x="155" y="340" fill="#666" font-size="10">Phase 1</text>
+    <text x="255" y="340" fill="#666" font-size="10">Phase 2</text>
+    <text x="405" y="340" fill="#666" font-size="10">Phase 3</text>
+    <text x="530" y="340" fill="#666" font-size="10">Phase 4</text>
+    <text x="720" y="340" fill="#666" font-size="10">1st Frame</text>
+    <text x="830" y="340" fill="#666" font-size="10">Prefetch</text>
+    <text x="950" y="340" fill="#666" font-size="10">Steady</text>
+
+    <!-- Phase divider lines -->
+    <line x1="140" y1="15" x2="140" y2="315" stroke="#333" stroke-dasharray="2"/>
+    <line x1="240" y1="15" x2="240" y2="315" stroke="#333" stroke-dasharray="2"/>
+    <line x1="390" y1="15" x2="390" y2="315" stroke="#333" stroke-dasharray="2"/>
+    <line x1="500" y1="15" x2="500" y2="315" stroke="#333" stroke-dasharray="2"/>
+    <line x1="710" y1="15" x2="710" y2="315" stroke="#333" stroke-dasharray="2"/>
+    <line x1="810" y1="15" x2="810" y2="315" stroke="#333" stroke-dasharray="2"/>
+
+    <!-- Memory area (total across all threads) -->
+    <!-- Path: Phase1(~0.05) → Phase2(~17MB) → Phase3(~38) → Phase4 peak(~1570MB) → drop to ~720 steady -->
+    <path d="
+      M 55,310
+      L 140,309
+      L 240,307
+      L 390,303
+      L 500,300
+      L 560,200
+      L 610,80
+      L 650,22
+      L 680,50
+      L 710,100
+      L 750,130
+      L 810,135
+      L 870,155
+      L 920,170
+      L 960,175
+      L 980,177
+      L 980,310
+      Z
+    " fill="url(#areaGrad)"/>
+
+    <!-- Total memory line -->
+    <path d="
+      M 55,310
+      L 140,309
+      L 240,307
+      L 390,303
+      L 500,300
+      L 560,200
+      L 610,80
+      L 650,22
+      L 680,50
+      L 710,100
+      L 750,130
+      L 810,135
+      L 870,155
+      L 920,170
+      L 960,175
+      L 980,177
+    " fill="none" stroke="#ef4444" stroke-width="2.5"/>
+
+    <!-- Steady state (retained) line -->
+    <path d="
+      M 55,310
+      L 140,310
+      L 240,307
+      L 390,303
+      L 500,300
+      L 560,260
+      L 610,230
+      L 650,200
+      L 680,185
+      L 710,177
+      L 750,177
+      L 810,177
+      L 870,177
+      L 920,177
+      L 960,177
+      L 980,177
+    " fill="none" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3"/>
+
+    <!-- Peak annotation -->
+    <circle cx="650" cy="22" r="5" fill="#ef4444"/>
+    <line x1="650" y1="22" x2="690" y2="46" stroke="#ef4444" stroke-width="1"/>
+    <rect x="690" y="36" width="110" height="22" rx="4" fill="#1a1a24" stroke="#ef4444" stroke-width="1"/>
+    <text x="745" y="51" fill="#ef4444" font-size="11" font-weight="700" text-anchor="middle">Peak ~1.38 GB</text>
+
+    <!-- Steady annotation -->
+    <circle cx="960" cy="177" r="4" fill="#10b981"/>
+    <rect x="870" y="160" width="85" height="18" rx="3" fill="#1a1a24" stroke="#10b981" stroke-width="1"/>
+    <text x="912" y="173" fill="#10b981" font-size="10" font-weight="700" text-anchor="middle">Steady ~890MB</text>
+
+    <!-- Worker transient annotations -->
+    <rect x="520" y="60" width="90" height="16" rx="3" fill="#8b5cf630" stroke="#8b5cf6" stroke-width="1"/>
+    <text x="565" y="72" fill="#a78bfa" font-size="9" font-weight="600" text-anchor="middle">Workers transient</text>
+
+    <!-- Legend in chart -->
+    <circle cx="60" cy="360" r="4" fill="#ef4444"/>
+    <text x="68" y="364" fill="#999" font-size="10">Total (peak)</text>
+    <line x1="140" y1="360" x2="160" y2="360" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3"/>
+    <text x="165" y="364" fill="#999" font-size="10">Retained (steady state)</text>
+  </svg>
+</div>
+
+<!-- ============================================================ -->
+<!-- Detailed Memory Breakdown Table -->
+<!-- ============================================================ -->
+<div class="memory-chart" style="margin-top:24px">
+  <div class="chart-title">Steady-State Memory Breakdown (모든 199 frames 캐시 완료 후)</div>
+  <table class="mem-table">
+    <tr>
+      <th>Data Store</th>
+      <th>Thread</th>
+      <th>Items</th>
+      <th>Per-Item Size</th>
+      <th>Total Retained</th>
+      <th>Notes</th>
+    </tr>
+    <tr>
+      <td><strong>frameCache</strong><br>(LiDAR point clouds)</td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>199 frames × 5 sensors</td>
+      <td>~168K pts × 24B (POINT_STRIDE=6 × 4B) = <strong>~4 MB/frame</strong><br>
+        <em style="color:#888;font-size:11px">주의: subarray().buffer 전체 전송 — 할당 버퍼 &gt; 유효 데이터</em></td>
+      <td class="mem-val">~500 MB</td>
+      <td>Float32Array transferred from workers (zero-copy via Transferable). 실제 할당 = maxPoints × STRIDE (빈 픽셀 포함)</td>
+    </tr>
+    <tr>
+      <td><strong>cameraImageCache</strong><br>(JPEG blobs)</td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>199 frames × 5 cameras</td>
+      <td>~300 KB/image (JPEG compressed)</td>
+      <td class="mem-val">~300 MB</td>
+      <td>Raw JPEG ArrayBuffers — 330MB parquet에서 ~10% Parquet overhead 제외</td>
+    </tr>
+    <tr>
+      <td><strong>lidarBoxByFrame</strong><br>(3D bounding boxes)</td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>~3000 boxes (199 frames)</td>
+      <td>~4 KB/box (14 fields)</td>
+      <td class="mem-val">~12 MB</td>
+      <td>JS objects with center, size, heading, type, id</td>
+    </tr>
+    <tr>
+      <td><strong>cameraBoxByFrame</strong><br>(2D bounding boxes)</td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>~5000 boxes (199 frames)</td>
+      <td>~800 B/box</td>
+      <td class="mem-val">~4 MB</td>
+      <td>center_x, center_y, width, height, type per cam</td>
+    </tr>
+    <tr>
+      <td><strong>objectTrajectories</strong></td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>~100 unique objects</td>
+      <td>~199 entries × 40B</td>
+      <td class="mem-val">~0.8 MB</td>
+      <td>frameIndex, x, y, z, type per tracking point</td>
+    </tr>
+    <tr>
+      <td><strong>vehiclePoseByFrame</strong><br>+ poseByFrameIndex</td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>199 frames</td>
+      <td>16 floats × 8B = 128B</td>
+      <td class="mem-val">~0.6 MB</td>
+      <td>4×4 row-major transform matrices</td>
+    </tr>
+    <tr>
+      <td><strong>association maps</strong></td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>~3000 entries</td>
+      <td>~100B/entry</td>
+      <td class="mem-val">~0.3 MB</td>
+      <td>cam↔laser ID string maps</td>
+    </tr>
+    <tr>
+      <td><strong>Worker heap overhead</strong><br>(3 LiDAR + 2 Camera)</td>
+      <td><span class="thread-tag thread-worker">Workers</span></td>
+      <td>5 workers idle</td>
+      <td>~5-15 MB/worker (JS engine + modules)</td>
+      <td class="mem-val">~50 MB</td>
+      <td>Workers stay alive for segment switching</td>
+    </tr>
+    <tr>
+      <td><strong>Three.js / GPU refs</strong></td>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>1 active frame</td>
+      <td>BufferGeometry + textures</td>
+      <td class="mem-val">~20 MB</td>
+      <td>CPU-side refs; GPU VRAM separate (~17 MB)</td>
+    </tr>
+    <tr style="background:#14141e; font-weight:700">
+      <td colspan="4" style="text-align:right; color:#10b981">TOTAL STEADY-STATE →</td>
+      <td class="mem-val mem-retained" style="font-size:16px">~890 MB</td>
+      <td></td>
+    </tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- Peak Memory Detail -->
+<!-- ============================================================ -->
+<div class="memory-chart" style="margin-top:24px">
+  <div class="chart-title">Peak Memory Detail (Phase 4 — 2× LiDAR + 2× Camera RG 동시 처리 시)</div>
+  <table class="mem-table">
+    <tr>
+      <th>Location</th>
+      <th>What</th>
+      <th>Memory</th>
+      <th>Lifetime</th>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>Phase 2 retained (boxes, poses, calibrations, metadata)</td>
+      <td class="mem-val">~17 MB</td>
+      <td>Permanent</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-worker">LiDAR W1</span></td>
+      <td>RG0: fetch buffer (compressed) + BROTLI output + range image arrays</td>
+      <td class="mem-val mem-peak">~160 MB</td>
+      <td>Transient (GC after transfer)</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-worker">LiDAR W2</span></td>
+      <td>RG1: fetch buffer + BROTLI output + range image arrays</td>
+      <td class="mem-val mem-peak">~160 MB</td>
+      <td>Transient (GC after transfer)</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-worker">LiDAR W3</span></td>
+      <td>Idle (base heap only)</td>
+      <td class="mem-val">~5 MB</td>
+      <td>Permanent</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-cam">Camera W1</span></td>
+      <td>RG0: compressed fetch + BROTLI output (~50 frames × 5 imgs)</td>
+      <td class="mem-val mem-peak">~165 MB</td>
+      <td>Transient (GC after transfer)</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-cam">Camera W2</span></td>
+      <td>RG1: compressed fetch + BROTLI output</td>
+      <td class="mem-val mem-peak">~165 MB</td>
+      <td>Transient (GC after transfer)</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>frameCache (partially filled — RG0 data arriving)</td>
+      <td class="mem-val">~130 MB</td>
+      <td>Permanent (growing)</td>
+    </tr>
+    <tr>
+      <td><span class="thread-tag thread-main">Main</span></td>
+      <td>cameraImageCache (partially filled)</td>
+      <td class="mem-val">~80 MB</td>
+      <td>Permanent (growing)</td>
+    </tr>
+    <tr>
+      <td colspan="1"></td>
+      <td>Worker base overhead (5× JS engine + modules)</td>
+      <td class="mem-val">~25 MB</td>
+      <td>Permanent</td>
+    </tr>
+    <tr style="background:#14141e; font-weight:700">
+      <td colspan="2" style="text-align:right; color:#ef4444">PEAK TOTAL →</td>
+      <td class="mem-val mem-peak" style="font-size:16px">~1.38 GB</td>
+      <td style="color:#888">4개 Worker 동시 BROTLI 해제 시</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- Key Insights -->
+<!-- ============================================================ -->
+<div class="memory-chart" style="margin-top:24px">
+  <div class="chart-title">핵심 인사이트</div>
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:12px">
+    <div class="note" style="border-left-color:#ef4444">
+      <strong style="color:#ef4444">Peak의 ~35%는 일시적(transient)</strong><br>
+      BROTLI 해제 버퍼가 Workers에서 동시에 생성. GC 후 대부분 해제됨.
+      Peak ~1.38GB → Steady ~890MB로 ~490MB 차이.
+    </div>
+    <div class="note" style="border-left-color:#8b5cf6">
+      <strong style="color:#8b5cf6">LiDAR point cloud가 최대 retained 소비자</strong><br>
+      199 frames × 5 sensors × Float32Array(maxPoints×24B) = ~500MB (56%).
+      Camera JPEG: 199×5×~300KB = ~300MB (34%). subarray buffer 전체 전송 주의.
+    </div>
+    <div class="note" style="border-left-color:#f59e0b">
+      <strong style="color:#f59e0b">BROTLI 해제 비율 ~2.5×</strong><br>
+      LiDAR: 170MB compressed → ~420MB decompressed (전체 RG).
+      단일 RG (~42MB) → ~100MB. 해제 후 range image 파싱 추가.
+    </div>
+    <div class="note" style="border-left-color:#10b981">
+      <strong style="color:#10b981">Transferable로 zero-copy</strong><br>
+      Worker→Main 전송 시 Float32Array.buffer를 transfer하여
+      복사 없이 소유권 이전. Workers 측 메모리 즉시 해제.
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:32px; color:#555; font-size:11px; text-align:center">
+  Based on actual file sizes from waymo_data/ · Segment ~170MB LiDAR + ~330MB Camera · Generated 2026-03-13
+</div>
+
+</body>
+</html>

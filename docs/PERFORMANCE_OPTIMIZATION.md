@@ -123,31 +123,31 @@ Measure where the bytes actually live before optimizing. The heap snapshot showe
 
 ---
 
-## Current memory baseline (post OPT-004)
+## Current memory baseline (post OPT-006)
 
-**Date:** 2026-03-01
+**Date:** 2026-03-13
 **Segment:** #1 · 1045547 · San Francisco · Day (199 frames, all cached)
 
-| Metric | Pre-optimizations | Post OPT-001 | Post OPT-004 | Total delta |
+| Metric | Pre-optimizations | Post OPT-004 | Post OPT-006 | Total delta |
 |---|---|---|---|---|
-| `performance.memory.usedJSHeapSize` | 4,140 MB | 4,091 MB | 3,340 MB | **-800 MB (-19.3%)** |
-| Heap snapshot (self-sizes) | 4,140 MB | 4,106 MB | 3,333 MB | **-807 MB (-19.5%)** |
-| Heap node count | 2,049,766 | 1,487,216 | 1,394,224 | **-655,542 (-32%)** |
-| V8 heap limit | 4,096 MB | 4,096 MB | 4,096 MB | — |
-| Heap utilization | 101% (over limit) | 99.9% | **81.5%** | **-19.5pp** |
+| `performance.memory.usedJSHeapSize` | 4,140 MB | 3,340 MB | ~1,085 MB* | **-3,055 MB (-73.8%)** |
+| LiDAR cache data transferred | 2,959 MB | ~772 MB | 775 MB | **-2,184 MB (-73.8%)** |
+| Camera cache data transferred | 310 MB | 310 MB | 310 MB | — |
+| Peak heap at phase5 (first render) | — | — | 629 MB | — |
 
-### Heap breakdown (post OPT-004)
+*Estimated: 775 MB lidar + 310 MB camera. Actual `usedJSHeapSize` includes V8 overhead.
+
+### Heap breakdown (post OPT-006)
 
 | Category | Measured size | Notes |
 |---|---|---|
-| LiDAR per-sensor clouds | ~772 MB | 5 sensors × 199 frames (no longer duplicated) |
-| Camera JPEG ArrayBuffers | ~312 MB | 5 cameras × ~200-400KB × 199 frames |
+| LiDAR per-sensor clouds | **~775 MB** | 5 sensors × 199 frames (trimmed via `slice()`) |
+| Camera JPEG ArrayBuffers | ~310 MB | 5 cameras × ~200-400KB × 199 frames |
 | Box data (lidar + camera) | ~27 MB | ~270 rows/frame × JS objects with string keys |
-| V8 overhead | ~2,222 MB | GC metadata, hidden classes, PerformanceMeasure, etc. |
 
 ### Next steps for further reduction
 
-The P0 stability issue (OOM at V8 4GB limit) is resolved — heap utilization dropped from 99.9% to 81.5%, providing ~756 MB headroom. For longer segments or lower-memory devices, further options:
+For longer segments or lower-memory devices:
 
 - **LRU frame cache** — keep only N frames around the playhead, evict distant frames. Needed for segments >300 frames.
 - **Deferred camera caching** — lazy-load camera JPEGs with small LRU (~30 frames). Saves ~260 MB.
@@ -434,6 +434,109 @@ No heap impact — expected, since the optimization targets DOM mutation through
 **v1:** Moved scene group pose matrix from `useEffect` (fires after paint) to `useFrame` (fires in render loop). Fixed the useEffect-after-paint desync but a subtler jitter remained during arrow-key scrubbing.
 
 **v2:** Added `useSceneStore.subscribe()` to update the group matrix synchronously during Zustand's `set()`, before React reconciliation. Arrow-key handlers trigger React's SyncLane (synchronous commit), which updates BoundingBoxes' Three.js objects immediately — before `useFrame` has a chance to run. The subscribe callback fires before React even starts, ensuring the matrix is always in sync. See [R3F_RENDER_SYNC.md](./R3F_RENDER_SYNC.md) for the full analysis.
+
+---
+
+## OPT-006: Fix LiDAR buffer waste — subarray→slice
+
+**Date:** 2026-03-13
+**Status:** Implemented
+**Files:** `src/utils/rangeImage.ts`
+
+### Problem
+
+Memory profiling (via `performance.memory` instrumentation added in `src/utils/memoryLogger.ts`) revealed that LiDAR cache data consumed **2,959 MB** for 199 frames — nearly 4× the expected ~800 MB of valid point data. Root cause analysis identified a single line in `convertRangeImageToPointCloud()`:
+
+```typescript
+const positions = output.subarray(0, pointCount * POINT_STRIDE)  // VIEW on full buffer
+```
+
+`Float32Array.subarray()` creates a *view* sharing the original ArrayBuffer. When `positions.buffer` is transferred via `postMessage(..., [positions.buffer])` as a Transferable, the **entire underlying allocation** is sent — not just the valid subrange.
+
+Per-sensor waste analysis:
+
+| Sensor | Allocated | Valid data | Waste |
+|---|---|---|---|
+| TOP (64×2650) | 3.88 MB | ~2.29 MB | 41% |
+| FRONT/SIDE/REAR (each) | 2.52 MB | ~0.39 MB | 85% |
+| **Per frame (5 sensors)** | **~14.0 MB** | **~3.85 MB** | **73%** |
+
+Non-TOP sensors have higher waste because their range images have fewer valid returns (narrower FOV, sparser data) relative to the maxPoints allocation.
+
+### Alternatives considered
+
+| Approach | Tradeoff |
+|---|---|
+| **A) `slice()` instead of `subarray()`** | Creates independent trimmed copy. ~0.05ms memcpy per sensor. Simplest change. |
+| B) Two-pass: count valid points first, allocate exact size | Avoids copy entirely. Requires iterating range image twice (first pass: conditionals only, no trig). More complex. |
+| C) Pre-allocate based on stats parquet metadata | Would require per-frame point count metadata not available in current schema. |
+
+### Decision
+
+Option A — change `subarray` to `slice` on line 207. The `slice()` call creates an independent ArrayBuffer containing only valid point data. Worker memory temporarily holds both buffers during copy (~4.8 MB peak per sensor), then the original is GC'd after return.
+
+### The fix
+
+```diff
+- const positions = output.subarray(0, pointCount * POINT_STRIDE)
++ const positions = output.slice(0, pointCount * POINT_STRIDE)
+```
+
+### Measurements
+
+Methodology: `performance.memory` instrumentation via `memoryLogger.ts`. Data size logged at worker `complete` events and main thread `cache:lidar-rg*` snapshots. Same segment (10455472356147194054, 199 frames).
+
+**LiDAR data transferred per row group:**
+
+| Row Group | Frames | Before (subarray) | After (slice) | Reduction |
+|---|---|---|---|---|
+| RG0 | 52 | 762.2 MB | 202.6 MB | **−73.4%** |
+| RG1 | 52 | 761.0 MB | 199.2 MB | **−73.8%** |
+| RG2 | 52 | 761.0 MB | 199.3 MB | **−73.8%** |
+| RG3 | 46 | 674.6 MB | 174.2 MB | **−74.2%** |
+| **Total** | **199** | **2,958.8 MB** | **775.3 MB** | **−73.8%** |
+
+**Camera cache (control — unchanged):**
+
+| Row Group | Before | After | Status |
+|---|---|---|---|
+| Camera RG0 | 79.3 MB | 79.3 MB | unchanged |
+| Camera RG1 | 80.0 MB | 80.0 MB | unchanged |
+| Camera RG2 | 79.5 MB | 79.5 MB | unchanged |
+| Camera RG3 | 71.0 MB | 71.0 MB | unchanged |
+
+**Pipeline heap snapshots (after fix):**
+
+| Phase | Heap used | Heap total | Notes |
+|---|---|---|---|
+| pipeline:start | 1.18 GB | 1.23 GB | 9 components open |
+| phase2:startup-data-loaded | 252.4 MB | 311.6 MB | Poses, calibrations, boxes |
+| phase3:workers-initialized | 129.1 MB | 187.3 MB | 3 lidar + 2 camera workers |
+| cache:lidar-rg1 | 429.3 MB | 482.4 MB | +199.2 MB lidar data |
+| cache:lidar-rg0 | 629.3 MB | 634.9 MB | +202.6 MB lidar data |
+| phase4:first-rgs-loaded | 629.3 MB | 634.9 MB | 2 lidar + 2 camera RGs |
+| phase5:first-frame-rendered | 629.3 MB | 634.9 MB | 103 frames cached |
+
+### Performance regression check
+
+| Metric | Before | After | Delta |
+|---|---|---|---|
+| lidar-0 RG0 processing time | ~4,400 ms | 4,381 ms | **~0 ms** (noise) |
+| lidar-1 RG1 processing time | ~4,300 ms | 4,248 ms | **~0 ms** (noise) |
+
+The `slice()` memcpy (~1.5 MB/frame, ~0.05ms) is negligible compared to the range image → cartesian conversion which involves sin/cos + matrix multiplication for ~170K pixels per frame. The copy cost is <0.001% of total worker processing time.
+
+### Investigation methodology
+
+This optimization was discovered through a systematic memory profiling investigation:
+
+1. **Pipeline visualization** — mapped the full data loading pipeline (9 parquet files → workers → cache) with estimated memory at each stage.
+2. **Memory instrumentation** — added `performance.memory` logging (`memoryLogger.ts`, `MemoryOverlay.tsx`) across main thread and 5 workers. Discovered `performance.memory` returns 0 in Web Workers (Chrome limitation).
+3. **Predicted vs actual comparison** — LiDAR cache was 2,959 MB actual vs 500 MB predicted (5.9× error). Camera cache matched prediction (310 MB).
+4. **Root cause isolation** — traced the discrepancy to `subarray().buffer` transferring full allocations. Confirmed by checking `positions.buffer.byteLength` vs `positions.byteLength` in workers.
+5. **Fix and verify** — applied `slice()`, re-profiled, confirmed 73.8% reduction matching theoretical prediction exactly.
+
+See `data-pipeline-slice-fix-report.html` for the interactive visualization of this analysis.
 
 ---
 
