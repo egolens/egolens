@@ -42,24 +42,7 @@ import { memLog } from '../utils/memoryLogger'
 import { getManifest } from '../adapters/registry'
 import { loadWaymoMetadata } from '../adapters/waymo/metadata'
 
-// ---------------------------------------------------------------------------
-// Row-major 4×4 matrix helpers (for world-coordinate normalization)
-// ---------------------------------------------------------------------------
-
-/** Multiply two row-major 4×4 matrices: result = A * B */
-function multiplyRowMajor4x4(a: number[], b: number[]): number[] {
-  const r = new Array(16)
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < 4; j++) {
-      r[i * 4 + j] =
-        a[i * 4 + 0] * b[0 * 4 + j] +
-        a[i * 4 + 1] * b[1 * 4 + j] +
-        a[i * 4 + 2] * b[2 * 4 + j] +
-        a[i * 4 + 3] * b[3 * 4 + j]
-    }
-  }
-  return r
-}
+import { multiplyRowMajor4x4 } from '../utils/matrix'
 
 // ---------------------------------------------------------------------------
 // Types
