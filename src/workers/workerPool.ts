@@ -7,7 +7,7 @@
  * Usage:
  *   const pool = new WorkerPool<WaymoLidarInitPayload, LidarBatchResult>(
  *     4,
- *     () => new Worker(new URL('./dataWorker.ts', import.meta.url), { type: 'module' }),
+ *     () => new Worker(new URL('./waymoLidarWorker.ts', import.meta.url), { type: 'module' }),
  *   )
  *   await pool.init({ lidarUrl, calibrationEntries })
  *   const result = await pool.requestBatch(0)

@@ -1,7 +1,7 @@
 /**
  * Waymo Camera Worker — loads camera images from Parquet off the main thread.
  *
- * Similar to dataWorker but much simpler: no range-image conversion needed.
+ * Similar to waymoLidarWorker but much simpler: no range-image conversion needed.
  * Reads an entire row group (= 1 batch) at once (same BROTLI decompression
  * cost whether reading 5 rows or 256), yielding ~50 frames of camera images per pass.
  *

@@ -899,7 +899,7 @@ async function initDataWorker(
 
   const pool = new WorkerPool(
     WORKER_CONCURRENCY,
-    () => new Worker(new URL('../workers/dataWorker.ts', import.meta.url), { type: 'module' }),
+    () => new Worker(new URL('../workers/waymoLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
@@ -919,7 +919,7 @@ async function initCameraWorker(
 
   const pool = new WorkerPool(
     2,
-    () => new Worker(new URL('../workers/cameraWorker.ts', import.meta.url), { type: 'module' }),
+    () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
   )
   const { numBatches } = await pool.init({ cameraUrl: cameraSource })
 
