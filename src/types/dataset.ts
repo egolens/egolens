@@ -133,4 +133,24 @@ export interface DatasetManifest {
   cameraColors: Record<number, string>
   /** POV label shown when a camera is active (cameraId → short name) */
   cameraPovLabels: Record<number, string>
+
+  // -- Parquet column mapping -----------------------------------------------
+
+  /**
+   * Maps logical field names to actual Parquet column paths.
+   * The store and workers reference these keys instead of hard-coding
+   * dataset-specific column names like '[VehiclePoseComponent].world_from_vehicle.transform'.
+   */
+  columnMap: {
+    /** Frame timestamp key (used across all components) */
+    frameTimestamp: string
+    /** LiDAR sensor ID key */
+    laserName: string
+    /** Range image shape column */
+    rangeImageShape: string
+    /** Range image values column */
+    rangeImageValues: string
+    /** Vehicle pose (4×4 row-major transform) column */
+    vehiclePose: string
+  }
 }

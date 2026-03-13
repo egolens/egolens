@@ -67,4 +67,12 @@ export const waymoManifest: DatasetManifest = {
     4: 'SL',
     5: 'SR',
   },
+
+  columnMap: {
+    frameTimestamp: 'key.frame_timestamp_micros',
+    laserName: 'key.laser_name',
+    rangeImageShape: '[LiDARComponent].range_image_return1.shape',
+    rangeImageValues: '[LiDARComponent].range_image_return1.values',
+    vehiclePose: '[VehiclePoseComponent].world_from_vehicle.transform',
+  },
 }

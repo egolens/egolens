@@ -296,7 +296,8 @@ function cacheRowGroupFrames(
     const boxes = internal.lidarBoxByFrame.get(timestamp) ?? []
     const cameraBoxes = internal.cameraBoxByFrame.get(timestamp) ?? []
     const poseRows = internal.vehiclePoseByFrame.get(timestamp)
-    const rawPose = (poseRows?.[0]?.['[VehiclePoseComponent].world_from_vehicle.transform'] as number[]) ?? null
+    const poseCol = getManifest().columnMap.vehiclePose
+    const rawPose = (poseRows?.[0]?.[poseCol] as number[]) ?? null
     const vehiclePose = rawPose && internal.worldOriginInverse
       ? multiplyRowMajor4x4(internal.worldOriginInverse, rawPose)
       : rawPose
@@ -775,12 +776,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-const LIDAR_COLUMNS = [
-  'key.frame_timestamp_micros',
-  'key.laser_name',
-  '[LiDARComponent].range_image_return1.shape',
-  '[LiDARComponent].range_image_return1.values',
-]
+function getLidarColumns(): string[] {
+  const cm = getManifest().columnMap
+  return [cm.frameTimestamp, cm.laserName, cm.rangeImageShape, cm.rangeImageValues]
+}
 
 /** Load entire row group via Worker and cache all its frames. */
 async function loadAndCacheRowGroup(
@@ -816,19 +815,20 @@ async function loadFrameMainThread(
   const timestamp = internal.timestamps[frameIndex]
   if (timestamp === undefined) return null
 
+  const cm = getManifest().columnMap
   const lidarRows = await readFrameData(
     lidarPf,
     internal.lidarFrameIndex,
     timestamp,
-    LIDAR_COLUMNS,
+    getLidarColumns(),
   )
 
   const rangeImages = new Map<number, RangeImage>()
   for (const row of lidarRows) {
-    const laserName = row['key.laser_name'] as number
+    const laserName = row[cm.laserName] as number
     rangeImages.set(laserName, {
-      shape: row['[LiDARComponent].range_image_return1.shape'] as [number, number, number],
-      values: row['[LiDARComponent].range_image_return1.values'] as number[],
+      shape: row[cm.rangeImageShape] as [number, number, number],
+      values: row[cm.rangeImageValues] as number[],
     })
   }
 
@@ -839,7 +839,7 @@ async function loadFrameMainThread(
   const boxes = internal.lidarBoxByFrame.get(timestamp) ?? []
   const cameraBoxes = internal.cameraBoxByFrame.get(timestamp) ?? []
   const poseRows = internal.vehiclePoseByFrame.get(timestamp)
-  const vehiclePose = (poseRows?.[0]?.['[VehiclePoseComponent].world_from_vehicle.transform'] as number[]) ?? null
+  const vehiclePose = (poseRows?.[0]?.[cm.vehiclePose] as number[]) ?? null
 
   const frameData: FrameData = {
     timestamp,

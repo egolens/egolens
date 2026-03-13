@@ -28,6 +28,13 @@ function makeMockManifest(overrides: Partial<DatasetManifest> = {}): DatasetMani
     frameRate: 5,
     cameraColors: { 1: '#000' },
     cameraPovLabels: { 1: 'C' },
+    columnMap: {
+      frameTimestamp: 'ts',
+      laserName: 'sensor',
+      rangeImageShape: 'shape',
+      rangeImageValues: 'values',
+      vehiclePose: 'pose',
+    },
     ...overrides,
   }
 }
