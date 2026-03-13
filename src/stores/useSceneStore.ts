@@ -703,22 +703,27 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     selectSegment: async (segmentId: string) => {
-      const { actions, boxMode, trailLength, sweepCount, pointOpacity } = get()
-      actions.reset()
+      const prev = get()
+      prev.actions.reset()
 
-      // nuScenes path — scene selection (database already built in loadFromFiles)
+      // After reset, UI prefs are already preserved. Just set the segment.
+      // If the dataset type changed, visibleSensors IDs may be stale — validate them.
       if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
         setManifest(nuScenesManifest)
-        // Use nuScenes manifest sensors (not preserved from previous dataset)
-        const visibleSensors = new Set(getManifest().lidarSensors.map(s => s.id))
-        set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, sweepCount, pointOpacity })
+      }
+
+      // Validate preserved visibleSensors against current manifest's sensor IDs
+      const manifestIds = new Set(getManifest().lidarSensors.map(s => s.id))
+      const preserved = get().visibleSensors
+      const valid = new Set([...preserved].filter(id => manifestIds.has(id)))
+      // If nothing valid remains (e.g. dataset type switch), enable all sensors
+      const visibleSensors = valid.size > 0 ? valid : manifestIds
+      set({ currentSegment: segmentId, visibleSensors })
+
+      if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
         await loadNuScenesScene(segmentId, set, get)
         return
       }
-
-      // Waymo path — preserve visible sensors within same dataset
-      const visibleSensors = new Set(get().visibleSensors.size > 0 ? get().visibleSensors : getManifest().lidarSensors.map(s => s.id))
-      set({ currentSegment: segmentId, visibleSensors, boxMode, trailLength, sweepCount, pointOpacity })
 
       // Waymo: file-based path (drag & drop / folder picker)
       if (internal.filesBySegment?.has(segmentId)) {
@@ -798,7 +803,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     reset: () => {
-      get().actions.pause()
+      const prev = get()
+      prev.actions.pause()
       resetInternal()
       set({
         status: 'idle',
@@ -818,11 +824,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         cachedFrames: [],
         cameraLoadedCount: 0,
         cameraTotalCount: 0,
-        visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
-        boxMode: 'box' as BoxMode,
-        trailLength: 10,
-        pointOpacity: 0.85,
-        colormapMode: (getManifest().colormapModes?.[0] ?? 'intensity') as ColormapMode,
+        // Preserve user's UI preferences across segment switches
+        visibleSensors: prev.visibleSensors,
+        boxMode: prev.boxMode,
+        trailLength: prev.trailLength,
+        sweepCount: prev.sweepCount,
+        pointOpacity: prev.pointOpacity,
+        colormapMode: prev.colormapMode,
         hasBoxData: false,
         activeCam: null,
         hoveredCam: null,

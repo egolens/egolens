@@ -139,6 +139,8 @@ export interface DatasetManifest {
   colormapModes?: string[]
   /** Max number of LiDAR sweeps for accumulation (0 or undefined = no sweep support). nuScenes=9. */
   maxSweeps?: number
+  /** Intensity value range [min, max] for normalization. Waymo: [0,1], nuScenes: [0,255]. Default [0,1]. */
+  intensityRange?: [number, number]
   /** Per-sensor colormap for 3D frustum / UI accents (cameraId → color) */
   cameraColors: Record<number, string>
   /** POV label shown when a camera is active (cameraId → short name) */

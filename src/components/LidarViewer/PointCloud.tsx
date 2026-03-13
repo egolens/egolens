@@ -187,10 +187,14 @@ export default function PointCloud() {
     const radarColArr = radarColorAttr.array as Float32Array
     const stops = COLORMAP_STOPS[colormapMode]
     const attrOff = ATTR_OFFSET[colormapMode]
-    const [attrMin, attrMax] = ATTR_RANGE[colormapMode]
+    const manifest = getManifest()
+    // Intensity range differs per dataset (Waymo: 0–1, nuScenes: 0–255)
+    const [attrMin, attrMax] = colormapMode === 'intensity' && manifest.intensityRange
+      ? manifest.intensityRange
+      : ATTR_RANGE[colormapMode]
     const attrSpan = attrMax - attrMin
 
-    const stride = getManifest().pointStride
+    const stride = manifest.pointStride
 
     let lidarTotal = 0
     let radarTotal = 0
