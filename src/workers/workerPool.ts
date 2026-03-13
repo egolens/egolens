@@ -1,26 +1,19 @@
 /**
- * LiDAR Worker Pool — manages N workers for parallel batch loading.
+ * Generic Worker Pool — manages N workers for parallel batch loading.
  *
- * Each worker independently opens the same data source and can process
- * batches concurrently. A "batch" maps to a Parquet row group for Waymo
- * (~51 frames per batch) or a group of per-frame files for nuScenes.
+ * Dataset-agnostic: the pool doesn't know what kind of worker it manages.
+ * The caller provides a `workerFactory` function and an opaque init payload.
  *
  * Usage:
- *   const pool = new WorkerPool(4)
+ *   const pool = new WorkerPool<WaymoLidarInitPayload, LidarBatchResult>(
+ *     4,
+ *     () => new Worker(new URL('./dataWorker.ts', import.meta.url), { type: 'module' }),
+ *   )
  *   await pool.init({ lidarUrl, calibrationEntries })
- *   const result = await pool.requestBatch(0)  // dispatches to idle worker
+ *   const result = await pool.requestBatch(0)
  *   pool.terminate()
  */
 
-import type {
-  WaymoLidarWorkerRequest,
-  DataWorkerResponse,
-} from './dataWorker'
-import type {
-  LidarBatchResult,
-  LidarWorkerReady,
-} from './types'
-import type { LidarCalibration } from '../utils/rangeImage'
 import { memLog } from '../utils/memoryLogger'
 import type { MemorySnapshot } from '../utils/memoryLogger'
 
@@ -28,13 +21,16 @@ import type { MemorySnapshot } from '../utils/memoryLogger'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface WorkerPoolInitOptions {
-  lidarUrl: string | File
-  calibrationEntries: [number, LidarCalibration][]
+/** Response union that the pool can handle (ready | batchReady | error) */
+interface PoolWorkerResponse {
+  type: string
+  requestId?: number
+  numBatches?: number
+  message?: string
 }
 
-interface PendingRequest {
-  resolve: (result: LidarBatchResult) => void
+interface PendingRequest<TResult> {
+  resolve: (result: TResult) => void
   reject: (err: Error) => void
 }
 
@@ -48,50 +44,52 @@ interface PoolWorker {
 // WorkerPool
 // ---------------------------------------------------------------------------
 
-export class WorkerPool {
+export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<string, unknown>, TResult = unknown> {
   private workers: PoolWorker[] = []
-  private pendingRequests = new Map<number, PendingRequest>()
+  private pendingRequests = new Map<number, PendingRequest<TResult>>()
   private nextRequestId = 0
   private numBatches = 0
   /** Queue of batch requests waiting for an idle worker */
   private waitQueue: Array<{
     requestId: number
     batchIndex: number
-    resolve: (result: LidarBatchResult) => void
+    resolve: (result: TResult) => void
     reject: (err: Error) => void
   }> = []
 
   readonly concurrency: number
+  private workerFactory: () => Worker
 
-  constructor(concurrency: number) {
+  constructor(concurrency: number, workerFactory: () => Worker) {
     this.concurrency = concurrency
+    this.workerFactory = workerFactory
   }
 
   /**
    * Initialize all workers. Each opens the data source independently.
    * Resolves when ALL workers are ready.
+   *
+   * The pool adds `type: 'init'`, `workerIndex`, and `enableMemLog`
+   * to the provided payload before sending to each worker.
    */
-  async init(opts: WorkerPoolInitOptions): Promise<{ numBatches: number }> {
-    const readyPromises: Promise<LidarWorkerReady>[] = []
+  async init(payload: TInitPayload): Promise<{ numBatches: number }> {
+    const readyPromises: Promise<{ type: 'ready'; numBatches: number }>[] = []
 
     for (let i = 0; i < this.concurrency; i++) {
-      const worker = new Worker(
-        new URL('./dataWorker.ts', import.meta.url),
-        { type: 'module' },
-      )
+      const worker = this.workerFactory()
 
       const poolWorker: PoolWorker = { worker, busy: false, ready: false }
       this.workers.push(poolWorker)
 
-      const readyPromise = new Promise<LidarWorkerReady>((resolve, reject) => {
-        worker.onmessage = (e: MessageEvent<DataWorkerResponse>) => {
+      const readyPromise = new Promise<{ type: 'ready'; numBatches: number }>((resolve, reject) => {
+        worker.onmessage = (e: MessageEvent<PoolWorkerResponse>) => {
           if (e.data.type === 'ready') {
             poolWorker.ready = true
-            worker.onmessage = (ev: MessageEvent<DataWorkerResponse>) =>
+            worker.onmessage = (ev: MessageEvent<PoolWorkerResponse>) =>
               this.handleWorkerMessage(i, ev)
-            resolve(e.data)
+            resolve(e.data as { type: 'ready'; numBatches: number })
           } else if (e.data.type === 'error') {
-            reject(new Error(e.data.message))
+            reject(new Error(e.data.message ?? 'Worker init failed'))
           }
         }
         worker.onerror = (e) => reject(new Error(e.message))
@@ -105,14 +103,12 @@ export class WorkerPool {
         localStorage.getItem('waymo-memory-log') === 'true'
       )
 
-      const initMsg: WaymoLidarWorkerRequest = {
+      worker.postMessage({
+        ...payload,
         type: 'init',
-        lidarUrl: opts.lidarUrl,
-        calibrationEntries: opts.calibrationEntries,
         workerIndex: i,
         enableMemLog,
-      }
-      worker.postMessage(initMsg)
+      })
     }
 
     const results = await Promise.all(readyPromises)
@@ -124,27 +120,27 @@ export class WorkerPool {
    * Re-initialize existing workers with a new file (skip worker creation).
    * Much faster than terminate + init — reuses WASM modules.
    */
-  async reinit(opts: WorkerPoolInitOptions): Promise<{ numBatches: number }> {
+  async reinit(payload: TInitPayload): Promise<{ numBatches: number }> {
     // Reject in-flight and queued promises so callers don't hang
     this.rejectAllPending('Worker pool reinitialized')
     this.nextRequestId = 0
 
-    const readyPromises: Promise<LidarWorkerReady>[] = []
+    const readyPromises: Promise<{ type: 'ready'; numBatches: number }>[] = []
 
     for (let i = 0; i < this.workers.length; i++) {
       const pw = this.workers[i]
       pw.busy = false
       pw.ready = false
 
-      const readyPromise = new Promise<LidarWorkerReady>((resolve, reject) => {
-        pw.worker.onmessage = (e: MessageEvent<DataWorkerResponse>) => {
+      const readyPromise = new Promise<{ type: 'ready'; numBatches: number }>((resolve, reject) => {
+        pw.worker.onmessage = (e: MessageEvent<PoolWorkerResponse>) => {
           if (e.data.type === 'ready') {
             pw.ready = true
-            pw.worker.onmessage = (ev: MessageEvent<DataWorkerResponse>) =>
+            pw.worker.onmessage = (ev: MessageEvent<PoolWorkerResponse>) =>
               this.handleWorkerMessage(i, ev)
-            resolve(e.data)
+            resolve(e.data as { type: 'ready'; numBatches: number })
           } else if (e.data.type === 'error') {
-            reject(new Error(e.data.message))
+            reject(new Error(e.data.message ?? 'Worker reinit failed'))
           }
         }
       })
@@ -156,14 +152,12 @@ export class WorkerPool {
         localStorage.getItem('waymo-memory-log') === 'true'
       )
 
-      const initMsg: WaymoLidarWorkerRequest = {
+      pw.worker.postMessage({
+        ...payload,
         type: 'init',
-        lidarUrl: opts.lidarUrl,
-        calibrationEntries: opts.calibrationEntries,
         workerIndex: i,
         enableMemLog,
-      }
-      pw.worker.postMessage(initMsg)
+      })
     }
 
     const results = await Promise.all(readyPromises)
@@ -190,7 +184,7 @@ export class WorkerPool {
    * Request a batch to be loaded. Dispatches to an idle worker,
    * or queues the request if all workers are busy.
    */
-  requestBatch(batchIndex: number): Promise<LidarBatchResult> {
+  requestBatch(batchIndex: number): Promise<TResult> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
 
@@ -206,7 +200,7 @@ export class WorkerPool {
   }
 
   // Legacy alias
-  requestRowGroup(batchIndex: number): Promise<LidarBatchResult> {
+  requestRowGroup(batchIndex: number): Promise<TResult> {
     return this.requestBatch(batchIndex)
   }
 
@@ -240,7 +234,7 @@ export class WorkerPool {
     pw: PoolWorker,
     requestId: number,
     batchIndex: number,
-    resolve: (result: LidarBatchResult) => void,
+    resolve: (result: TResult) => void,
     reject: (err: Error) => void,
   ): void {
     pw.busy = true
@@ -249,12 +243,12 @@ export class WorkerPool {
       type: 'loadBatch',
       requestId,
       batchIndex,
-    } satisfies WaymoLidarWorkerRequest)
+    })
   }
 
   private handleWorkerMessage(
     workerIndex: number,
-    e: MessageEvent<DataWorkerResponse | { type: '__memorySnapshot'; snapshot: MemorySnapshot }>,
+    e: MessageEvent<PoolWorkerResponse | { type: '__memorySnapshot'; snapshot: MemorySnapshot }>,
   ): void {
     const msg = e.data
 
@@ -272,9 +266,9 @@ export class WorkerPool {
       if (pending) {
         this.pendingRequests.delete(rid!)
         if (msg.type === 'error') {
-          pending.reject(new Error(msg.message))
+          pending.reject(new Error(msg.message ?? 'Worker error'))
         } else {
-          pending.resolve(msg)
+          pending.resolve(msg as unknown as TResult)
         }
       }
 

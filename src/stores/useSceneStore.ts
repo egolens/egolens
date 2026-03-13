@@ -31,7 +31,6 @@ import {
 import type { LidarBatchResult } from '../workers/types'
 import type { CameraBatchResult } from '../workers/types'
 import { WorkerPool } from '../workers/workerPool'
-import { CameraWorkerPool } from '../workers/cameraWorkerPool'
 import type { SegmentMeta } from '../types/waymo'
 import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
@@ -182,7 +181,7 @@ const internal = {
   /** Track which lidar batches have been loaded or are in-flight */
   loadedRowGroups: new Set<number>(),
   /** Camera worker pool */
-  cameraPool: null as CameraWorkerPool | null,
+  cameraPool: null as WorkerPool | null,
   cameraNumBatches: 0,
   /** Track which camera batches have been loaded or are in-flight */
   cameraLoadedRowGroups: new Set<number>(),
@@ -898,7 +897,10 @@ async function initDataWorker(
   const lidarSource = sources.get('lidar')
   if (!lidarSource) return
 
-  const pool = new WorkerPool(WORKER_CONCURRENCY)
+  const pool = new WorkerPool(
+    WORKER_CONCURRENCY,
+    () => new Worker(new URL('../workers/dataWorker.ts', import.meta.url), { type: 'module' }),
+  )
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
@@ -915,7 +917,10 @@ async function initCameraWorker(
   const cameraSource = sources.get('camera_image')
   if (!cameraSource) return
 
-  const pool = new CameraWorkerPool(2)
+  const pool = new WorkerPool(
+    2,
+    () => new Worker(new URL('../workers/cameraWorker.ts', import.meta.url), { type: 'module' }),
+  )
   const { numBatches } = await pool.init({ cameraUrl: cameraSource })
 
   internal.cameraPool = pool

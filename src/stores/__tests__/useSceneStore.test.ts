@@ -31,18 +31,21 @@ vi.mock('../../workers/workerPool', () => {
       private calibrations = new Map<number, LidarCalibration>()
       private _numBatches = 0
 
-      constructor(public readonly concurrency: number) {}
+      constructor(public readonly concurrency: number, _workerFactory?: () => Worker) {}
 
-      async init(opts: {
-        lidarUrl: string | File | AsyncBuffer
-        calibrationEntries: [number, LidarCalibration][]
-      }) {
+      async init(opts: Record<string, unknown>) {
+        // Camera pool init — no fixtures, return 0 batches
+        if ('cameraUrl' in opts) {
+          return { numBatches: 0 }
+        }
+
+        // LiDAR pool init
         const { openParquetFile, buildHeavyFileFrameIndex, readRowGroupRows } =
           await import('../../utils/parquet')
         const { convertAllSensors } = await import('../../utils/rangeImage')
 
         // Store references for requestBatch
-        this.calibrations = new Map(opts.calibrationEntries)
+        this.calibrations = new Map(opts.calibrationEntries as [number, LidarCalibration][])
         this.pf = await openParquetFile('lidar', opts.lidarUrl as AsyncBuffer)
         const pfTyped = this.pf as Awaited<ReturnType<typeof openParquetFile>>
         this._numBatches = pfTyped.rowGroups.length
@@ -54,10 +57,7 @@ vi.mock('../../workers/workerPool', () => {
         return { numBatches: this._numBatches }
       }
 
-      async reinit(opts: {
-        lidarUrl: string | File | AsyncBuffer
-        calibrationEntries: [number, LidarCalibration][]
-      }) {
+      async reinit(opts: Record<string, unknown>) {
         return this.init(opts)
       }
 
@@ -146,28 +146,8 @@ vi.mock('../../workers/workerPool', () => {
   }
 })
 
-vi.mock('../../workers/cameraWorkerPool', () => {
-  return {
-    CameraWorkerPool: class MockCameraWorkerPool {
-      constructor(public readonly concurrency: number) {}
-      async init() {
-        // No camera fixtures → init "fails" gracefully by returning 0 batches
-        return { numBatches: 0 }
-      }
-      async reinit() { return { numBatches: 0 } }
-      getNumBatches() { return 0 }
-      getNumRowGroups() { return 0 }
-      isReady() { return false }
-      async requestBatch(): Promise<never> {
-        throw new Error('No camera data in test fixtures')
-      }
-      async requestRowGroup(): Promise<never> {
-        return this.requestBatch()
-      }
-      terminate() { /* no-op */ }
-    },
-  }
-})
+// CameraWorkerPool mock no longer needed — store uses generic WorkerPool for both
+// lidar and camera. The MockWorkerPool.init() detects camera payloads via 'cameraUrl' key.
 
 // ---------------------------------------------------------------------------
 // Imports (AFTER vi.mock calls — vitest hoists vi.mock automatically)
