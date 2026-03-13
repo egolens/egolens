@@ -13,6 +13,19 @@ export const waymoManifest: DatasetManifest = {
   id: 'waymo',
   name: 'Waymo Open Dataset',
 
+  // All Waymo v2 component directory names (accepted during folder scan)
+  knownComponents: [
+    'vehicle_pose', 'lidar_calibration', 'camera_calibration',
+    'lidar_box', 'lidar', 'camera_image', 'stats',
+    'lidar_pose', 'lidar_camera_projection', 'camera_box',
+    'projected_lidar_box', 'lidar_segmentation', 'camera_segmentation',
+    'lidar_hkp', 'camera_hkp', 'lidar_camera_synced_box',
+    'camera_to_lidar_box_association',
+  ],
+
+  // Minimum components needed to identify a folder as Waymo data
+  requiredComponents: ['vehicle_pose', 'lidar', 'camera_image'],
+
   lidarSensors: [
     { id: 1, label: 'TOP', color: colors.sensorTop },
     { id: 2, label: 'FRONT', color: colors.sensorFront },

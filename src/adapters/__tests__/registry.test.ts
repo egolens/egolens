@@ -4,14 +4,33 @@
  * Verifies:
  * - Registry defaults to Waymo manifest
  * - setManifest() / getManifest() correctly swap the active manifest
+ * - detectDataset() matches manifests by requiredComponents
+ * - getAllKnownComponents() aggregates across all manifests
  * - Waymo manifest structure is internally consistent
  * - Manifest contract (required fields, no duplicates, valid colors)
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { getManifest, setManifest } from '../registry'
+import { getManifest, setManifest, detectDataset, getAllKnownComponents } from '../registry'
 import { waymoManifest } from '../waymo/manifest'
 import type { DatasetManifest } from '../../types/dataset'
+
+/** Helper: create a minimal valid DatasetManifest for testing */
+function makeMockManifest(overrides: Partial<DatasetManifest> = {}): DatasetManifest {
+  return {
+    id: 'test-dataset',
+    name: 'Test Dataset',
+    knownComponents: ['comp_a', 'comp_b', 'comp_c'],
+    requiredComponents: ['comp_a', 'comp_b'],
+    lidarSensors: [{ id: 1, label: 'LIDAR', color: '#fff' }],
+    cameraSensors: [{ id: 1, label: 'CAM', color: '#000', width: 640, height: 480 }],
+    boxTypes: [{ id: 0, label: 'Unknown', color: '#888' }],
+    frameRate: 5,
+    cameraColors: { 1: '#000' },
+    cameraPovLabels: { 1: 'C' },
+    ...overrides,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Registry: getManifest / setManifest
@@ -29,31 +48,91 @@ describe('adapter registry', () => {
   })
 
   it('setManifest() swaps the active manifest', () => {
-    const mock: DatasetManifest = {
-      id: 'test-dataset',
-      name: 'Test Dataset',
-      lidarSensors: [{ id: 1, label: 'LIDAR', color: '#fff' }],
-      cameraSensors: [{ id: 1, label: 'CAM', color: '#000', width: 640, height: 480 }],
-      boxTypes: [{ id: 0, label: 'Unknown', color: '#888' }],
-      frameRate: 5,
-      cameraColors: { 1: '#000' },
-      cameraPovLabels: { 1: 'C' },
-    }
-
+    const mock = makeMockManifest()
     setManifest(mock)
     expect(getManifest()).toBe(mock)
     expect(getManifest().id).toBe('test-dataset')
   })
 
   it('setManifest() can be called multiple times', () => {
-    const m1: DatasetManifest = { ...waymoManifest, id: 'a', name: 'A' }
-    const m2: DatasetManifest = { ...waymoManifest, id: 'b', name: 'B' }
+    const m1 = makeMockManifest({ id: 'a', name: 'A' })
+    const m2 = makeMockManifest({ id: 'b', name: 'B' })
 
     setManifest(m1)
     expect(getManifest().id).toBe('a')
 
     setManifest(m2)
     expect(getManifest().id).toBe('b')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// detectDataset()
+// ---------------------------------------------------------------------------
+
+describe('detectDataset', () => {
+  it('detects Waymo from required components', () => {
+    const result = detectDataset(['vehicle_pose', 'lidar', 'camera_image', 'stats'])
+    expect(result).toBe(waymoManifest)
+  })
+
+  it('detects Waymo even with extra unknown dirs', () => {
+    const result = detectDataset(['vehicle_pose', 'lidar', 'camera_image', '.DS_Store', 'random_folder'])
+    expect(result).toBe(waymoManifest)
+  })
+
+  it('detects Waymo with only required components (no extras)', () => {
+    const result = detectDataset(['vehicle_pose', 'lidar', 'camera_image'])
+    expect(result).toBe(waymoManifest)
+  })
+
+  it('returns null when required components are missing', () => {
+    const result = detectDataset(['vehicle_pose', 'lidar'])
+    expect(result).toBeNull()
+  })
+
+  it('returns null for empty entry list', () => {
+    expect(detectDataset([])).toBeNull()
+  })
+
+  it('returns null for completely unrelated dirs', () => {
+    const result = detectDataset(['photos', 'documents', 'music'])
+    expect(result).toBeNull()
+  })
+
+  it('is case-sensitive (component names must match exactly)', () => {
+    const result = detectDataset(['Vehicle_Pose', 'Lidar', 'Camera_Image'])
+    expect(result).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getAllKnownComponents()
+// ---------------------------------------------------------------------------
+
+describe('getAllKnownComponents', () => {
+  it('returns a Set', () => {
+    const result = getAllKnownComponents()
+    expect(result).toBeInstanceOf(Set)
+  })
+
+  it('includes all Waymo required components', () => {
+    const known = getAllKnownComponents()
+    for (const c of waymoManifest.requiredComponents) {
+      expect(known.has(c)).toBe(true)
+    }
+  })
+
+  it('includes all Waymo known components', () => {
+    const known = getAllKnownComponents()
+    for (const c of waymoManifest.knownComponents) {
+      expect(known.has(c)).toBe(true)
+    }
+  })
+
+  it('does not include random strings', () => {
+    const known = getAllKnownComponents()
+    expect(known.has('random_not_a_component')).toBe(false)
   })
 })
 
@@ -81,6 +160,27 @@ describe('waymoManifest', () => {
 
   it('has frameRate of 10 Hz', () => {
     expect(waymoManifest.frameRate).toBe(10)
+  })
+
+  // knownComponents / requiredComponents
+  it('requiredComponents is a subset of knownComponents', () => {
+    const known = new Set(waymoManifest.knownComponents)
+    for (const c of waymoManifest.requiredComponents) {
+      expect(known.has(c)).toBe(true)
+    }
+  })
+
+  it('has non-empty knownComponents', () => {
+    expect(waymoManifest.knownComponents.length).toBeGreaterThan(0)
+  })
+
+  it('has non-empty requiredComponents', () => {
+    expect(waymoManifest.requiredComponents.length).toBeGreaterThan(0)
+  })
+
+  it('knownComponents has no duplicates', () => {
+    const unique = new Set(waymoManifest.knownComponents)
+    expect(unique.size).toBe(waymoManifest.knownComponents.length)
   })
 
   // Uniqueness checks
@@ -191,10 +291,18 @@ describe('manifest contract validation', () => {
     expect(m.id.length).toBeGreaterThan(0)
     expect(m.name).toBeTypeOf('string')
     expect(m.name.length).toBeGreaterThan(0)
+    expect(m.knownComponents.length).toBeGreaterThan(0)
+    expect(m.requiredComponents.length).toBeGreaterThan(0)
     expect(m.lidarSensors.length).toBeGreaterThan(0)
     expect(m.cameraSensors.length).toBeGreaterThan(0)
     expect(m.boxTypes.length).toBeGreaterThan(0)
     expect(m.frameRate).toBeGreaterThan(0)
+
+    // requiredComponents must be subset of knownComponents
+    const known = new Set(m.knownComponents)
+    for (const c of m.requiredComponents) {
+      expect(known.has(c)).toBe(true)
+    }
 
     // All camera ids have colors and labels
     for (const cam of m.cameraSensors) {
@@ -205,5 +313,9 @@ describe('manifest contract validation', () => {
 
   it('waymoManifest passes contract validation', () => {
     validateManifest(waymoManifest)
+  })
+
+  it('mock manifest passes contract validation', () => {
+    validateManifest(makeMockManifest())
   })
 })

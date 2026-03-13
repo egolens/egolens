@@ -2,9 +2,11 @@
  * Folder scanning for drag & drop / folder picker.
  *
  * Accepts a dropped folder or FileSystemDirectoryHandle and discovers
- * Waymo Open Dataset segments by scanning for the expected structure:
+ * dataset segments by scanning for component subdirectories defined in
+ * registered dataset manifests (via `getAllKnownComponents()`).
  *
- *   waymo_data/
+ * Expected structure (e.g. Waymo):
+ *   {root}/
  *   ├── vehicle_pose/{segment_id}.parquet
  *   ├── lidar/{segment_id}.parquet
  *   └── ...
@@ -12,16 +14,7 @@
  * Returns: Map<segmentId, Map<component, File>>
  */
 
-/** Known Waymo Open Dataset v2 components */
-const KNOWN_COMPONENTS = new Set([
-  'vehicle_pose', 'lidar_calibration', 'camera_calibration',
-  'lidar_box', 'lidar', 'camera_image', 'stats',
-  // Future components (accepted but not required)
-  'lidar_pose', 'lidar_camera_projection', 'camera_box',
-  'projected_lidar_box', 'lidar_segmentation', 'camera_segmentation',
-  'lidar_hkp', 'camera_hkp', 'lidar_camera_synced_box',
-  'camera_to_lidar_box_association',
-])
+import { getAllKnownComponents } from '../adapters/registry'
 
 // ---------------------------------------------------------------------------
 // FileSystemDirectoryHandle path (Chrome, Edge — best UX)
@@ -50,7 +43,7 @@ export async function scanDirectoryHandle(
   // Otherwise, look one level deeper (e.g. user dropped a folder containing waymo_data/)
   let componentDirs: Map<string, FileSystemDirectoryHandle>
 
-  const hasComponents = [...childDirs.keys()].some((n) => KNOWN_COMPONENTS.has(n))
+  const hasComponents = [...childDirs.keys()].some((n) => getAllKnownComponents().has(n))
   if (hasComponents) {
     componentDirs = childDirs
   } else {
@@ -58,7 +51,7 @@ export async function scanDirectoryHandle(
     componentDirs = new Map()
     for (const [, childDir] of childDirs) {
       for await (const [name, handle] of childDir as any) {
-        if (handle.kind === 'directory' && KNOWN_COMPONENTS.has(name)) {
+        if (handle.kind === 'directory' && getAllKnownComponents().has(name)) {
           componentDirs.set(name, handle as FileSystemDirectoryHandle)
         }
       }
@@ -70,7 +63,7 @@ export async function scanDirectoryHandle(
 
   // Scan each component directory for .parquet files
   for (const [component, compDir] of componentDirs) {
-    if (!KNOWN_COMPONENTS.has(component)) continue
+    if (!getAllKnownComponents().has(component)) continue
     for await (const [fileName, fileHandle] of compDir as any) {
       if (fileHandle.kind !== 'file' || !fileName.endsWith('.parquet')) continue
       const segmentId = fileName.replace('.parquet', '')
@@ -157,16 +150,16 @@ async function scanFileSystemEntry(
   let componentEntries: { component: string; entry: FileSystemDirectoryEntry }[] = []
 
   // Check if top-level dirs are components
-  const hasComponents = topDirs.some((d) => KNOWN_COMPONENTS.has(d.name))
+  const hasComponents = topDirs.some((d) => getAllKnownComponents().has(d.name))
   if (hasComponents) {
     componentEntries = topDirs
-      .filter((d) => KNOWN_COMPONENTS.has(d.name))
+      .filter((d) => getAllKnownComponents().has(d.name))
       .map((d) => ({ component: d.name, entry: d as FileSystemDirectoryEntry }))
   } else {
     // Try one level deeper
     for (const dir of topDirs) {
       const children = await readDir(dir as FileSystemDirectoryEntry)
-      const compDirs = children.filter((c) => c.isDirectory && KNOWN_COMPONENTS.has(c.name))
+      const compDirs = children.filter((c) => c.isDirectory && getAllKnownComponents().has(c.name))
       if (compDirs.length > 0) {
         componentEntries = compDirs.map((d) => ({
           component: d.name,

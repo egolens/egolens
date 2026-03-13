@@ -101,6 +101,26 @@ export interface DatasetManifest {
   id: string
   /** Human-readable name shown in the header */
   name: string
+
+  // -- Dataset detection --------------------------------------------------
+
+  /**
+   * All component directory names recognized by this dataset format.
+   * Used by folder scanning to accept directories (replaces hard-coded lists).
+   * e.g. Waymo: ['vehicle_pose', 'lidar', 'camera_image', ...]
+   * e.g. nuScenes: ['samples', 'sweeps', 'v1.0-mini', ...]
+   */
+  knownComponents: string[]
+
+  /**
+   * Minimum set of components that MUST be present to identify this dataset.
+   * `detectDataset()` checks that every required component exists in the
+   * scanned directory entries before declaring a match.
+   */
+  requiredComponents: string[]
+
+  // -- Sensor / UI config -------------------------------------------------
+
   /** LiDAR sensors available in this dataset */
   lidarSensors: SensorDef[]
   /** Camera sensors available in this dataset */
