@@ -487,11 +487,17 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 
   const handleFiles = useCallback(async (segments: Map<string, Map<string, File>>) => {
     if (segments.size === 0) {
-      setError('No Waymo segments found. Make sure the folder contains vehicle_pose/*.parquet files.')
+      setError('No dataset found. Drop a Waymo (vehicle_pose/*.parquet) or nuScenes (v1.0-mini + samples/) folder.')
       setScanning(false)
       return
     }
-    // Check that at least one segment has vehicle_pose (required)
+    // nuScenes sentinel key — pass directly (store handles validation)
+    if (segments.has('__nuscenes__')) {
+      setError(null)
+      await onFilesLoaded(segments)
+      return
+    }
+    // Waymo: check that at least one segment has vehicle_pose (required)
     const valid = [...segments.entries()].filter(([, m]) => m.has('vehicle_pose'))
     if (valid.length === 0) {
       setError('No valid segments found. Each segment needs at least a vehicle_pose parquet file.')
@@ -684,7 +690,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 color: colors.textPrimary,
                 marginBottom: '8px',
               }}>
-                Drop <span style={{ color: colors.accent, fontFamily: fonts.mono }}>waymo_data/</span> folder here
+                Drop dataset folder here
               </div>
               <div style={{
                 fontSize: '13px',
