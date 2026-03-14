@@ -4,7 +4,9 @@
  *
  * Reads LiDAR points from the current frame's sensorClouds, projects them
  * into the camera's image plane using calibration data, and draws colored
- * dots. Color follows the current colormapMode (distance/intensity/segment/panoptic).
+ * dots. Color always matches the currently selected colormapMode in the 3D
+ * viewer (intensity/range/elongation/distance/segment/panoptic) by reusing
+ * the same colormap stops, attribute offsets, and normalization ranges.
  *
  * Imperative draw pattern (same as BBoxOverlayCanvas): zero DOM churn,
  * updates via Zustand subscribe + ResizeObserver.
@@ -18,36 +20,18 @@ import {
   projectPointsToCamera,
 } from '../../utils/lidarProjection'
 import { computeTransform } from './BBoxOverlayCanvas'
-import { LIDARSEG_PALETTE } from '../LidarViewer/PointCloud'
+import {
+  LIDARSEG_PALETTE,
+  COLORMAP_STOPS,
+  ATTR_OFFSET,
+  ATTR_RANGE,
+  colormapColor,
+} from '../LidarViewer/PointCloud'
 import { getManifest } from '../../adapters/registry'
 import type { PointCloud } from '../../utils/rangeImage'
 
 // ---------------------------------------------------------------------------
-// Distance (viridis-like) colormap for projection overlay
-// ---------------------------------------------------------------------------
-
-const VIRIDIS_STOPS: [number, number, number][] = [
-  [0.27, 0.00, 0.33],
-  [0.28, 0.47, 0.68],
-  [0.13, 0.66, 0.51],
-  [0.99, 0.91, 0.15],
-]
-
-function viridisColor(t: number): [number, number, number] {
-  const tc = Math.max(0, Math.min(1, t))
-  const idx = tc * (VIRIDIS_STOPS.length - 1)
-  const lo = Math.floor(idx)
-  const hi = Math.min(lo + 1, VIRIDIS_STOPS.length - 1)
-  const f = idx - lo
-  return [
-    VIRIDIS_STOPS[lo][0] + f * (VIRIDIS_STOPS[hi][0] - VIRIDIS_STOPS[lo][0]),
-    VIRIDIS_STOPS[lo][1] + f * (VIRIDIS_STOPS[hi][1] - VIRIDIS_STOPS[lo][1]),
-    VIRIDIS_STOPS[lo][2] + f * (VIRIDIS_STOPS[hi][2] - VIRIDIS_STOPS[lo][2]),
-  ]
-}
-
-// ---------------------------------------------------------------------------
-// Panoptic instance coloring (duplicated from PointCloud for worker isolation)
+// Panoptic instance coloring (same logic as PointCloud)
 // ---------------------------------------------------------------------------
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
@@ -99,8 +83,6 @@ function instanceColor(sem: number, inst: number): [number, number, number] {
 
 /** Point radius in image pixels (before display scaling) */
 const POINT_RADIUS = 4
-/** Max depth for normalization (meters) */
-const MAX_DEPTH = 50
 
 // ---------------------------------------------------------------------------
 // Component
@@ -155,15 +137,19 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
     const frame = state.currentFrame
     if (!frame) return
 
-    const colormapMode = state.colormapMode
+    const cmap = state.colormapMode
     const visibleSensors = state.visibleSensors
     const manifest = getManifest()
     const stride = manifest.pointStride
 
-    // Intensity range for this dataset
-    const intensityRange = manifest.intensityRange ?? [0, 1]
-    const intensityMin = intensityRange[0]
-    const intensitySpan = intensityRange[1] - intensityRange[0]
+    // Resolve colormap stops, attribute offset, and normalization range
+    const stops = COLORMAP_STOPS[cmap]
+    const attrOff = ATTR_OFFSET[cmap]
+    // Intensity range may be overridden per-dataset
+    const [attrMin, attrMax] = cmap === 'intensity' && manifest.intensityRange
+      ? manifest.intensityRange
+      : ATTR_RANGE[cmap]
+    const attrSpan = attrMax - attrMin
 
     // Project + draw only for visible (toggled-on) sensors
     for (const [laserName, cloud] of frame.sensorClouds) {
@@ -176,8 +162,8 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
       )
 
       drawProjectedPoints(
-        ctx, projected, cloud, stride, t, colormapMode,
-        intensityMin, intensitySpan,
+        ctx, projected, cloud, stride, t, cmap,
+        stops, attrOff, attrMin, attrSpan,
       )
     }
   }, [cameraName, projectors])
@@ -238,8 +224,10 @@ function drawProjectedPoints(
   stride: number,
   t: DisplayTransform,
   colormapMode: ColormapMode,
-  intensityMin: number,
-  intensitySpan: number,
+  stops: [number, number, number][],
+  attrOff: number,
+  attrMin: number,
+  attrSpan: number,
 ) {
   const { positions, segLabels, panopticLabels } = cloud
   const dotRadius = POINT_RADIUS * t.scale
@@ -248,41 +236,35 @@ function drawProjectedPoints(
   projected.sort((a, b) => b.depth - a.depth)
 
   for (const pt of projected) {
-    const { u, v, depth, srcIndex } = pt
+    const { u, v, srcIndex } = pt
 
     // Map image-space → display-space
     const dx = u * t.scale + t.offsetX
     const dy = v * t.scale + t.offsetY
 
-    // Compute color based on colormap mode
+    // Compute color — same logic as PointCloud.tsx
     let r: number, g: number, b: number
 
-    switch (colormapMode) {
-      case 'segment': {
-        const label = segLabels ? segLabels[srcIndex] ?? 0 : 0
-        const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
-        r = c[0]; g = c[1]; b = c[2]
-        break
-      }
-      case 'panoptic': {
-        const panLabel = panopticLabels ? panopticLabels[srcIndex] ?? 0 : 0
-        const sem = Math.floor(panLabel / 1000)
-        const inst = panLabel % 1000
-        ;[r, g, b] = instanceColor(sem, inst)
-        break
-      }
-      case 'intensity': {
-        const raw = positions[srcIndex * stride + 3] ?? 0
-        const tNorm = Math.max(0, Math.min(1, (raw - intensityMin) / intensitySpan))
-        ;[r, g, b] = viridisColor(tNorm)
-        break
-      }
-      default: {
-        // depth (default)
-        const tNorm = Math.max(0, Math.min(1, depth / MAX_DEPTH))
-        ;[r, g, b] = viridisColor(tNorm)
-        break
-      }
+    if (colormapMode === 'panoptic') {
+      const panLabel = panopticLabels ? panopticLabels[srcIndex] ?? 0 : 0
+      const sem = Math.floor(panLabel / 1000)
+      const inst = panLabel % 1000
+      ;[r, g, b] = instanceColor(sem, inst)
+    } else if (colormapMode === 'segment') {
+      const label = segLabels ? segLabels[srcIndex] ?? 0 : 0
+      const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
+      r = c[0]; g = c[1]; b = c[2]
+    } else {
+      // Standard colormap: distance computes from xyz, others read from buffer
+      const src = srcIndex * stride
+      const px = positions[src]
+      const py = positions[src + 1]
+      const pz = positions[src + 2]
+      const raw = attrOff === -1
+        ? Math.sqrt(px * px + py * py + pz * pz)  // distance
+        : (attrOff < stride ? positions[src + attrOff] : 0)
+      const tNorm = Math.max(0, Math.min(1, (raw - attrMin) / attrSpan))
+      ;[r, g, b] = colormapColor(stops, tNorm)
     }
 
     ctx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`

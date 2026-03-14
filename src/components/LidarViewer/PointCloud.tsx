@@ -64,7 +64,7 @@ const DISTANCE_STOPS: [number, number, number][] = [
   [0.99, 0.91, 0.14],  // 1.0 — bright yellow (far from ego)
 ]
 
-const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = {
+export const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = {
   intensity: INTENSITY_STOPS,
   range: RANGE_STOPS,
   elongation: ELONGATION_STOPS,
@@ -123,7 +123,7 @@ export const LIDARSEG_LABELS: string[] = [
   'manmade', 'other static', 'vegetation', 'ego',
 ]
 
-function colormapColor(stops: [number, number, number][], t: number): [number, number, number] {
+export function colormapColor(stops: [number, number, number][], t: number): [number, number, number] {
   const tc = Math.max(0, Math.min(1, t))
   const idx = tc * (stops.length - 1)
   const lo = Math.floor(idx)
@@ -142,7 +142,7 @@ function colormapColor(stops: [number, number, number][], t: number): [number, n
 
 /** Offset within the POINT_STRIDE-sized record for each attribute.
  *  -1 means the value is computed from xyz (not stored in the buffer). */
-const ATTR_OFFSET: Record<ColormapMode, number> = {
+export const ATTR_OFFSET: Record<ColormapMode, number> = {
   intensity: 3,   // positions[src + 3]
   range: 4,       // positions[src + 4]
   elongation: 5,  // positions[src + 5]
@@ -152,7 +152,7 @@ const ATTR_OFFSET: Record<ColormapMode, number> = {
 }
 
 /** Normalization ranges per attribute (min, max) for mapping to 0..1 */
-const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
+export const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
   intensity: [0, 1],        // already 0..1 in Waymo data
   range: [0, 75],           // meters (max useful range ~75m for visualization)
   elongation: [0, 1],       // already 0..1 in Waymo data

@@ -105,6 +105,7 @@ interface SceneActions {
   selectSegment: (segmentId: string) => Promise<void>
   loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
   toggleWorldMode: () => void
+  toggleLidarOverlay: () => void
   reset: () => void
 }
 
@@ -165,6 +166,8 @@ export interface SceneState {
   highlightedCameraBoxIds: Set<string>
   /** Laser box ID to highlight (derived from hovering a 2D box) */
   highlightedLaserBoxId: string | null
+  /** LiDAR point projection overlay on camera panels */
+  showLidarOverlay: boolean
   /** World coordinate mode (true = world frame, false = vehicle frame) */
   worldMode: boolean
   /** All discovered segment IDs */
@@ -434,6 +437,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   hoveredBoxId: null,
   highlightedCameraBoxIds: new Set<string>(),
   highlightedLaserBoxId: null,
+  showLidarOverlay: false,
   worldMode: true,
   availableSegments: [],
   segmentMetas: new Map(),
@@ -766,6 +770,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     toggleWorldMode: () => {
       set((s) => ({ worldMode: !s.worldMode }))
     },
+    toggleLidarOverlay: () => {
+      set((s) => ({ showLidarOverlay: !s.showLidarOverlay }))
+    },
 
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Check for nuScenes sentinel key (produced by folder scanner)
@@ -878,6 +885,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // Preserve user's UI preferences across segment switches
         visibleSensors: prev.visibleSensors,
         boxMode: prev.boxMode,
+        showLidarOverlay: prev.showLidarOverlay,
         trailLength: prev.trailLength,
         pointOpacity: prev.pointOpacity,
         colormapMode: prev.colormapMode,

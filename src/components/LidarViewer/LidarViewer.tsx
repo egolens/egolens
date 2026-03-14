@@ -467,6 +467,8 @@ export default function LidarViewer() {
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const setColormapMode = useSceneStore((s) => s.actions.setColormapMode)
   const hasBoxData = useSceneStore((s) => s.hasBoxData)
+  const showLidarOverlay = useSceneStore((s) => s.showLidarOverlay)
+  const toggleLidarOverlay = useSceneStore((s) => s.actions.toggleLidarOverlay)
   const cameraCalibrations = useSceneStore((s) => s.cameraCalibrations)
   const activeCam = useSceneStore((s) => s.activeCam)
   const setActiveCam = useSceneStore((s) => s.actions.setActiveCam)
@@ -714,6 +716,7 @@ export default function LidarViewer() {
                 ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong', segment: 'Seg', panoptic: 'Pan' }[colormapMode]]
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
+              ...(showLidarOverlay ? ['LiDAR→Cam'] : []),
             ].map((text, i, arr) => (
               <span key={i} style={{
                 fontSize: '10px',
@@ -1018,6 +1021,29 @@ export default function LidarViewer() {
                 )
               })}
             </div>
+
+            {/* LiDAR → Camera projection toggle */}
+            <button
+              onClick={toggleLidarOverlay}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                width: '100%', padding: '4px 8px',
+                fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500,
+                border: 'none', cursor: 'pointer',
+                backgroundColor: showLidarOverlay ? 'rgba(0, 200, 219, 0.1)' : 'transparent',
+                color: showLidarOverlay ? colors.accentBlue : colors.textDim,
+                transition: 'all 0.15s', textAlign: 'left',
+              }}
+            >
+              <span style={{
+                width: 8, height: 8, borderRadius: '2px',
+                border: `1.5px solid ${showLidarOverlay ? colors.accentBlue : colors.textDim}`,
+                backgroundColor: showLidarOverlay ? colors.accentBlue : 'transparent',
+                display: 'inline-block', flexShrink: 0,
+                transition: 'all 0.15s',
+              }} />
+              LiDAR → Camera
+            </button>
 
             {boxMode !== 'off' && (<>
               {/* Class legend — only types present in current frame */}

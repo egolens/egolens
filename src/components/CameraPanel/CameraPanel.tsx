@@ -27,6 +27,7 @@ export default function CameraPanel() {
   const cameraImages = useSceneStore((s) => s.currentFrame?.cameraImages)
   const cameraBoxes = useSceneStore((s) => s.currentFrame?.cameraBoxes)
   const boxMode = useSceneStore((s) => s.boxMode)
+  const showLidarOverlay = useSceneStore((s) => s.showLidarOverlay)
   const activeCam = useSceneStore((s) => s.activeCam)
   const toggleActiveCam = useSceneStore((s) => s.actions.toggleActiveCam)
   const setHoveredCam = useSceneStore((s) => s.actions.setHoveredCam)
@@ -66,6 +67,7 @@ export default function CameraPanel() {
           imageBuffer={cameraImages?.get(id) ?? null}
           boxes={boxesByCamera.get(id) ?? EMPTY_BOXES}
           boxMode={boxMode}
+          showLidarOverlay={showLidarOverlay}
           active={activeCam === id}
           onTogglePov={toggleActiveCam}
           onHover={setHoveredCam}
@@ -87,12 +89,13 @@ interface CameraViewProps {
   imageBuffer: ArrayBuffer | null
   boxes: ParquetRow[]
   boxMode: string
+  showLidarOverlay: boolean
   active: boolean
   onTogglePov: (cameraName: number) => void
   onHover: (cameraName: number | null) => void
 }
 
-function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, active, onTogglePov, onHover }: CameraViewProps) {
+function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover }: CameraViewProps) {
   /** The URL currently displayed (kept until a new image fully loads) */
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   /** The newest blob URL being loaded (may not be visible yet) */
@@ -185,17 +188,17 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, active, on
         </div>
       )}
 
-      {/* LiDAR point projection overlay (visible when Perception is not 'off') */}
-      {boxMode !== 'off' && (
+      {/* LiDAR point projection overlay (separate toggle) */}
+      {showLidarOverlay && (
         <LidarProjectionOverlay cameraName={cameraName} />
       )}
 
-      {/* 3D box → camera wireframe projection (render_annotation style) */}
-      {boxMode !== 'off' && (
+      {/* 3D box → camera wireframe projection (only when no native 2D boxes — AV2/nuScenes) */}
+      {boxMode !== 'off' && boxes.length === 0 && (
         <BoxProjectionOverlay cameraName={cameraName} />
       )}
 
-      {/* 2D bounding box overlay (Waymo only — nuScenes cameraBoxes is empty) */}
+      {/* Native 2D bounding box overlay (Waymo — has pre-associated camera_box data) */}
       {boxes.length > 0 && (
         <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
       )}
