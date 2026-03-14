@@ -57,10 +57,12 @@ export default function Timeline() {
 
   // Annotation frame markers
   const colormapMode = useSceneStore((s) => s.colormapMode)
-  const showKeypoints = useSceneStore((s) => s.showKeypoints)
+  const showKeypoints3D = useSceneStore((s) => s.showKeypoints3D)
+  const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
   const hasCameraSegmentation = useSceneStore((s) => s.hasCameraSegmentation)
   const segLabelFrames = useSceneStore((s) => s.segLabelFrames)
   const keypointFrames = useSceneStore((s) => s.keypointFrames)
+  const cameraKeypointFrames = useSceneStore((s) => s.cameraKeypointFrames)
   const cameraSegFrames = useSceneStore((s) => s.cameraSegFrames)
 
   const disabled = status !== 'ready'
@@ -156,20 +158,39 @@ export default function Timeline() {
             }}
           />
         ))}
-        {showKeypoints && maxFrame > 0 && [...keypointFrames].map((fi) => (
+        {/* 3D keypoint frames (lidar_hkp) — lime dots above center */}
+        {showKeypoints3D && maxFrame > 0 && [...keypointFrames].map((fi) => (
           <div
-            key={`kp-${fi}`}
+            key={`kp3d-${fi}`}
             style={{
               position: 'absolute',
               left: `${(fi / maxFrame) * 100}%`,
-              top: '50%',
+              top: 'calc(50% - 3px)',
               width: '3px',
               height: '3px',
               borderRadius: '50%',
               backgroundColor: '#CCFF00',
               transform: 'translate(-50%, -50%)',
               pointerEvents: 'none',
-              opacity: 0.8,
+              opacity: 0.9,
+            }}
+          />
+        ))}
+        {/* 2D keypoint frames (camera_hkp) — cyan dots below center */}
+        {showKeypoints2D && maxFrame > 0 && [...cameraKeypointFrames].map((fi) => (
+          <div
+            key={`kp2d-${fi}`}
+            style={{
+              position: 'absolute',
+              left: `${(fi / maxFrame) * 100}%`,
+              top: 'calc(50% + 3px)',
+              width: '2px',
+              height: '2px',
+              borderRadius: '50%',
+              backgroundColor: '#88DDFF',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              opacity: 0.6,
             }}
           />
         ))}

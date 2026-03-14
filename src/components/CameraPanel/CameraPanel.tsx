@@ -19,6 +19,7 @@ import { getManifest } from '../../adapters/registry'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
 import LidarProjectionOverlay from './LidarProjectionOverlay'
 import BoxProjectionOverlay from './BoxProjectionOverlay'
+import KeypointOverlay from './KeypointOverlay'
 
 /** Height of the camera strip in pixels */
 const STRIP_HEIGHT = 160
@@ -96,6 +97,8 @@ interface CameraViewProps {
 }
 
 function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover }: CameraViewProps) {
+  const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
+  const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
   /** The URL currently displayed (kept until a new image fully loads) */
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   /** The newest blob URL being loaded (may not be visible yet) */
@@ -201,6 +204,11 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
       {/* Native 2D bounding box overlay (Waymo — has pre-associated camera_box data) */}
       {boxes.length > 0 && (
         <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
+      )}
+
+      {/* 2D keypoint skeleton overlay (Waymo camera_hkp) */}
+      {showKeypoints2D && hasKeypoints && (
+        <KeypointOverlay cameraName={cameraName} />
       )}
 
       {/* Label overlay */}

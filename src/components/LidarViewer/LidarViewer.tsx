@@ -471,8 +471,10 @@ export default function LidarViewer() {
   const hasBoxData = useSceneStore((s) => s.hasBoxData)
   const hasSegmentation = useSceneStore((s) => s.hasSegmentation)
   const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
-  const showKeypoints = useSceneStore((s) => s.showKeypoints)
-  const toggleKeypoints = useSceneStore((s) => s.actions.toggleKeypoints)
+  const showKeypoints3D = useSceneStore((s) => s.showKeypoints3D)
+  const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
+  const toggleKeypoints3D = useSceneStore((s) => s.actions.toggleKeypoints3D)
+  const toggleKeypoints2D = useSceneStore((s) => s.actions.toggleKeypoints2D)
   const showLidarOverlay = useSceneStore((s) => s.showLidarOverlay)
   const toggleLidarOverlay = useSceneStore((s) => s.actions.toggleLidarOverlay)
   const cameraCalibrations = useSceneStore((s) => s.cameraCalibrations)
@@ -724,7 +726,8 @@ export default function LidarViewer() {
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
               ...(showLidarOverlay ? ['LiDAR→Cam'] : []),
-              ...(showKeypoints ? ['Keypoints 3D'] : []),
+              ...(showKeypoints3D ? ['KP 3D'] : []),
+              ...(showKeypoints2D ? ['KP 2D'] : []),
             ].map((text, i, arr) => (
               <span key={i} style={{
                 fontSize: '10px',
@@ -1087,28 +1090,52 @@ export default function LidarViewer() {
               LiDAR → Camera
             </button>
 
-            {/* Keypoints toggle — only visible when keypoint data exists */}
+            {/* Keypoints 3D toggle */}
             {hasKeypoints && (
               <button
-                onClick={toggleKeypoints}
+                onClick={toggleKeypoints3D}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
                   width: '100%', padding: '4px 8px',
                   fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500,
                   border: 'none', cursor: 'pointer',
-                  backgroundColor: showKeypoints ? 'rgba(204, 255, 0, 0.1)' : 'transparent',
-                  color: showKeypoints ? '#CCFF00' : colors.textDim,
+                  backgroundColor: showKeypoints3D ? 'rgba(204, 255, 0, 0.1)' : 'transparent',
+                  color: showKeypoints3D ? '#CCFF00' : colors.textDim,
                   transition: 'all 0.15s', textAlign: 'left',
                 }}
               >
                 <span style={{
                   width: 8, height: 8, borderRadius: '2px',
-                  border: `1.5px solid ${showKeypoints ? '#CCFF00' : colors.textDim}`,
-                  backgroundColor: showKeypoints ? '#CCFF00' : 'transparent',
+                  border: `1.5px solid ${showKeypoints3D ? '#CCFF00' : colors.textDim}`,
+                  backgroundColor: showKeypoints3D ? '#CCFF00' : 'transparent',
                   display: 'inline-block', flexShrink: 0,
                   transition: 'all 0.15s',
                 }} />
                 Keypoints 3D
+              </button>
+            )}
+            {/* Keypoints 2D toggle */}
+            {hasKeypoints && (
+              <button
+                onClick={toggleKeypoints2D}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  width: '100%', padding: '4px 8px',
+                  fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500,
+                  border: 'none', cursor: 'pointer',
+                  backgroundColor: showKeypoints2D ? 'rgba(136, 221, 255, 0.1)' : 'transparent',
+                  color: showKeypoints2D ? '#88DDFF' : colors.textDim,
+                  transition: 'all 0.15s', textAlign: 'left',
+                }}
+              >
+                <span style={{
+                  width: 8, height: 8, borderRadius: '2px',
+                  border: `1.5px solid ${showKeypoints2D ? '#88DDFF' : colors.textDim}`,
+                  backgroundColor: showKeypoints2D ? '#88DDFF' : 'transparent',
+                  display: 'inline-block', flexShrink: 0,
+                  transition: 'all 0.15s',
+                }} />
+                Keypoints 2D
               </button>
             )}
 

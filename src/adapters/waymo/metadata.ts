@@ -282,16 +282,13 @@ export async function loadWaymoMetadata(
     try {
       const rows = await readAllRows(cameraHkpPf)
       if (rows.length > 0) {
-        // If lidar_hkp wasn't available, camera_hkp alone still enables keypoints
-        if (!bundle.hasKeypoints) {
-          bundle.hasKeypoints = true
-          bundle.keypointFrames = new Set<number>()
-        }
+        bundle.hasKeypoints = true
+        const cameraKeypointFrames = new Set<number>()
         const cameraKeypointsByFrame = new Map<bigint, typeof rows>()
         for (const row of rows) {
           const ts = row['key.frame_timestamp_micros'] as bigint
           const fi = bundle.timestampToFrame.get(ts)
-          if (fi !== undefined) bundle.keypointFrames!.add(fi)
+          if (fi !== undefined) cameraKeypointFrames.add(fi)
           let group = cameraKeypointsByFrame.get(ts)
           if (!group) {
             group = []
@@ -300,6 +297,7 @@ export async function loadWaymoMetadata(
           group.push(row)
         }
         bundle.cameraKeypointsByFrame = cameraKeypointsByFrame
+        bundle.cameraKeypointFrames = cameraKeypointFrames
       }
     } catch (e) {
       console.warn('[waymo] Could not read camera_hkp, skipping:', e)

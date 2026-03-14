@@ -63,6 +63,7 @@ import type {
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
+import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -108,7 +109,8 @@ interface SceneActions {
   loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
   toggleWorldMode: () => void
   toggleLidarOverlay: () => void
-  toggleKeypoints: () => void
+  toggleKeypoints3D: () => void
+  toggleKeypoints2D: () => void
   reset: () => void
 }
 
@@ -182,12 +184,16 @@ export interface SceneState {
   hasKeypoints: boolean
   /** Whether camera_segmentation data is available */
   hasCameraSegmentation: boolean
-  /** Show 3D skeleton + 2D keypoint overlays */
-  showKeypoints: boolean
+  /** Show 3D lidar keypoint skeletons */
+  showKeypoints3D: boolean
+  /** Show 2D camera keypoint overlays */
+  showKeypoints2D: boolean
   /** Frame indices with lidar segmentation labels (for Timeline markers) */
   segLabelFrames: Set<number>
-  /** Frame indices with keypoint data (for Timeline markers) */
+  /** Frame indices with 3D lidar keypoint data (for Timeline markers) */
   keypointFrames: Set<number>
+  /** Frame indices with 2D camera keypoint data (for Timeline markers) */
+  cameraKeypointFrames: Set<number>
   /** Frame indices with camera segmentation data (for Timeline markers) */
   cameraSegFrames: Set<number>
   /** All discovered segment IDs */
@@ -316,6 +322,7 @@ function resetInternal() {
   internal.keypointsByFrame.clear()
   setKeypointsByFrameRef(internal.keypointsByFrame)
   internal.cameraKeypointsByFrame.clear()
+  setCameraKeypointsByFrameRef(internal.cameraKeypointsByFrame)
   internal.cameraSeg.clear()
 }
 
@@ -478,9 +485,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   hasSegmentation: false,
   hasKeypoints: false,
   hasCameraSegmentation: false,
-  showKeypoints: false,
+  showKeypoints3D: false,
+  showKeypoints2D: false,
   segLabelFrames: new Set<number>(),
   keypointFrames: new Set<number>(),
+  cameraKeypointFrames: new Set<number>(),
   cameraSegFrames: new Set<number>(),
   availableSegments: [],
   segmentMetas: new Map(),
@@ -817,8 +826,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     toggleLidarOverlay: () => {
       set((s) => ({ showLidarOverlay: !s.showLidarOverlay }))
     },
-    toggleKeypoints: () => {
-      set((s) => ({ showKeypoints: !s.showKeypoints }))
+    toggleKeypoints3D: () => {
+      set((s) => ({ showKeypoints3D: !s.showKeypoints3D }))
+    },
+    toggleKeypoints2D: () => {
+      set((s) => ({ showKeypoints2D: !s.showKeypoints2D }))
     },
 
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
@@ -943,9 +955,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         hasCameraSegmentation: false,
         segLabelFrames: new Set<number>(),
         keypointFrames: new Set<number>(),
+        cameraKeypointFrames: new Set<number>(),
         cameraSegFrames: new Set<number>(),
-        // Preserve showKeypoints across segment switches (like boxMode)
-        showKeypoints: prev.showKeypoints,
+        // Preserve keypoint toggles across segment switches (like boxMode)
+        showKeypoints3D: prev.showKeypoints3D,
+        showKeypoints2D: prev.showKeypoints2D,
         activeCam: null,
         hoveredCam: null,
         hoveredBoxId: null,
@@ -1082,6 +1096,7 @@ function applyMetadataBundle(
   }
   if (bundle.cameraKeypointsByFrame) {
     internal.cameraKeypointsByFrame = bundle.cameraKeypointsByFrame
+    setCameraKeypointsByFrameRef(bundle.cameraKeypointsByFrame)
   }
   if (bundle.cameraSeg) {
     internal.cameraSeg = bundle.cameraSeg
@@ -1099,6 +1114,7 @@ function applyMetadataBundle(
     hasCameraSegmentation: bundle.hasCameraSegmentation ?? false,
     segLabelFrames: bundle.segLabelFrames ?? new Set<number>(),
     keypointFrames: bundle.keypointFrames ?? new Set<number>(),
+    cameraKeypointFrames: bundle.cameraKeypointFrames ?? new Set<number>(),
     cameraSegFrames: bundle.cameraSegFrames ?? new Set<number>(),
   })
 

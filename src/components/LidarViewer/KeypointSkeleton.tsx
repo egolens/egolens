@@ -128,7 +128,7 @@ function getKeypointRowsForTimestamp(timestamp: bigint): ParquetRow[] | undefine
 
 export default function KeypointSkeleton() {
   const currentFrame = useSceneStore((s) => s.currentFrame)
-  const showKeypoints = useSceneStore((s) => s.showKeypoints)
+  const showKeypoints3D = useSceneStore((s) => s.showKeypoints3D3D)
   const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
 
   const meshRef = useRef<THREE.InstancedMesh>(null)
@@ -136,11 +136,11 @@ export default function KeypointSkeleton() {
 
   // Parse keypoint objects for current frame
   const objects = useMemo(() => {
-    if (!showKeypoints || !hasKeypoints || !currentFrame) return []
+    if (!showKeypoints3D || !hasKeypoints || !currentFrame) return []
     const rows = getKeypointRowsForTimestamp(currentFrame.timestamp)
     if (!rows || rows.length === 0) return []
     return parseKeypointRows(rows)
-  }, [showKeypoints, hasKeypoints, currentFrame])
+  }, [showKeypoints3D, hasKeypoints, currentFrame])
 
   // Update InstancedMesh + bone geometry when objects change
   useEffect(() => {
@@ -235,7 +235,7 @@ export default function KeypointSkeleton() {
     }
   }, [objects])
 
-  if (!showKeypoints || !hasKeypoints) return null
+  if (!showKeypoints3D || !hasKeypoints) return null
 
   return (
     <group>
