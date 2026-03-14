@@ -162,15 +162,15 @@ function PovController({
         _povPoseQuat.setFromRotationMatrix(_povPoseMat)
         _povWorldQuat.copy(_povVehicleQuat).premultiply(_povPoseQuat)
 
-        camera.position.lerp(_povWorldPos, LERP_SPEED)
-        camera.quaternion.slerp(_povWorldQuat, LERP_SPEED)
+        camera.position.copy(_povWorldPos)
+        camera.quaternion.copy(_povWorldQuat)
       } else {
-        camera.position.lerp(targetCalib.position, LERP_SPEED)
-        camera.quaternion.slerp(_povVehicleQuat, LERP_SPEED)
+        camera.position.copy(targetCalib.position)
+        camera.quaternion.copy(_povVehicleQuat)
       }
 
       const targetFov = THREE.MathUtils.radToDeg(targetCalib.vFov)
-      pc.fov = THREE.MathUtils.lerp(pc.fov, targetFov, LERP_SPEED)
+      pc.fov = targetFov
       pc.updateProjectionMatrix()
       return
     }

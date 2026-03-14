@@ -722,7 +722,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const fileMap = internal.filesBySegment.get(segmentId)!
         // Pass File objects directly — workers can receive them via postMessage
         const sources = new Map<string, File | string>(fileMap)
-        await actions.loadDataset(sources)
+        await get().actions.loadDataset(sources)
         return
       }
 
@@ -736,7 +736,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       for (const comp of components) {
         sources.set(comp, `/waymo_data/${comp}/${segmentId}.parquet`)
       }
-      await actions.loadDataset(sources as Map<string, File | string>)
+      await get().actions.loadDataset(sources as Map<string, File | string>)
     },
 
     toggleWorldMode: () => {
