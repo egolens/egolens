@@ -26,56 +26,10 @@ import {
   ATTR_OFFSET,
   ATTR_RANGE,
   colormapColor,
-} from '../LidarViewer/PointCloud'
+  instanceColor,
+} from '../../utils/colormaps'
 import { getManifest } from '../../adapters/registry'
 import type { PointCloud } from '../../utils/rangeImage'
-
-// ---------------------------------------------------------------------------
-// Panoptic instance coloring (same logic as PointCloud)
-// ---------------------------------------------------------------------------
-
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-  const max = Math.max(r, g, b), min = Math.min(r, g, b)
-  const l = (max + min) / 2
-  if (max === min) return [0, 0, l]
-  const d = max - min
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
-  let h = 0
-  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
-  else if (max === g) h = ((b - r) / d + 2) / 6
-  else h = ((r - g) / d + 4) / 6
-  return [h, s, l]
-}
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  if (s === 0) return [l, l, l]
-  const c = (1 - Math.abs(2 * l - 1)) * s
-  const x = c * (1 - Math.abs((h * 6) % 2 - 1))
-  const m = l - c / 2
-  let r = 0, g = 0, b = 0
-  const sector = Math.floor(h * 6) % 6
-  if (sector === 0) { r = c; g = x }
-  else if (sector === 1) { r = x; g = c }
-  else if (sector === 2) { g = c; b = x }
-  else if (sector === 3) { g = x; b = c }
-  else if (sector === 4) { r = x; b = c }
-  else { r = c; b = x }
-  return [r + m, g + m, b + m]
-}
-
-const LIDARSEG_HSL: [number, number, number][] = LIDARSEG_PALETTE.map(
-  ([r, g, b]) => rgbToHsl(r, g, b),
-)
-
-function instanceColor(sem: number, inst: number): [number, number, number] {
-  const base = LIDARSEG_PALETTE[sem] ?? LIDARSEG_PALETTE[0]
-  if (inst === 0) return base
-  const [h, s] = LIDARSEG_HSL[sem] ?? LIDARSEG_HSL[0]
-  const spread = (inst * 0.618033988749895) % 1.0
-  const lit = 0.30 + spread * 0.50
-  const sat = Math.min(1.0, s * 1.2 + 0.1)
-  return hslToRgb(h, sat, lit)
-}
 
 // ---------------------------------------------------------------------------
 // Constants
