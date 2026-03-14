@@ -122,8 +122,8 @@ function BoxMesh({ box, highlighted, onHover, colorMap }: {
     <group
       position={[box.cx, box.cy, box.cz]}
       rotation={[0, 0, box.heading]}
-      onPointerEnter={box.isAssociated ? handlePointerEnter : undefined}
-      onPointerLeave={box.isAssociated ? handlePointerLeave : undefined}
+      onPointerEnter={onHover ? handlePointerEnter : undefined}
+      onPointerLeave={onHover ? handlePointerLeave : undefined}
     >
       <mesh scale={[box.sx, box.sy, box.sz]} geometry={_unitBox}>
         <meshBasicMaterial color={color} transparent opacity={opacity} depthWrite={false} />
@@ -203,11 +203,11 @@ function ModelMesh({ box, highlighted, onHover, colorMap, modelMap }: {
     <group
       position={[box.cx, box.cy, box.cz]}
       rotation={[0, 0, box.heading]}
-      onPointerEnter={box.isAssociated ? handlePointerEnter : undefined}
-      onPointerLeave={box.isAssociated ? handlePointerLeave : undefined}
+      onPointerEnter={onHover ? handlePointerEnter : undefined}
+      onPointerLeave={onHover ? handlePointerLeave : undefined}
     >
-      {/* Invisible box hitarea — consistent with box mode (visible wireframe when highlighted) */}
-      {box.isAssociated && (
+      {/* Invisible box hitarea for pointer events */}
+      {onHover && (
         <mesh scale={[box.sx, box.sy, box.sz]} geometry={_unitBox} visible={false} />
       )}
       {highlighted && (
@@ -346,7 +346,7 @@ export default function BoundingBoxes() {
             key={i}
             box={box}
             highlighted={highlighted}
-            onHover={box.isAssociated ? handleHover : undefined}
+            onHover={handleHover}
             colorMap={colorMap}
             modelMap={modelMap}
           />
@@ -355,7 +355,7 @@ export default function BoundingBoxes() {
             key={i}
             box={box}
             highlighted={highlighted}
-            onHover={box.isAssociated ? handleHover : undefined}
+            onHover={handleHover}
             colorMap={colorMap}
           />
         )

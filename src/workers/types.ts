@@ -34,6 +34,8 @@ export interface SensorCloudResult {
   pointCount: number
   /** Per-point semantic segmentation labels (uint8, 0–31). nuScenes lidarseg only. */
   segLabels?: Uint8Array
+  /** Per-point panoptic labels (uint16, encoded as category_id*1000 + instance_id). nuScenes panoptic only. */
+  panopticLabels?: Uint16Array
 }
 
 /** A single converted LiDAR frame within a batch */

@@ -711,7 +711,7 @@ export default function LidarViewer() {
                 return `${active[0].label}+${active.length - 1}`
               })(),
               ...((getManifest().colormapModes?.length ?? 3) > 1
-                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong', segment: 'Seg' }[colormapMode]]
+                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong', segment: 'Seg', panoptic: 'Pan' }[colormapMode]]
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
             ].map((text, i, arr) => (
@@ -848,7 +848,7 @@ export default function LidarViewer() {
 
           {/* Colormap — hide when dataset only supports one mode */}
           {(() => {
-            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg']]
+            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg'], ['panoptic', 'Pan']]
             const manifest = getManifest()
             const availableModes = manifest.colormapModes
               ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))
@@ -924,6 +924,51 @@ export default function LidarViewer() {
                       }} />
                       <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textSecondary }}>
                         {LIDARSEG_LABELS[cls] ?? cls}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Panoptic segmentation legend — visible only in panoptic mode */}
+          {colormapMode === 'panoptic' && (() => {
+            // Count unique instances per semantic class
+            const classCounts = new Map<number, Set<number>>()
+            const clouds = sensorClouds
+            if (clouds) {
+              for (const [, cloud] of clouds) {
+                const labels = cloud.panopticLabels
+                if (!labels) continue
+                for (let i = 0; i < labels.length; i++) {
+                  const sem = Math.floor(labels[i] / 1000)
+                  const inst = labels[i] % 1000
+                  if (sem === 0 || sem === 31) continue  // Skip noise + ego
+                  let set = classCounts.get(sem)
+                  if (!set) { set = new Set<number>(); classCounts.set(sem, set) }
+                  if (inst > 0) set.add(inst)
+                }
+              }
+            }
+            if (classCounts.size === 0) return null
+            const sorted = [...classCounts.entries()].sort((a, b) => a[0] - b[0])
+            return (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', padding: '4px 8px' }}>
+                {sorted.map(([cls, instances]) => {
+                  const [r, g, b] = LIDARSEG_PALETTE[cls] ?? [0.5, 0.5, 0.5]
+                  const cssColor = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
+                  const label = LIDARSEG_LABELS[cls] ?? String(cls)
+                  const count = instances.size
+                  return (
+                    <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '1px',
+                        backgroundColor: cssColor,
+                        display: 'inline-block', flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textSecondary }}>
+                        {label}{count > 0 ? ` (${count})` : ''}
                       </span>
                     </div>
                   )

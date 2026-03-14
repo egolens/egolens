@@ -17,6 +17,8 @@ import type { ParquetRow } from '../../utils/merge'
 import { colors, fonts, radius, shadows } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
+import LidarProjectionOverlay from './LidarProjectionOverlay'
+import BoxProjectionOverlay from './BoxProjectionOverlay'
 
 /** Height of the camera strip in pixels */
 const STRIP_HEIGHT = 160
@@ -63,6 +65,7 @@ export default function CameraPanel() {
           label={label}
           imageBuffer={cameraImages?.get(id) ?? null}
           boxes={boxesByCamera.get(id) ?? EMPTY_BOXES}
+          boxMode={boxMode}
           active={activeCam === id}
           onTogglePov={toggleActiveCam}
           onHover={setHoveredCam}
@@ -83,12 +86,13 @@ interface CameraViewProps {
   label: string
   imageBuffer: ArrayBuffer | null
   boxes: ParquetRow[]
+  boxMode: string
   active: boolean
   onTogglePov: (cameraName: number) => void
   onHover: (cameraName: number | null) => void
 }
 
-function CameraView({ cameraName, label, imageBuffer, boxes, active, onTogglePov, onHover }: CameraViewProps) {
+function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, active, onTogglePov, onHover }: CameraViewProps) {
   /** The URL currently displayed (kept until a new image fully loads) */
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   /** The newest blob URL being loaded (may not be visible yet) */
@@ -181,7 +185,17 @@ function CameraView({ cameraName, label, imageBuffer, boxes, active, onTogglePov
         </div>
       )}
 
-      {/* 2D bounding box overlay */}
+      {/* LiDAR point projection overlay (visible when Perception is not 'off') */}
+      {boxMode !== 'off' && (
+        <LidarProjectionOverlay cameraName={cameraName} />
+      )}
+
+      {/* 3D box → camera wireframe projection (render_annotation style) */}
+      {boxMode !== 'off' && (
+        <BoxProjectionOverlay cameraName={cameraName} />
+      )}
+
+      {/* 2D bounding box overlay (Waymo only — nuScenes cameraBoxes is empty) */}
       {boxes.length > 0 && (
         <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
       )}

@@ -24,6 +24,7 @@ import type {
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 import { NUSCENES_POINT_STRIDE } from '../types/nuscenes'
+import { parseNpzUint16 } from '../utils/npz'
 
 // ---------------------------------------------------------------------------
 // Init message
@@ -44,6 +45,8 @@ export interface NuScenesFrameDescriptor {
   radarFiles?: NuScenesRadarFileDescriptor[]
   /** Lidarseg label file (e.g. "lidarseg/v1.0-mini/<token>_lidarseg.bin"). Keyframe-only. */
   lidarsegFile?: string
+  /** Panoptic label file (e.g. "panoptic/v1.0-mini/<token>_panoptic.npz"). Keyframe-only. */
+  panopticFile?: string
 }
 
 export interface NuScenesLidarWorkerInit extends WorkerInitBase {
@@ -286,9 +289,31 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
           }
         }
 
-        sensorClouds.push({ laserName: LIDAR_TOP_ID, positions: lidarPos, pointCount: lidarPts, segLabels })
+        // 1c. Load panoptic labels if available (uint16 per point, encoded as category*1000+instance)
+        let panopticLabels: Uint16Array | undefined
+        if (frameDesc.panopticFile) {
+          const panFile = fileMap.get(frameDesc.panopticFile)
+          if (panFile) {
+            try {
+              const panBuffer = await panFile.arrayBuffer()
+              panopticLabels = await parseNpzUint16(panBuffer)
+              // If we have panoptic but no lidarseg, derive semantic labels from panoptic
+              if (!segLabels && panopticLabels) {
+                segLabels = new Uint8Array(panopticLabels.length)
+                for (let i = 0; i < panopticLabels.length; i++) {
+                  segLabels[i] = Math.floor(panopticLabels[i] / 1000)
+                }
+              }
+            } catch (e) {
+              console.warn(`[nuScenes LiDAR] Failed to parse panoptic file: ${frameDesc.panopticFile}`, e)
+            }
+          }
+        }
+
+        sensorClouds.push({ laserName: LIDAR_TOP_ID, positions: lidarPos, pointCount: lidarPts, segLabels, panopticLabels })
         transferBuffers.push(lidarPos.buffer as ArrayBuffer)
         if (segLabels) transferBuffers.push(segLabels.buffer as ArrayBuffer)
+        if (panopticLabels) transferBuffers.push(panopticLabels.buffer as ArrayBuffer)
 
         // 2. Parse radar .pcd files (if present)
         if (frameDesc.radarFiles) {

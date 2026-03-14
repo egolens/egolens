@@ -220,7 +220,7 @@ export function BicycleModel({ color, opacity }: { color: string; opacity: numbe
 export function MotorcycleModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/motorcycle.glb`} color={color} opacity={opacity} yawOffset={Math.PI} />
+      <GLBModel url={`${import.meta.env.BASE_URL}models/motorcycle.glb`} color={color} opacity={opacity} yawOffset={Math.PI / 2} />
     </Suspense>
   )
 }

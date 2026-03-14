@@ -63,6 +63,8 @@ export interface NuScenesDatabase {
 
   /** sample_data_token → lidarseg label filename (e.g. "lidarseg/v1.0-mini/<token>_lidarseg.bin") */
   lidarsegBySampleData: Map<string, string>
+  /** sample_data_token → panoptic label filename (e.g. "panoptic/v1.0-mini/<token>_panoptic.npz") */
+  panopticBySampleData: Map<string, string>
   /** Ordered category names for lidarseg index → name lookup (index=uint8 label) */
   lidarsegCategories: string[]
 }
@@ -112,6 +114,7 @@ export async function buildNuScenesDatabase(
     categories,
     logs,
     lidarsegEntries,
+    panopticEntries,
   ] = await Promise.all([
     readJsonFile<NuScenesScene>(jsonFiles, 'scene.json'),
     readJsonFile<NuScenesSample>(jsonFiles, 'sample.json'),
@@ -124,6 +127,7 @@ export async function buildNuScenesDatabase(
     readJsonFile<NuScenesCategory>(jsonFiles, 'category.json'),
     readJsonFile<NuScenesLog>(jsonFiles, 'log.json'),
     readJsonFile<NuScenesLidarsegEntry>(jsonFiles, 'lidarseg.json'),
+    readJsonFile<NuScenesLidarsegEntry>(jsonFiles, 'panoptic.json'),  // same schema as lidarseg.json
   ])
 
   // Build token → entry maps
@@ -175,6 +179,12 @@ export async function buildNuScenesDatabase(
     lidarsegBySampleData.set(entry.sample_data_token, entry.filename)
   }
 
+  // Build panoptic lookup: sample_data_token → filename (same structure as lidarseg)
+  const panopticBySampleData = new Map<string, string>()
+  for (const entry of panopticEntries) {
+    panopticBySampleData.set(entry.sample_data_token, entry.filename)
+  }
+
   // Build ordered category list for lidarseg label index → name lookup.
   // category.json entries have an `index` field (0–31) when lidarseg data is present.
   const lidarsegCategories: string[] = []
@@ -200,6 +210,7 @@ export async function buildNuScenesDatabase(
     sampleDataBySample,
     instanceCategoryName,
     lidarsegBySampleData,
+    panopticBySampleData,
     lidarsegCategories,
   }
 }
@@ -330,6 +341,8 @@ export function loadNuScenesSceneMetadata(
     const intrinsic = cs.camera_intrinsic // 3×3 row-major
     const f_u = intrinsic?.[0]?.[0] ?? 0
     const f_v = intrinsic?.[1]?.[1] ?? 0
+    const c_u = intrinsic?.[0]?.[2] ?? (camDef?.width ?? 1600) / 2
+    const c_v = intrinsic?.[1]?.[2] ?? (camDef?.height ?? 900) / 2
     cameraCalibrations.push({
       'key.camera_name': sensorId,
       [`${CAM_PREFIX}.extrinsic.transform`]: quaternionToMatrix4x4(cs.rotation, cs.translation),
@@ -337,6 +350,8 @@ export function loadNuScenesSceneMetadata(
       [`${CAM_PREFIX}.height`]: camDef?.height ?? 900,
       [`${CAM_PREFIX}.intrinsic.f_u`]: f_u,
       [`${CAM_PREFIX}.intrinsic.f_v`]: f_v,
+      [`${CAM_PREFIX}.intrinsic.c_u`]: c_u,
+      [`${CAM_PREFIX}.intrinsic.c_v`]: c_v,
       '__isOpticalFrame': true, // nuScenes sensor frame is already optical convention
     })
   }
@@ -455,11 +470,15 @@ export function loadNuScenesSceneMetadata(
         ego_pose_token: sd.ego_pose_token,
       }
 
-      // For LIDAR_TOP, attach lidarseg label filename (if available)
+      // For LIDAR_TOP, attach lidarseg/panoptic label filenames (if available)
       if (sensor.channel === 'LIDAR_TOP') {
         const lidarsegFile = db.lidarsegBySampleData.get(sd.token)
         if (lidarsegFile) {
           entry.lidarsegFile = lidarsegFile
+        }
+        const panopticFile = db.panopticBySampleData.get(sd.token)
+        if (panopticFile) {
+          entry.panopticFile = panopticFile
         }
       }
 

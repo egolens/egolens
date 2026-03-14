@@ -71,6 +71,7 @@ const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = {
   elongation: ELONGATION_STOPS,
   distance: DISTANCE_STOPS,
   segment: INTENSITY_STOPS, // placeholder — segment mode uses its own palette
+  panoptic: INTENSITY_STOPS, // placeholder — panoptic mode uses its own palette
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +149,7 @@ const ATTR_OFFSET: Record<ColormapMode, number> = {
   elongation: 5,  // positions[src + 5]
   distance: -1,   // computed: sqrt(x² + y² + z²)
   segment: -2,    // uses segLabels array (not from positions buffer)
+  panoptic: -3,   // uses panopticLabels array (not from positions buffer)
 }
 
 /** Normalization ranges per attribute (min, max) for mapping to 0..1 */
@@ -157,6 +159,69 @@ const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
   elongation: [0, 1],       // already 0..1 in Waymo data
   distance: [0, 50],        // meters from ego center (devkit uses ~50m typical urban range)
   segment: [0, 31],         // 32 classes (unused — segment mode uses direct palette lookup)
+  panoptic: [0, 31],        // unused — panoptic uses direct instance coloring
+}
+
+// ---------------------------------------------------------------------------
+// Panoptic instance coloring
+// ---------------------------------------------------------------------------
+
+/** RGB → HSL conversion (r,g,b in [0,1]) → returns [h,s,l] in [0,1] */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  if (max === min) return [0, 0, l]  // achromatic
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h = 0
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+  else if (max === g) h = ((b - r) / d + 2) / 6
+  else h = ((r - g) / d + 4) / 6
+  return [h, s, l]
+}
+
+/** HSL → RGB conversion (h,s,l in [0,1]) → returns [r,g,b] in [0,1] */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) return [l, l, l]
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1))
+  const m = l - c / 2
+  let r = 0, g = 0, b = 0
+  const sector = Math.floor(h * 6) % 6
+  if (sector === 0) { r = c; g = x; b = 0 }
+  else if (sector === 1) { r = x; g = c; b = 0 }
+  else if (sector === 2) { r = 0; g = c; b = x }
+  else if (sector === 3) { r = 0; g = x; b = c }
+  else if (sector === 4) { r = x; g = 0; b = c }
+  else { r = c; g = 0; b = x }
+  return [r + m, g + m, b + m]
+}
+
+/** Pre-computed HSL values for each semantic class (derived from LIDARSEG_PALETTE). */
+const LIDARSEG_HSL: [number, number, number][] = LIDARSEG_PALETTE.map(
+  ([r, g, b]) => rgbToHsl(r, g, b),
+)
+
+/**
+ * Instance-aware coloring: keeps the semantic class hue from the palette,
+ * but varies lightness per instance so each object is distinguishable
+ * while remaining visually linked to its class color in the legend.
+ */
+function instanceColor(semanticLabel: number, instanceId: number): [number, number, number] {
+  const base = LIDARSEG_PALETTE[semanticLabel] ?? LIDARSEG_PALETTE[0]
+  if (instanceId === 0) {
+    // "Stuff" classes (no instance) — use semantic palette directly
+    return base
+  }
+  // "Thing" classes — same hue as palette, vary lightness per instance
+  const [h, s] = LIDARSEG_HSL[semanticLabel] ?? LIDARSEG_HSL[0]
+  // Golden ratio spread across lightness range [0.30 .. 0.80]
+  const GOLDEN_RATIO = 0.618033988749895
+  const spread = (instanceId * GOLDEN_RATIO) % 1.0
+  const lit = 0.30 + spread * 0.50
+  // Boost saturation slightly to keep colors vivid at varying lightness
+  const sat = Math.min(1.0, s * 1.2 + 0.1)
+  return hslToRgb(h, sat, lit)
 }
 
 // ---------------------------------------------------------------------------
@@ -375,8 +440,11 @@ export default function PointCloud() {
 
         // Segment mode: use per-point label → palette lookup
         const isSegMode = cmap === 'segment'
+        const isPanopticMode = cmap === 'panoptic'
         const segLabels = cloud.segLabels
         const segLabelCount = segLabels ? segLabels.length : 0
+        const panopticLabels = cloud.panopticLabels
+        const panopticLabelCount = panopticLabels ? panopticLabels.length : 0
 
         let written = 0
         for (let i = 0; i < maxCount; i++) {
@@ -394,7 +462,13 @@ export default function PointCloud() {
           posArr[dst + 2] = pz
 
           let r: number, g: number, b: number
-          if (isSegMode) {
+          if (isPanopticMode) {
+            // Panoptic coloring: unique color per instance, semantic-influenced
+            const panLabel = i < panopticLabelCount && panopticLabels ? panopticLabels[i] : 0
+            const semLabel = Math.floor(panLabel / 1000)
+            const instId = panLabel % 1000
+            ;[r, g, b] = instanceColor(semLabel, instId)
+          } else if (isSegMode) {
             // Segment coloring: palette lookup from uint8 label
             const label = i < segLabelCount && segLabels ? segLabels[i] : 0
             const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]

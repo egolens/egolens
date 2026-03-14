@@ -115,7 +115,7 @@ export const nuScenesManifest: DatasetManifest = {
 
   frameRate: 2,   // nuScenes keyframe rate
   pointStride: 4, // x, y, z, intensity
-  colormapModes: ['distance', 'intensity', 'segment'], // distance (viridis) + intensity + semantic seg
+  colormapModes: ['distance', 'intensity', 'segment', 'panoptic'], // distance + intensity + semantic seg + panoptic
   intensityRange: [0, 255], // Velodyne HDL-32E raw reflectance 0–255
 
   cameraColors: {

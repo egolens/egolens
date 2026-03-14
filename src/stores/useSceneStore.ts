@@ -57,7 +57,7 @@ import { multiplyRowMajor4x4 } from '../utils/matrix'
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
-export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment'
+export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment' | 'panoptic'
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -308,6 +308,7 @@ function cacheRowGroupFrames(
           positions: sc.positions,
           pointCount: sc.pointCount,
           segLabels: sc.segLabels,
+          panopticLabels: sc.panopticLabels,
         })
       }
     }
@@ -1165,14 +1166,16 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
           })
         }
       }
-      // Extract lidarseg label filename (if available)
+      // Extract lidarseg / panoptic label filenames (if available)
       const lidarsegFile = lidarFile.lidarsegFile as string | undefined
+      const panopticFile = lidarFile.panopticFile as string | undefined
 
       lidarFrames.push({
         timestamp: ts.toString(),
         filename: lidarFile.filename as string,
         radarFiles: radarFiles.length > 0 ? radarFiles : undefined,
         lidarsegFile,
+        panopticFile,
       })
     }
 
@@ -1226,6 +1229,9 @@ async function initNuScenesLidarWorker(
       }
       if (frame.lidarsegFile) {
         neededFiles.add(frame.lidarsegFile)
+      }
+      if (frame.panopticFile) {
+        neededFiles.add(frame.panopticFile)
       }
     }
   }
