@@ -21,22 +21,22 @@ export const WAYMO_SEG_PALETTE: [number, number, number][] = [
   [0.90, 0.47, 0.00],  //  2  Truck             — darker orange
   [1.00, 0.84, 0.00],  //  3  Bus               — gold
   [0.65, 0.43, 0.15],  //  4  Other Vehicle     — brown
-  [0.85, 0.10, 0.10],  //  5  Motorcycle        — red
-  [1.00, 0.42, 0.62],  //  6  Bicycle           — pink-red
-  [0.25, 0.25, 0.25],  //  7  (reserved)        — dark gray
-  [0.70, 0.00, 0.15],  //  8  Motorcyclist      — dark crimson
-  [0.86, 0.08, 0.24],  //  9  Bicyclist         — crimson (matches Cyclist box)
-  [0.80, 1.00, 0.00],  // 10  Pedestrian        — lime (matches Pedestrian box)
-  [1.00, 0.27, 1.00],  // 11  Sign              — magenta (matches Sign box)
-  [0.00, 0.90, 0.90],  // 12  Traffic Light     — cyan
-  [0.50, 0.50, 0.50],  // 13  Curb              — medium gray
-  [0.40, 0.40, 0.55],  // 14  Road              — blue-gray
-  [0.55, 0.70, 1.00],  // 15  Lane Marker       — light blue
-  [0.60, 0.30, 0.90],  // 16  Pole              — purple
-  [1.00, 0.40, 0.70],  // 17  Construction Cone — hot pink
-  [0.45, 0.55, 0.70],  // 18  Building          — steel blue
-  [0.10, 0.72, 0.20],  // 19  Vegetation        — green
-  [0.35, 0.50, 0.20],  // 20  Tree Trunk        — olive
+  [0.70, 0.00, 0.15],  //  5  Motorcyclist      — dark crimson
+  [0.86, 0.08, 0.24],  //  6  Bicyclist         — crimson (matches Cyclist box)
+  [0.80, 1.00, 0.00],  //  7  Pedestrian        — lime (matches Pedestrian box)
+  [1.00, 0.27, 1.00],  //  8  Sign              — magenta (matches Sign box)
+  [0.00, 0.90, 0.90],  //  9  Traffic Light     — cyan
+  [0.60, 0.30, 0.90],  // 10  Pole              — purple
+  [1.00, 0.40, 0.70],  // 11  Construction Cone — hot pink
+  [1.00, 0.42, 0.62],  // 12  Bicycle           — pink-red
+  [0.85, 0.10, 0.10],  // 13  Motorcycle        — red
+  [0.45, 0.55, 0.70],  // 14  Building          — steel blue
+  [0.10, 0.72, 0.20],  // 15  Vegetation        — green
+  [0.35, 0.50, 0.20],  // 16  Tree Trunk        — olive
+  [0.50, 0.50, 0.50],  // 17  Curb              — medium gray
+  [0.40, 0.40, 0.55],  // 18  Road              — blue-gray
+  [0.55, 0.70, 1.00],  // 19  Lane Marker       — light blue
+  [0.60, 0.55, 0.40],  // 20  Other Ground      — earth gray
   [0.82, 0.75, 0.60],  // 21  Walkable          — tan
   [0.55, 0.55, 0.65],  // 22  Sidewalk          — cool gray
 ]
@@ -51,24 +51,94 @@ export const WAYMO_SEG_LABELS: string[] = [
   'Truck',             //  2
   'Bus',               //  3
   'Other Vehicle',     //  4
-  'Motorcycle',        //  5
-  'Bicycle',           //  6
-  '(reserved)',        //  7
-  'Motorcyclist',      //  8
-  'Bicyclist',         //  9
-  'Pedestrian',        // 10
-  'Sign',              // 11
-  'Traffic Light',     // 12
-  'Curb',              // 13
-  'Road',              // 14
-  'Lane Marker',       // 15
-  'Pole',              // 16
-  'Construction Cone', // 17
-  'Building',          // 18
-  'Vegetation',        // 19
-  'Tree Trunk',        // 20
+  'Motorcyclist',      //  5
+  'Bicyclist',         //  6
+  'Pedestrian',        //  7
+  'Sign',              //  8
+  'Traffic Light',     //  9
+  'Pole',              // 10
+  'Construction Cone', // 11
+  'Bicycle',           // 12
+  'Motorcycle',        // 13
+  'Building',          // 14
+  'Vegetation',        // 15
+  'Tree Trunk',        // 16
+  'Curb',              // 17
+  'Road',              // 18
+  'Lane Marker',       // 19
+  'Other Ground',      // 20
   'Walkable',          // 21
   'Sidewalk',          // 22
+]
+
+// ---------------------------------------------------------------------------
+// 29-class Camera Segmentation palette — RGB [0..1], indexed by class ID
+// Camera segmentation uses a DIFFERENT class scheme than LiDAR (29 vs 23).
+// See: waymo.proto CameraSegmentation.Type
+// ---------------------------------------------------------------------------
+
+export const WAYMO_CAMERA_SEG_PALETTE: [number, number, number][] = [
+  [0.25, 0.25, 0.25],  //  0  Undefined           — dark gray
+  [1.00, 0.62, 0.00],  //  1  Car                 — orange (matches Vehicle box)
+  [1.00, 0.84, 0.00],  //  2  Bus                 — gold
+  [0.90, 0.47, 0.00],  //  3  Truck               — darker orange
+  [0.65, 0.43, 0.15],  //  4  Other Large Vehicle — brown
+  [0.75, 0.55, 0.25],  //  5  Trailer             — tan-brown
+  [0.40, 0.40, 0.40],  //  6  Ego Vehicle         — medium gray
+  [0.85, 0.10, 0.10],  //  7  Motorcycle          — red
+  [1.00, 0.42, 0.62],  //  8  Bicycle             — pink-red
+  [0.80, 1.00, 0.00],  //  9  Pedestrian          — lime (matches Pedestrian box)
+  [0.70, 0.00, 0.15],  // 10  Motorcyclist        — dark crimson
+  [0.86, 0.08, 0.24],  // 11  Bicyclist           — crimson
+  [0.45, 0.80, 0.20],  // 12  Ground Animal       — forest green
+  [0.60, 0.85, 0.95],  // 13  Bird                — sky blue
+  [0.40, 0.40, 0.55],  // 14  Road                — blue-gray
+  [0.55, 0.70, 1.00],  // 15  Lane Marker         — light blue
+  [0.50, 0.50, 0.50],  // 16  Curb                — medium gray
+  [0.82, 0.75, 0.60],  // 17  Walkable            — tan
+  [0.55, 0.55, 0.65],  // 18  Sidewalk            — cool gray
+  [0.45, 0.55, 0.70],  // 19  Building            — steel blue
+  [0.60, 0.30, 0.90],  // 20  Pole                — purple
+  [1.00, 0.27, 1.00],  // 21  Sign                — magenta
+  [0.00, 0.90, 0.90],  // 22  Traffic Light       — cyan
+  [1.00, 0.40, 0.70],  // 23  Construction Cone   — hot pink
+  [0.10, 0.72, 0.20],  // 24  Vegetation          — green
+  [0.70, 0.85, 0.95],  // 25  Sky                 — pale sky blue (camera-only!)
+  [0.50, 0.45, 0.35],  // 26  Ground              — earth brown
+  [0.35, 0.35, 0.45],  // 27  Static              — dark blue-gray
+  [0.75, 0.60, 0.45],  // 28  Dynamic             — warm tan
+]
+
+export const WAYMO_CAMERA_SEG_LABELS: string[] = [
+  'Undefined',           //  0
+  'Car',                 //  1
+  'Bus',                 //  2
+  'Truck',               //  3
+  'Other Large Vehicle', //  4
+  'Trailer',             //  5
+  'Ego Vehicle',         //  6
+  'Motorcycle',          //  7
+  'Bicycle',             //  8
+  'Pedestrian',          //  9
+  'Motorcyclist',        // 10
+  'Bicyclist',           // 11
+  'Ground Animal',       // 12
+  'Bird',                // 13
+  'Road',                // 14
+  'Lane Marker',         // 15
+  'Curb',                // 16
+  'Walkable',            // 17
+  'Sidewalk',            // 18
+  'Building',            // 19
+  'Pole',                // 20
+  'Sign',                // 21
+  'Traffic Light',       // 22
+  'Construction Cone',   // 23
+  'Vegetation',          // 24
+  'Sky',                 // 25
+  'Ground',              // 26
+  'Static',              // 27
+  'Dynamic',             // 28
 ]
 
 // ---------------------------------------------------------------------------

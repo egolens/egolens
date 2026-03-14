@@ -38,6 +38,8 @@ export interface SensorCloudResult {
   panopticLabels?: Uint16Array
   /** Per-point camera projection: [camName, pixelX, pixelY] × pointCount. Waymo lidar_camera_projection. */
   cameraProjection?: Int16Array
+  /** Per-point range image pixel index (row*W+col). Used for seg label matching in worker. */
+  validIndices?: Uint32Array
 }
 
 /** A single converted LiDAR frame within a batch */

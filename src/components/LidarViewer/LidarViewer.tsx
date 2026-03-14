@@ -468,6 +468,10 @@ export default function LidarViewer() {
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const setColormapMode = useSceneStore((s) => s.actions.setColormapMode)
   const hasBoxData = useSceneStore((s) => s.hasBoxData)
+  const hasSegmentation = useSceneStore((s) => s.hasSegmentation)
+  const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
+  const showKeypoints = useSceneStore((s) => s.showKeypoints)
+  const toggleKeypoints = useSceneStore((s) => s.actions.toggleKeypoints)
   const showLidarOverlay = useSceneStore((s) => s.showLidarOverlay)
   const toggleLidarOverlay = useSceneStore((s) => s.actions.toggleLidarOverlay)
   const cameraCalibrations = useSceneStore((s) => s.cameraCalibrations)
@@ -718,6 +722,7 @@ export default function LidarViewer() {
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
               ...(showLidarOverlay ? ['LiDAR→Cam'] : []),
+              ...(showKeypoints ? ['Skeleton'] : []),
             ].map((text, i, arr) => (
               <span key={i} style={{
                 fontSize: '10px',
@@ -854,9 +859,15 @@ export default function LidarViewer() {
           {(() => {
             const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg'], ['panoptic', 'Pan'], ['camera', 'Cam']]
             const manifest = getManifest()
-            const availableModes = manifest.colormapModes
+            const availableModes = (manifest.colormapModes
               ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))
               : allModes
+            ).filter(([mode]) => {
+              // Gate 'segment' mode on actual data availability
+              if (mode === 'segment') return hasSegmentation
+              if (mode === 'panoptic') return hasSegmentation
+              return true
+            })
             if (availableModes.length <= 1) return null
             return (
               <>
@@ -912,12 +923,26 @@ export default function LidarViewer() {
             // Remove noise (0) and ego (31) from legend — they're uninteresting
             presentClasses.delete(0)
             presentClasses.delete(31)
-            if (presentClasses.size === 0) return null
+            // Filter to only known classes (seg extraction may inject out-of-range values — Phase B fix)
+            const numClasses = (getManifest().semanticLabels ?? LIDARSEG_LABELS).length
+            for (const cls of presentClasses) {
+              if (cls >= numClasses) presentClasses.delete(cls)
+            }
+            if (presentClasses.size === 0) return (
+              <div style={{ padding: '4px 8px' }}>
+                <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textDim, fontStyle: 'italic' }}>
+                  No seg data this frame
+                </span>
+              </div>
+            )
             const sorted = [...presentClasses].sort((a, b) => a - b)
+            const manifest = getManifest()
+            const palette = manifest.semanticPalette ?? LIDARSEG_PALETTE
+            const labels = manifest.semanticLabels ?? LIDARSEG_LABELS
             return (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', padding: '4px 8px' }}>
                 {sorted.map((cls) => {
-                  const [r, g, b] = LIDARSEG_PALETTE[cls] ?? [0.5, 0.5, 0.5]
+                  const [r, g, b] = palette[cls] ?? [0.5, 0.5, 0.5]
                   const cssColor = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
                   return (
                     <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -927,7 +952,7 @@ export default function LidarViewer() {
                         display: 'inline-block', flexShrink: 0,
                       }} />
                       <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textSecondary }}>
-                        {LIDARSEG_LABELS[cls] ?? cls}
+                        {labels[cls] ?? cls}
                       </span>
                     </div>
                   )
@@ -955,14 +980,28 @@ export default function LidarViewer() {
                 }
               }
             }
-            if (classCounts.size === 0) return null
+            // Filter out-of-range classes
+            const numClasses = (getManifest().semanticLabels ?? LIDARSEG_LABELS).length
+            for (const cls of classCounts.keys()) {
+              if (cls >= numClasses) classCounts.delete(cls)
+            }
+            if (classCounts.size === 0) return (
+              <div style={{ padding: '4px 8px' }}>
+                <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textDim, fontStyle: 'italic' }}>
+                  No seg data this frame
+                </span>
+              </div>
+            )
+            const manifest = getManifest()
+            const palette = manifest.semanticPalette ?? LIDARSEG_PALETTE
+            const labels = manifest.semanticLabels ?? LIDARSEG_LABELS
             const sorted = [...classCounts.entries()].sort((a, b) => a[0] - b[0])
             return (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', padding: '4px 8px' }}>
                 {sorted.map(([cls, instances]) => {
-                  const [r, g, b] = LIDARSEG_PALETTE[cls] ?? [0.5, 0.5, 0.5]
+                  const [r, g, b] = palette[cls] ?? [0.5, 0.5, 0.5]
                   const cssColor = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
-                  const label = LIDARSEG_LABELS[cls] ?? String(cls)
+                  const label = labels[cls] ?? String(cls)
                   const count = instances.size
                   return (
                     <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -1045,6 +1084,31 @@ export default function LidarViewer() {
               }} />
               LiDAR → Camera
             </button>
+
+            {/* Keypoints toggle — only visible when keypoint data exists */}
+            {hasKeypoints && (
+              <button
+                onClick={toggleKeypoints}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  width: '100%', padding: '4px 8px',
+                  fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500,
+                  border: 'none', cursor: 'pointer',
+                  backgroundColor: showKeypoints ? 'rgba(204, 255, 0, 0.1)' : 'transparent',
+                  color: showKeypoints ? '#CCFF00' : colors.textDim,
+                  transition: 'all 0.15s', textAlign: 'left',
+                }}
+              >
+                <span style={{
+                  width: 8, height: 8, borderRadius: '2px',
+                  border: `1.5px solid ${showKeypoints ? '#CCFF00' : colors.textDim}`,
+                  backgroundColor: showKeypoints ? '#CCFF00' : 'transparent',
+                  display: 'inline-block', flexShrink: 0,
+                  transition: 'all 0.15s',
+                }} />
+                Skeleton
+              </button>
+            )}
 
             {boxMode !== 'off' && (<>
               {/* Class legend — only types present in current frame */}

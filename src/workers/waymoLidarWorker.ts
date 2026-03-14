@@ -14,6 +14,7 @@ import {
   openParquetFile,
   buildHeavyFileFrameIndex,
   readRowGroupRows,
+  readAllRows,
   type WaymoParquetFile,
   type FrameRowIndex,
 } from '../utils/parquet'
@@ -53,6 +54,8 @@ export interface WaymoLidarWorkerInit extends WorkerInitBase {
   lidarUrl: string | File
   /** Serialized as [laserName, calibration][] since Map can't be postMessage'd */
   calibrationEntries: [number, LidarCalibration][]
+  /** Optional: lidar_segmentation parquet URL for per-point semantic labels */
+  segUrl?: string | File
 }
 
 export type WaymoLidarWorkerRequest = WaymoLidarWorkerInit | LidarBatchRequest
@@ -77,6 +80,16 @@ let calibrations = new Map<number, LidarCalibration>()
 
 /** Worker-local memory logger — posts snapshots to main thread */
 let wMem = createWorkerMemoryLogger('worker-lidar-?')
+
+// ---------------------------------------------------------------------------
+// Segmentation state (loaded at init, ~850KB)
+// Map<timestamp, Map<laserName, { shape, values }>>
+// ---------------------------------------------------------------------------
+type SegRangeImage = { shape: number[]; values: number[] }
+let segMap: Map<bigint, Map<number, SegRangeImage>> | null = null
+
+/** Whether we've logged seg diagnostics for the first frame */
+let segDiagLogged = false
 
 // ---------------------------------------------------------------------------
 // Waymo Parquet column names
@@ -125,6 +138,38 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
       lidarPf = await openParquetFile('lidar', msg.lidarUrl)
       lidarIndex = await buildHeavyFileFrameIndex(lidarPf)
       calibrations = new Map(msg.calibrationEntries)
+
+      // Load segmentation parquet if provided (~850KB, full load)
+      segMap = null
+      if (msg.segUrl) {
+        try {
+          const segPf = await openParquetFile('lidar_segmentation', msg.segUrl)
+          const segRows = await readAllRows(segPf, [
+            'key.frame_timestamp_micros',
+            'key.laser_name',
+            '[LiDARSegmentationLabelComponent].range_image_return1.shape',
+            '[LiDARSegmentationLabelComponent].range_image_return1.values',
+          ])
+          segMap = new Map()
+          for (const row of segRows) {
+            const ts = row['key.frame_timestamp_micros'] as bigint
+            const laserName = row['key.laser_name'] as number
+            const shape = row['[LiDARSegmentationLabelComponent].range_image_return1.shape'] as [number, number, number]
+            const values = row['[LiDARSegmentationLabelComponent].range_image_return1.values'] as number[]
+            let frameMap = segMap.get(ts)
+            if (!frameMap) {
+              frameMap = new Map()
+              segMap.set(ts, frameMap)
+            }
+            frameMap.set(laserName, { shape, values })
+          }
+          wMem.snap('init:seg-loaded', { note: `${segRows.length} seg rows, ${segMap.size} frames` })
+        } catch (e) {
+          console.warn('[worker-lidar] Could not load lidar_segmentation, skipping:', e)
+          segMap = null
+        }
+      }
+
       wMem.snap('init:complete', { note: `${lidarPf.rowGroups.length} RGs` })
 
       post.postMessage({
@@ -184,8 +229,55 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
         const convertMs = performance.now() - ct0
 
         const sensorClouds: SensorCloudResult[] = []
+        // Lookup seg data for this frame+sensor (if available)
+        const segFrameMap = segMap?.get(ts) ?? null
         for (const [laserName, cloud] of result.perSensor) {
           const sc: SensorCloudResult = { laserName, positions: cloud.positions, pointCount: cloud.pointCount }
+
+          // Inject per-point segmentation labels from seg range image
+          if (segFrameMap) {
+            const segRI = segFrameMap.get(laserName)
+            if (segRI && cloud.validIndices) {
+              // Waymo seg range image: shape [H, W, 2], interleaved (channels-last)
+              // IMPORTANT: channel 0 = instance_id, channel 1 = semantic_class
+              // (reversed from the naive assumption of sem=ch0, inst=ch1)
+              const C = segRI.shape.length >= 3 ? segRI.shape[2] : 1
+
+              // One-time diagnostic log
+              if (!segDiagLogged) {
+                segDiagLogged = true
+                const sampleN = Math.min(20, cloud.pointCount)
+                const samples: string[] = []
+                for (let s = 0; s < sampleN; s++) {
+                  const ri = cloud.validIndices[s]
+                  const ch0 = segRI.values[ri * C] ?? -999
+                  const ch1 = C >= 2 ? (segRI.values[ri * C + 1] ?? -999) : -999
+                  samples.push(`(${ch0},${ch1})`)
+                }
+                console.log(
+                  `[worker-lidar] seg: shape=[${segRI.shape}], C=${C}, len=${segRI.values.length}` +
+                  ` | first ${sampleN} pts (inst,sem): ${samples.join(' ')}`
+                )
+              }
+
+              const segLabels = new Uint8Array(cloud.pointCount)
+              const panopticLabels = new Uint16Array(cloud.pointCount)
+
+              for (let i = 0; i < cloud.pointCount; i++) {
+                const ri = cloud.validIndices[i] // flattened row*W+col index
+                // Channel 0 = instance_id, Channel 1 = semantic_class
+                const instId = segRI.values[ri * C] ?? 0
+                const semClass = C >= 2 ? (segRI.values[ri * C + 1] ?? 0) : (segRI.values[ri * C] ?? 0)
+                segLabels[i] = semClass
+                panopticLabels[i] = semClass * 1000 + (instId >= 0 ? instId : 0)
+              }
+              sc.segLabels = segLabels
+              sc.panopticLabels = panopticLabels
+              transferBuffers.push(segLabels.buffer as ArrayBuffer)
+              transferBuffers.push(panopticLabels.buffer as ArrayBuffer)
+            }
+          }
+
           sensorClouds.push(sc)
           transferBuffers.push(cloud.positions.buffer as ArrayBuffer)
         }

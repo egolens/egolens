@@ -109,6 +109,7 @@ export async function openParquetFile(
 export async function readAllRows(
   pf: WaymoParquetFile,
   columns?: string[],
+  options?: { utf8?: boolean },
 ): Promise<ParquetRow[]> {
   return parquetReadObjects({
     file: pf.buffer,
@@ -116,6 +117,7 @@ export async function readAllRows(
     columns,
     compressors,
     rowFormat: 'object',
+    ...(options?.utf8 === false ? { utf8: false } : {}),
   })
 }
 

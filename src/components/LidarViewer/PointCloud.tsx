@@ -254,6 +254,9 @@ export default function PointCloud() {
             r = srgbToLinear(camRgb[ci] / 255)
             g = srgbToLinear(camRgb[ci + 1] / 255)
             b = srgbToLinear(camRgb[ci + 2] / 255)
+          } else if ((cmap === 'segment' || cmap === 'panoptic') && !segLabels) {
+            // Non-TOP sensors have no seg labels → dim gray to indicate missing data
+            r = 0.15; g = 0.15; b = 0.15
           } else {
             ;[r, g, b] = computePointColor(
               cmap, i, positions, stride,

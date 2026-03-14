@@ -220,5 +220,142 @@ export async function loadWaymoMetadata(
     }
   }
 
+  // -----------------------------------------------------------------------
+  // LiDAR segmentation — sparse frame index only (data loaded in worker)
+  // -----------------------------------------------------------------------
+  const lidarSegPf = parquetFiles.get('lidar_segmentation')
+  if (lidarSegPf) {
+    try {
+      const rows = await readAllRows(lidarSegPf, [
+        'key.frame_timestamp_micros',
+      ])
+      if (rows.length > 0) {
+        bundle.hasSegmentation = true
+        const segLabelFrames = new Set<number>()
+        for (const row of rows) {
+          const ts = row['key.frame_timestamp_micros'] as bigint
+          const fi = bundle.timestampToFrame.get(ts)
+          if (fi !== undefined) segLabelFrames.add(fi)
+        }
+        bundle.segLabelFrames = segLabelFrames
+      }
+    } catch (e) {
+      console.warn('[waymo] Could not read lidar_segmentation, skipping:', e)
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // LiDAR keypoints (3D) — small file, full load (~29KB)
+  // -----------------------------------------------------------------------
+  const lidarHkpPf = parquetFiles.get('lidar_hkp')
+  if (lidarHkpPf) {
+    try {
+      const rows = await readAllRows(lidarHkpPf)
+      if (rows.length > 0) {
+        bundle.hasKeypoints = true
+        const keypointFrames = new Set<number>()
+        const keypointsByFrame = new Map<bigint, typeof rows>()
+        for (const row of rows) {
+          const ts = row['key.frame_timestamp_micros'] as bigint
+          const fi = bundle.timestampToFrame.get(ts)
+          if (fi !== undefined) keypointFrames.add(fi)
+          let group = keypointsByFrame.get(ts)
+          if (!group) {
+            group = []
+            keypointsByFrame.set(ts, group)
+          }
+          group.push(row)
+        }
+        bundle.keypointFrames = keypointFrames
+        bundle.keypointsByFrame = keypointsByFrame
+      }
+    } catch (e) {
+      console.warn('[waymo] Could not read lidar_hkp, skipping:', e)
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Camera keypoints (2D) — small file, full load (~116KB)
+  // -----------------------------------------------------------------------
+  const cameraHkpPf = parquetFiles.get('camera_hkp')
+  if (cameraHkpPf) {
+    try {
+      const rows = await readAllRows(cameraHkpPf)
+      if (rows.length > 0) {
+        // If lidar_hkp wasn't available, camera_hkp alone still enables keypoints
+        if (!bundle.hasKeypoints) {
+          bundle.hasKeypoints = true
+          bundle.keypointFrames = new Set<number>()
+        }
+        const cameraKeypointsByFrame = new Map<bigint, typeof rows>()
+        for (const row of rows) {
+          const ts = row['key.frame_timestamp_micros'] as bigint
+          const fi = bundle.timestampToFrame.get(ts)
+          if (fi !== undefined) bundle.keypointFrames!.add(fi)
+          let group = cameraKeypointsByFrame.get(ts)
+          if (!group) {
+            group = []
+            cameraKeypointsByFrame.set(ts, group)
+          }
+          group.push(row)
+        }
+        bundle.cameraKeypointsByFrame = cameraKeypointsByFrame
+      }
+    } catch (e) {
+      console.warn('[waymo] Could not read camera_hkp, skipping:', e)
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Camera segmentation — PNG bytes cached in memory (~2.3MB)
+  // IMPORTANT: utf8: false to prevent PNG binary corruption
+  // -----------------------------------------------------------------------
+  const cameraSegPf = parquetFiles.get('camera_segmentation')
+  if (cameraSegPf) {
+    try {
+      const rows = await readAllRows(cameraSegPf, [
+        'key.frame_timestamp_micros',
+        'key.camera_name',
+        '[CameraSegmentationLabelComponent].panoptic_label',
+        '[CameraSegmentationLabelComponent].panoptic_label_divisor',
+      ], { utf8: false })
+      if (rows.length > 0) {
+        bundle.hasCameraSegmentation = true
+        const cameraSegFrames = new Set<number>()
+        const cameraSeg = new Map<bigint, Map<number, { panopticLabel: ArrayBuffer; divisor: number }>>()
+        for (const row of rows) {
+          const ts = row['key.frame_timestamp_micros'] as bigint
+          const camName = row['key.camera_name'] as number
+          const pngBytes = row['[CameraSegmentationLabelComponent].panoptic_label'] as ArrayBuffer | Uint8Array | undefined
+          const divisor = (row['[CameraSegmentationLabelComponent].panoptic_label_divisor'] as number) ?? 1000
+
+          const fi = bundle.timestampToFrame.get(ts)
+          if (fi !== undefined) cameraSegFrames.add(fi)
+
+          if (pngBytes) {
+            let frameMap = cameraSeg.get(ts)
+            if (!frameMap) {
+              frameMap = new Map()
+              cameraSeg.set(ts, frameMap)
+            }
+            // Ensure we have an ArrayBuffer (readAllRows may return Uint8Array)
+            let buf: ArrayBuffer
+            if (pngBytes instanceof ArrayBuffer) {
+              buf = pngBytes
+            } else {
+              const ab = pngBytes.buffer as ArrayBuffer
+              buf = ab.slice(pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength)
+            }
+            frameMap.set(camName, { panopticLabel: buf, divisor })
+          }
+        }
+        bundle.cameraSegFrames = cameraSegFrames
+        bundle.cameraSeg = cameraSeg
+      }
+    } catch (e) {
+      console.warn('[waymo] Could not read camera_segmentation, skipping:', e)
+    }
+  }
+
   return bundle
 }

@@ -8,7 +8,12 @@
 
 import { colors } from '../../theme'
 import type { DatasetManifest } from '../../types/dataset'
-import { WAYMO_SEG_PALETTE, WAYMO_SEG_LABELS } from '../../utils/waymoSemanticClasses'
+import {
+  WAYMO_SEG_PALETTE,
+  WAYMO_SEG_LABELS,
+  WAYMO_CAMERA_SEG_PALETTE,
+  WAYMO_CAMERA_SEG_LABELS,
+} from '../../utils/waymoSemanticClasses'
 
 export const waymoManifest: DatasetManifest = {
   id: 'waymo',
@@ -53,15 +58,19 @@ export const waymoManifest: DatasetManifest = {
 
   frameRate: 10,
   pointStride: 6, // x, y, z, intensity, range, elongation
-  colormapModes: ['intensity', 'range', 'elongation', 'camera'],
+  colormapModes: ['intensity', 'range', 'elongation', 'segment', 'camera'],
 
   // Perception capabilities — gated at runtime by store has* flags
   overlayModes: ['bbox2d', 'segmentation', 'keypoints2d', 'lidarProjection'],
   annotationModes: ['bbox3d', 'keypoints3d'],
 
-  // Waymo 23-class semantic segmentation palette
+  // Waymo 23-class LiDAR semantic segmentation palette
   semanticPalette: WAYMO_SEG_PALETTE,
   semanticLabels: WAYMO_SEG_LABELS,
+
+  // Waymo 29-class Camera semantic segmentation palette (different class scheme)
+  cameraSemanticPalette: WAYMO_CAMERA_SEG_PALETTE,
+  cameraSemanticLabels: WAYMO_CAMERA_SEG_LABELS,
 
   cameraColors: {
     1: colors.camFront,

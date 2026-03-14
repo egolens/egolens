@@ -95,6 +95,29 @@ export interface MetadataBundle {
   hasBoxData: boolean
   /** Segment metadata (time of day, location, weather, counts) */
   segmentMeta: import('../types/waymo').SegmentMeta | null
+
+  // -- Segmentation & keypoint data (optional, Waymo Phase A+) ----------------
+
+  /** Whether lidar_segmentation data is available */
+  hasSegmentation?: boolean
+  /** Whether lidar_hkp / camera_hkp data is available */
+  hasKeypoints?: boolean
+  /** Whether camera_segmentation data is available */
+  hasCameraSegmentation?: boolean
+
+  /** Frame indices with lidar segmentation labels */
+  segLabelFrames?: Set<number>
+  /** Frame indices with keypoint data */
+  keypointFrames?: Set<number>
+  /** Frame indices with camera segmentation data */
+  cameraSegFrames?: Set<number>
+
+  /** 3D keypoint rows grouped by timestamp */
+  keypointsByFrame?: Map<bigint, import('../utils/merge').ParquetRow[]>
+  /** 2D camera keypoint rows grouped by timestamp */
+  cameraKeypointsByFrame?: Map<bigint, import('../utils/merge').ParquetRow[]>
+  /** Camera segmentation: timestamp → cameraName → { panopticLabel PNG bytes, divisor } */
+  cameraSeg?: Map<bigint, Map<number, { panopticLabel: ArrayBuffer; divisor: number }>>
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +209,19 @@ export interface DatasetManifest {
    * If undefined, falls back to LIDARSEG_LABELS in colormaps.ts (nuScenes default).
    */
   semanticLabels?: string[]
+
+  /**
+   * Camera-specific semantic segmentation palette (when different from LiDAR).
+   * Waymo uses 29 camera seg classes vs 23 LiDAR seg classes.
+   * If undefined, falls back to semanticPalette.
+   */
+  cameraSemanticPalette?: [number, number, number][]
+
+  /**
+   * Camera-specific semantic segmentation labels.
+   * If undefined, falls back to semanticLabels.
+   */
+  cameraSemanticLabels?: string[]
 
   // -- Parquet column mapping -----------------------------------------------
 

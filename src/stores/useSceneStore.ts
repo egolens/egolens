@@ -107,6 +107,7 @@ interface SceneActions {
   loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
   toggleWorldMode: () => void
   toggleLidarOverlay: () => void
+  toggleKeypoints: () => void
   reset: () => void
 }
 
@@ -171,6 +172,23 @@ export interface SceneState {
   showLidarOverlay: boolean
   /** World coordinate mode (true = world frame, false = vehicle frame) */
   worldMode: boolean
+
+  // -- Segmentation & Keypoint flags (Phase A) --------------------------------
+
+  /** Whether lidar_segmentation data is available for this segment */
+  hasSegmentation: boolean
+  /** Whether keypoint (lidar_hkp / camera_hkp) data is available */
+  hasKeypoints: boolean
+  /** Whether camera_segmentation data is available */
+  hasCameraSegmentation: boolean
+  /** Show 3D skeleton + 2D keypoint overlays */
+  showKeypoints: boolean
+  /** Frame indices with lidar segmentation labels (for Timeline markers) */
+  segLabelFrames: Set<number>
+  /** Frame indices with keypoint data (for Timeline markers) */
+  keypointFrames: Set<number>
+  /** Frame indices with camera segmentation data (for Timeline markers) */
+  cameraSegFrames: Set<number>
   /** All discovered segment IDs */
   availableSegments: string[]
   /** Segment metadata from stats component (segmentId → SegmentMeta) */
@@ -233,6 +251,13 @@ const internal = {
   filesBySegment: null as Map<string, Map<string, File>> | null,
   /** Blob URLs created for workers — revoke on reset to free memory */
   blobUrls: [] as string[],
+  // -- Segmentation & keypoint internal caches --------------------------------
+  /** 3D keypoint rows grouped by timestamp */
+  keypointsByFrame: new Map<bigint, ParquetRow[]>(),
+  /** 2D camera keypoint rows grouped by timestamp */
+  cameraKeypointsByFrame: new Map<bigint, ParquetRow[]>(),
+  /** Camera segmentation: timestamp → cameraName → { panopticLabel, divisor } */
+  cameraSeg: new Map<bigint, Map<number, { panopticLabel: ArrayBuffer; divisor: number }>>(),
   // -- nuScenes-specific state (persists across scene switches, like filesBySegment) --
   /** Active dataset type */
   datasetId: 'waymo' as string,
@@ -286,6 +311,10 @@ function resetInternal() {
     URL.revokeObjectURL(url)
   }
   internal.blobUrls = []
+  // Segmentation & keypoint caches
+  internal.keypointsByFrame.clear()
+  internal.cameraKeypointsByFrame.clear()
+  internal.cameraSeg.clear()
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +472,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   highlightedLaserBoxId: null,
   showLidarOverlay: false,
   worldMode: true,
+  // Segmentation & keypoint state
+  hasSegmentation: false,
+  hasKeypoints: false,
+  hasCameraSegmentation: false,
+  showKeypoints: false,
+  segLabelFrames: new Set<number>(),
+  keypointFrames: new Set<number>(),
+  cameraSegFrames: new Set<number>(),
   availableSegments: [],
   segmentMetas: new Map(),
   currentSegment: null,
@@ -778,6 +815,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     toggleLidarOverlay: () => {
       set((s) => ({ showLidarOverlay: !s.showLidarOverlay }))
     },
+    toggleKeypoints: () => {
+      set((s) => ({ showKeypoints: !s.showKeypoints }))
+    },
 
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Check for nuScenes sentinel key (produced by folder scanner)
@@ -895,6 +935,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         pointOpacity: prev.pointOpacity,
         colormapMode: prev.colormapMode,
         hasBoxData: false,
+        // Segmentation & keypoint flags reset
+        hasSegmentation: false,
+        hasKeypoints: false,
+        hasCameraSegmentation: false,
+        segLabelFrames: new Set<number>(),
+        keypointFrames: new Set<number>(),
+        cameraSegFrames: new Set<number>(),
+        // Preserve showKeypoints across segment switches (like boxMode)
+        showKeypoints: prev.showKeypoints,
         activeCam: null,
         hoveredCam: null,
         hoveredBoxId: null,
@@ -1023,12 +1072,30 @@ function applyMetadataBundle(
   internal.assocCamToLaser = bundle.assocCamToLaser
   internal.assocLaserToCams = bundle.assocLaserToCams
 
+  // Segmentation & keypoint data
+  if (bundle.keypointsByFrame) {
+    internal.keypointsByFrame = bundle.keypointsByFrame
+  }
+  if (bundle.cameraKeypointsByFrame) {
+    internal.cameraKeypointsByFrame = bundle.cameraKeypointsByFrame
+  }
+  if (bundle.cameraSeg) {
+    internal.cameraSeg = bundle.cameraSeg
+  }
+
   // Zustand state updates
   set({
     totalFrames: bundle.timestamps.length,
     lidarCalibrations: bundle.lidarCalibrations,
     cameraCalibrations: bundle.cameraCalibrations,
     hasBoxData: bundle.hasBoxData,
+    // Segmentation & keypoint flags
+    hasSegmentation: bundle.hasSegmentation ?? false,
+    hasKeypoints: bundle.hasKeypoints ?? false,
+    hasCameraSegmentation: bundle.hasCameraSegmentation ?? false,
+    segLabelFrames: bundle.segLabelFrames ?? new Set<number>(),
+    keypointFrames: bundle.keypointFrames ?? new Set<number>(),
+    cameraSegFrames: bundle.cameraSegFrames ?? new Set<number>(),
   })
 
   // Segment metadata
@@ -1056,9 +1123,12 @@ async function initDataWorker(
     WORKER_CONCURRENCY,
     () => new Worker(new URL('../workers/waymoLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
+  // Pass segmentation parquet URL if available (Phase A worker protocol)
+  const segSource = sources.get('lidar_segmentation')
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
+    ...(segSource ? { segUrl: segSource } : {}),
   })
 
   internal.workerPool = pool

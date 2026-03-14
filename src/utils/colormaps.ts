@@ -198,7 +198,7 @@ export function computePointColor(
   attrMin: number,
   attrSpan: number,
   segLabels?: Uint8Array | Int32Array | null,
-  panopticLabels?: Int32Array | null,
+  panopticLabels?: Int32Array | Uint16Array | null,
   semanticPalette?: [number, number, number][] | null,
 ): [number, number, number] {
   const pal = semanticPalette ?? LIDARSEG_PALETTE

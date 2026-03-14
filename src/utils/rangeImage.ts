@@ -54,6 +54,8 @@ export interface PointCloud {
   cameraProjection?: Int16Array
   /** Per-point camera RGB colors: [R, G, B] × pointCount (Uint8, 0–255). Computed from cameraProjection + camera images. */
   cameraRgb?: Uint8Array
+  /** Per-point range image pixel index (row*W+col), for matching with seg labels. Waymo only. */
+  validIndices?: Uint32Array
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +187,8 @@ export function convertRangeImageToPointCloud(
   // Worst case: all pixels valid → POINT_STRIDE floats per point
   const maxPoints = height * width
   const output = new Float32Array(maxPoints * POINT_STRIDE)
+  // Track valid pixel indices (row*width+col) for seg label matching
+  const validIdxBuf = new Uint32Array(maxPoints)
   // Optional projection output: 3 int16s per point (camName, pixelX, pixelY)
   const projValues = projection?.values
   const projChannels = projection ? projection.shape[2] : 0
@@ -214,6 +218,9 @@ export function convertRangeImageToPointCloud(
       const vy = e10 * x + e11 * y + e12 * z + e13
       const vz = e20 * x + e21 * y + e22 * z + e23
 
+      // Record which range image pixel this point came from (for seg matching)
+      validIdxBuf[pointCount] = row * width + col
+
       const outIdx = pointCount * POINT_STRIDE
       output[outIdx] = vx
       output[outIdx + 1] = vy
@@ -237,7 +244,8 @@ export function convertRangeImageToPointCloud(
   // slice() creates an independent trimmed copy instead of a view on the full buffer.
   const positions = output.slice(0, pointCount * POINT_STRIDE)
   const cameraProjection = projOutput ? projOutput.slice(0, pointCount * 3) : undefined
-  return { positions, pointCount, cameraProjection }
+  const validIndices = validIdxBuf.slice(0, pointCount)
+  return { positions, pointCount, cameraProjection, validIndices }
 }
 
 // ---------------------------------------------------------------------------

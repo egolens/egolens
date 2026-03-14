@@ -55,6 +55,14 @@ export default function Timeline() {
   const cachedFrames = useSceneStore((s) => s.cachedFrames)
   const actions = useSceneStore((s) => s.actions)
 
+  // Annotation frame markers
+  const colormapMode = useSceneStore((s) => s.colormapMode)
+  const showKeypoints = useSceneStore((s) => s.showKeypoints)
+  const hasCameraSegmentation = useSceneStore((s) => s.hasCameraSegmentation)
+  const segLabelFrames = useSceneStore((s) => s.segLabelFrames)
+  const keypointFrames = useSceneStore((s) => s.keypointFrames)
+  const cameraSegFrames = useSceneStore((s) => s.cameraSegFrames)
+
   const disabled = status !== 'ready'
   const maxFrame = Math.max(totalFrames - 1, 0)
 
@@ -129,6 +137,59 @@ export default function Timeline() {
             />
           )
         })}
+
+        {/* Annotation frame markers — small dots on the track */}
+        {colormapMode === 'segment' && maxFrame > 0 && [...segLabelFrames].map((fi) => (
+          <div
+            key={`seg-${fi}`}
+            style={{
+              position: 'absolute',
+              left: `${(fi / maxFrame) * 100}%`,
+              top: '50%',
+              width: '3px',
+              height: '3px',
+              borderRadius: '50%',
+              backgroundColor: '#00CCFF',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              opacity: 0.8,
+            }}
+          />
+        ))}
+        {showKeypoints && maxFrame > 0 && [...keypointFrames].map((fi) => (
+          <div
+            key={`kp-${fi}`}
+            style={{
+              position: 'absolute',
+              left: `${(fi / maxFrame) * 100}%`,
+              top: '50%',
+              width: '3px',
+              height: '3px',
+              borderRadius: '50%',
+              backgroundColor: '#CCFF00',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              opacity: 0.8,
+            }}
+          />
+        ))}
+        {hasCameraSegmentation && maxFrame > 0 && [...cameraSegFrames].map((fi) => (
+          <div
+            key={`cseg-${fi}`}
+            style={{
+              position: 'absolute',
+              left: `${(fi / maxFrame) * 100}%`,
+              top: '50%',
+              width: '3px',
+              height: '3px',
+              borderRadius: '50%',
+              backgroundColor: '#FF44FF',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              opacity: 0.8,
+            }}
+          />
+        ))}
 
         {/* Played progress (gradient bar) */}
         <div style={{
