@@ -79,6 +79,21 @@ export default function Timeline() {
     }
   }, [actions, maxCached])
 
+  // Build active annotation lanes (only visible features)
+  interface AnnotationLane { key: string; color: string; frames: Set<number> }
+  const activeLanes = useMemo(() => {
+    const lanes: AnnotationLane[] = []
+    if (colormapMode === 'segment' && segLabelFrames.size > 0)
+      lanes.push({ key: 'seg', color: '#00CCFF', frames: segLabelFrames })
+    if (showKeypoints3D && keypointFrames.size > 0)
+      lanes.push({ key: 'kp3d', color: '#CCFF00', frames: keypointFrames })
+    if (showKeypoints2D && cameraKeypointFrames.size > 0)
+      lanes.push({ key: 'kp2d', color: '#88DDFF', frames: cameraKeypointFrames })
+    if (showCameraSeg && hasCameraSegmentation && cameraSegFrames.size > 0)
+      lanes.push({ key: 'cseg', color: '#FF44FF', frames: cameraSegFrames })
+    return lanes
+  }, [colormapMode, segLabelFrames, showKeypoints3D, keypointFrames, showKeypoints2D, cameraKeypointFrames, showCameraSeg, hasCameraSegmentation, cameraSegFrames])
+
   // Compute buffer bar segments (continuous ranges of cached frames)
   const bufferSegments = useMemo(
     () => computeBufferSegments(cachedFrames, totalFrames),
@@ -108,158 +123,113 @@ export default function Timeline() {
         {isPlaying ? '⏸' : '▶'}
       </button>
 
-      {/* Custom slider with buffer bar */}
-      <div style={{ flex: 1, position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
-        {/* Track background */}
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          height: '6px',
-          backgroundColor: colors.bgOverlay,
-          borderRadius: radius.pill,
-          pointerEvents: 'none',
-        }} />
-
-        {/* Buffer segments — loaded frames */}
-        {bufferSegments.map((seg, i) => {
-          const left = (seg.start / maxFrame) * 100
-          const width = ((seg.end - seg.start + 1) / maxFrame) * 100
-          return (
-            <div
-              key={i}
-              style={{
-                position: 'absolute',
-                left: `${left}%`,
-                width: `${width}%`,
-                height: '6px',
-                backgroundColor: colors.accentDim,
-                borderRadius: radius.pill,
-                pointerEvents: 'none',
-              }}
-            />
-          )
-        })}
-
-        {/* Annotation frame markers — small dots on the track */}
-        {colormapMode === 'segment' && maxFrame > 0 && [...segLabelFrames].map((fi) => (
-          <div
-            key={`seg-${fi}`}
-            style={{
-              position: 'absolute',
-              left: `${(fi / maxFrame) * 100}%`,
-              top: '50%',
-              width: '3px',
-              height: '3px',
-              borderRadius: '50%',
-              backgroundColor: '#00CCFF',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'none',
-              opacity: 0.8,
-            }}
-          />
-        ))}
-        {/* 3D keypoint frames (lidar_hkp) — lime dots above center */}
-        {showKeypoints3D && maxFrame > 0 && [...keypointFrames].map((fi) => (
-          <div
-            key={`kp3d-${fi}`}
-            style={{
-              position: 'absolute',
-              left: `${(fi / maxFrame) * 100}%`,
-              top: 'calc(50% - 3px)',
-              width: '3px',
-              height: '3px',
-              borderRadius: '50%',
-              backgroundColor: '#CCFF00',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'none',
-              opacity: 0.9,
-            }}
-          />
-        ))}
-        {/* 2D keypoint frames (camera_hkp) — cyan dots below center */}
-        {showKeypoints2D && maxFrame > 0 && [...cameraKeypointFrames].map((fi) => (
-          <div
-            key={`kp2d-${fi}`}
-            style={{
-              position: 'absolute',
-              left: `${(fi / maxFrame) * 100}%`,
-              top: 'calc(50% + 3px)',
-              width: '2px',
-              height: '2px',
-              borderRadius: '50%',
-              backgroundColor: '#88DDFF',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'none',
-              opacity: 0.6,
-            }}
-          />
-        ))}
-        {showCameraSeg && hasCameraSegmentation && maxFrame > 0 && [...cameraSegFrames].map((fi) => (
-          <div
-            key={`cseg-${fi}`}
-            style={{
-              position: 'absolute',
-              left: `${(fi / maxFrame) * 100}%`,
-              top: '50%',
-              width: '3px',
-              height: '3px',
-              borderRadius: '50%',
-              backgroundColor: '#FF44FF',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'none',
-              opacity: 0.8,
-            }}
-          />
-        ))}
-
-        {/* Played progress (gradient bar) */}
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          width: `${maxFrame > 0 ? (currentFrameIndex / maxFrame) * 100 : 0}%`,
-          height: '6px',
-          background: gradients.accent,
-          borderRadius: radius.pill,
-          pointerEvents: 'none',
-          boxShadow: `0 0 8px ${colors.accentGlow}`,
-        }} />
-
-        {/* Playhead dot */}
-        {maxFrame > 0 && (
+      {/* Custom slider with buffer bar + annotation lanes */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {/* Main track area */}
+        <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
+          {/* Track background */}
           <div style={{
-            position: 'absolute',
-            left: `${(currentFrameIndex / maxFrame) * 100}%`,
-            top: '50%',
-            width: '12px',
-            height: '12px',
-            borderRadius: '50%',
-            backgroundColor: colors.accent,
-            transform: 'translate(-50%, -50%)',
-            boxShadow: `0 0 6px ${colors.accentDim}`,
-            pointerEvents: 'none',
-          }} />
-        )}
-
-        {/* Invisible range input on top */}
-        <input
-          type="range"
-          min={0}
-          max={maxCached}
-          value={currentFrameIndex}
-          onChange={handleSliderChange}
-          disabled={disabled}
-          style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            width: '100%',
-            height: '24px',
-            opacity: 0,
-            cursor: disabled ? 'default' : 'pointer',
-            margin: 0,
-          }}
-        />
+            height: '6px',
+            backgroundColor: colors.bgOverlay,
+            borderRadius: radius.pill,
+            pointerEvents: 'none',
+          }} />
+
+          {/* Buffer segments — loaded frames */}
+          {bufferSegments.map((seg, i) => {
+            const left = (seg.start / maxFrame) * 100
+            const width = ((seg.end - seg.start + 1) / maxFrame) * 100
+            return (
+              <div
+                key={i}
+                style={{
+                  position: 'absolute',
+                  left: `${left}%`,
+                  width: `${width}%`,
+                  height: '6px',
+                  backgroundColor: colors.accentDim,
+                  borderRadius: radius.pill,
+                  pointerEvents: 'none',
+                }}
+              />
+            )
+          })}
+
+          {/* Played progress (gradient bar) */}
+          <div style={{
+            position: 'absolute',
+            left: 0,
+            width: `${maxFrame > 0 ? (currentFrameIndex / maxFrame) * 100 : 0}%`,
+            height: '6px',
+            background: gradients.accent,
+            borderRadius: radius.pill,
+            pointerEvents: 'none',
+            boxShadow: `0 0 8px ${colors.accentGlow}`,
+          }} />
+
+          {/* Playhead dot */}
+          {maxFrame > 0 && (
+            <div style={{
+              position: 'absolute',
+              left: `${(currentFrameIndex / maxFrame) * 100}%`,
+              top: '50%',
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              backgroundColor: colors.accent,
+              transform: 'translate(-50%, -50%)',
+              boxShadow: `0 0 6px ${colors.accentDim}`,
+              pointerEvents: 'none',
+            }} />
+          )}
+
+          {/* Invisible range input on top */}
+          <input
+            type="range"
+            min={0}
+            max={maxCached}
+            value={currentFrameIndex}
+            onChange={handleSliderChange}
+            disabled={disabled}
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              width: '100%',
+              height: '24px',
+              opacity: 0,
+              cursor: disabled ? 'default' : 'pointer',
+              margin: 0,
+            }}
+          />
+        </div>
+
+        {/* Annotation lanes — each active feature gets its own thin lane */}
+        {activeLanes.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', paddingTop: '2px' }}>
+            {activeLanes.map(({ key, color, frames }) => (
+              <div key={key} style={{ position: 'relative', height: '3px' }}>
+                {maxFrame > 0 && [...frames].map((fi) => (
+                  <div
+                    key={fi}
+                    style={{
+                      position: 'absolute',
+                      left: `${(fi / maxFrame) * 100}%`,
+                      width: '2px',
+                      height: '3px',
+                      backgroundColor: color,
+                      opacity: 0.85,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <span style={{

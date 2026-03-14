@@ -487,6 +487,18 @@ export function loadNuScenesSceneMetadata(
     vehiclePoseByFrame.set(ts, sensorFiles)
   }
 
+  // 7b. Detect segmentation data availability
+  let hasLidarseg = false
+  for (const [, sensorFiles] of vehiclePoseByFrame) {
+    for (const entry of sensorFiles) {
+      if (entry.lidarsegFile || entry.panopticFile) {
+        hasLidarseg = true
+        break
+      }
+    }
+    if (hasLidarseg) break
+  }
+
   // 8. Build scene metadata (from log.json + scene description)
   const log = db.logByToken.get(scene.log_token)
   const locationLabel = log ? formatNuScenesLocation(log.location) : 'Unknown'
@@ -530,6 +542,7 @@ export function loadNuScenesSceneMetadata(
     assocCamToLaser: new Map(),   // nuScenes doesn't have explicit cam↔lidar box association
     assocLaserToCams: new Map(),
     hasBoxData: lidarBoxByFrame.size > 0,
+    hasSegmentation: hasLidarseg,
     segmentMeta: sceneMeta,
   }
 }
