@@ -39,8 +39,8 @@ const COL_OCCLUDED = '[CameraHumanKeypointsComponent].camera_keypoints[*].keypoi
 // Drawing constants
 // ---------------------------------------------------------------------------
 
-const JOINT_RADIUS = 4        // display pixels
-const BONE_LINE_WIDTH = 2.5   // display pixels
+const JOINT_RADIUS = 8        // display pixels
+const BONE_LINE_WIDTH = 5     // display pixels
 const OCCLUDED_ALPHA = 0.3
 const DEFAULT_COLOR: [number, number, number] = [0.8, 1.0, 0.0]
 
