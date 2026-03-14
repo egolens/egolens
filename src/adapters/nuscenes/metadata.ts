@@ -13,6 +13,7 @@
  */
 
 import type { MetadataBundle, TrajectoryPoint } from '../../types/dataset'
+import type { LidarCalibration } from '../../utils/rangeImage'
 import type {
   NuScenesScene,
   NuScenesSample,
@@ -301,7 +302,7 @@ export function loadNuScenesSceneMetadata(
 
   // 4. Build lidar + radar calibrations
   //    Both LiDAR and radar sensors need extrinsics for sensor→ego transform.
-  const lidarCalibrations = new Map<number, { laserName: number; extrinsic: number[] }>()
+  const lidarCalibrations = new Map<number, LidarCalibration>()
   for (const cs of db.calibratedSensorByToken.values()) {
     const sensor = db.sensorByToken.get(cs.sensor_token)
     if (!sensor || (sensor.modality !== 'lidar' && sensor.modality !== 'radar')) continue
@@ -310,6 +311,9 @@ export function loadNuScenesSceneMetadata(
     lidarCalibrations.set(sensorId, {
       laserName: sensorId,
       extrinsic: quaternionToMatrix4x4(cs.rotation, cs.translation),
+      beamInclinationValues: null,
+      beamInclinationMin: 0,
+      beamInclinationMax: 0,
     })
   }
 
@@ -346,7 +350,6 @@ export function loadNuScenesSceneMetadata(
     const sample = orderedSamples[fi]
     const ts = timestamps[fi]
     const anns = db.annotationsBySample.get(sample.token) ?? []
-    const egoPoseMatrix = poseByFrameIndex.get(fi)
     // For box transform we need inv(ego_pose_global) to go from global → vehicle
     // But poseByFrameIndex already has inv(pose0) × poseN, so we need the raw ego pose
     // Let's get the raw ego pose for this frame
@@ -500,7 +503,7 @@ export function loadNuScenesSceneMetadata(
     vehiclePoseByFrame: vehiclePoseByFrame as Map<unknown, Record<string, unknown>[]>,
     worldOriginInverse,
     poseByFrameIndex,
-    lidarCalibrations: lidarCalibrations as Map<number, { laserName: number; extrinsic: number[] }>,
+    lidarCalibrations,
     cameraCalibrations,
     lidarBoxByFrame: lidarBoxByFrame as Map<unknown, Record<string, unknown>[]>,
     cameraBoxByFrame: new Map(),  // nuScenes doesn't have separate 2D camera boxes

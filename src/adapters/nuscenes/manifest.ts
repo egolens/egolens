@@ -93,11 +93,24 @@ export const nuScenesManifest: DatasetManifest = {
   ],
 
   boxTypes: [
-    { id: 0, label: 'Unknown', color: '#6B7280' },
-    { id: 1, label: 'Vehicle', color: '#FF9E00' },
-    { id: 2, label: 'Pedestrian', color: '#CCFF00' },
-    { id: 3, label: 'Sign', color: '#FF44FF' },
-    { id: 4, label: 'Cyclist', color: '#DC143C' },
+    // 0: fallback wireframe box (debris, pushable_pullable, bicycle_rack)
+    { id: 0,  label: 'Unknown',      color: '#6B7280' },
+    // Vehicle subtypes — all use VehicleModel, differentiated by color
+    { id: 1,  label: 'Car',          color: '#FF9E00', model: 'vehicle' },
+    { id: 5,  label: 'Truck',        color: '#E67700', model: 'vehicle' },
+    { id: 6,  label: 'Bus',          color: '#FFD600', model: 'vehicle' },
+    { id: 7,  label: 'Construction', color: '#CC7A00', model: 'vehicle' },
+    { id: 8,  label: 'Emergency',    color: '#FF4444', model: 'vehicle' },
+    { id: 9,  label: 'Trailer',      color: '#D4A574', model: 'vehicle' },
+    // Pedestrian (all subtypes unified)
+    { id: 2,  label: 'Pedestrian',   color: '#CCFF00', model: 'pedestrian' },
+    // Two-wheelers
+    { id: 10, label: 'Motorcycle',   color: '#FF2D55', model: 'motorcycle' },
+    { id: 11, label: 'Bicycle',      color: '#FF6B9D', model: 'bicycle' },
+    // Static / movable objects
+    { id: 12, label: 'Barrier',      color: '#8B9DC3', model: 'barrier' },
+    { id: 13, label: 'Traffic Cone', color: '#FF44FF', model: 'cone' },
+    { id: 14, label: 'Animal',       color: '#00CED1' },
   ],
 
   frameRate: 2,   // nuScenes keyframe rate

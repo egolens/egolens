@@ -171,22 +171,27 @@ export type NuScenesLidarChannel = (typeof NuScenesLidarChannel)[keyof typeof Nu
 
 /**
  * Maps nuScenes 23 categories → renderer BoxType ints.
- * Matches Waymo's BoxType values: 0=Unknown, 1=Vehicle, 2=Pedestrian, 3=Sign, 4=Cyclist
+ *
+ * IDs 0–4 overlap with Waymo for shared types (Unknown, Car, Pedestrian).
+ * IDs 5–14 are nuScenes-specific subcategories with distinct colors.
+ * See nuScenes manifest boxTypes for the full palette.
  */
 export const NUSCENES_CATEGORY_MAP: Record<string, number> = {
-  // Vehicle types → 1 (TYPE_VEHICLE)
-  'vehicle.car': 1,
-  'vehicle.truck': 1,
-  'vehicle.bus.bendy': 1,
-  'vehicle.bus.rigid': 1,
-  'vehicle.construction': 1,
-  'vehicle.emergency.ambulance': 1,
-  'vehicle.emergency.police': 1,
-  'vehicle.trailer': 1,
-  'vehicle.motorcycle': 4,       // → CYCLIST (closest match)
-  'vehicle.bicycle': 4,          // → CYCLIST
+  // Vehicle subtypes — each gets a distinct color, all use VehicleModel
+  'vehicle.car': 1,                   // Car
+  'vehicle.truck': 5,                 // Truck
+  'vehicle.bus.bendy': 6,             // Bus
+  'vehicle.bus.rigid': 6,             // Bus
+  'vehicle.construction': 7,          // Construction
+  'vehicle.emergency.ambulance': 8,   // Emergency
+  'vehicle.emergency.police': 8,      // Emergency
+  'vehicle.trailer': 9,               // Trailer
 
-  // Pedestrian types → 2 (TYPE_PEDESTRIAN)
+  // Two-wheelers — CyclistModel
+  'vehicle.motorcycle': 10,           // Motorcycle
+  'vehicle.bicycle': 11,              // Bicycle
+
+  // Pedestrian types — all unified as Pedestrian
   'human.pedestrian.adult': 2,
   'human.pedestrian.child': 2,
   'human.pedestrian.wheelchair': 2,
@@ -195,13 +200,13 @@ export const NUSCENES_CATEGORY_MAP: Record<string, number> = {
   'human.pedestrian.police_officer': 2,
   'human.pedestrian.construction_worker': 2,
 
-  // Other → 0 (TYPE_UNKNOWN) or 3 (TYPE_SIGN)
-  'animal': 0,
-  'movable_object.barrier': 0,
-  'movable_object.trafficcone': 3,   // → SIGN (closest visual match)
-  'movable_object.pushable_pullable': 0,
-  'movable_object.debris': 0,
-  'static_object.bicycle_rack': 0,
+  // Static / movable objects
+  'movable_object.barrier': 12,       // Barrier (box fallback)
+  'movable_object.trafficcone': 13,   // Traffic Cone (SignModel)
+  'animal': 14,                        // Animal (box fallback)
+  'movable_object.pushable_pullable': 0, // Unknown
+  'movable_object.debris': 0,            // Unknown
+  'static_object.bicycle_rack': 0,       // Unknown
 }
 
 // ---------------------------------------------------------------------------

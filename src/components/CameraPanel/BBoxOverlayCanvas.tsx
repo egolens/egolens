@@ -11,7 +11,8 @@
 
 import { useRef, useEffect, useCallback } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
-import { BOX_TYPE_COLORS, BoxType, CAMERA_RESOLUTION, HIGHLIGHT_COLOR } from '../../types/waymo'
+import { BoxType, CAMERA_RESOLUTION, HIGHLIGHT_COLOR } from '../../types/waymo'
+import { getManifest } from '../../adapters/registry'
 import type { ParquetRow } from '../../utils/merge'
 
 const BBOX_STROKE_WIDTH = 4
@@ -117,7 +118,8 @@ export default function BBoxOverlayCanvas({ cameraName, boxes }: BBoxOverlayCanv
       const camObjectId = (row['key.camera_object_id'] as string) ?? ''
 
       const isHighlighted = hovered === camObjectId || highlighted.has(camObjectId)
-      const color = isHighlighted ? HIGHLIGHT_COLOR : (BOX_TYPE_COLORS[type] ?? BOX_TYPE_COLORS[BoxType.TYPE_UNKNOWN])
+      const btDef = getManifest().boxTypes.find((bt) => bt.id === type)
+      const color = isHighlighted ? HIGHLIGHT_COLOR : (btDef?.color ?? '#6B7280')
       const strokeW = isHighlighted ? BBOX_STROKE_WIDTH_HIGHLIGHT : BBOX_STROKE_WIDTH
 
       // Map image-space → display-space

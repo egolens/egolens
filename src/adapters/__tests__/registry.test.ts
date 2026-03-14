@@ -333,8 +333,11 @@ describe('nuScenesManifest', () => {
     expect(nuScenesManifest.cameraSensors).toHaveLength(6)
   })
 
-  it('has 5 box types (same as Waymo)', () => {
-    expect(nuScenesManifest.boxTypes).toHaveLength(5)
+  it('has 13 box types (expanded nuScenes subcategories)', () => {
+    expect(nuScenesManifest.boxTypes).toHaveLength(13)
+    // Verify vehicle subtypes have distinct IDs
+    const ids = nuScenesManifest.boxTypes.map(bt => bt.id)
+    expect(new Set(ids).size).toBe(ids.length) // no duplicate IDs
   })
 
   it('has frameRate of 2 Hz (keyframes)', () => {

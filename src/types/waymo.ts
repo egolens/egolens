@@ -33,15 +33,6 @@ export const BoxType = {
 } as const
 export type BoxType = (typeof BoxType)[keyof typeof BoxType]
 
-/** Color palette per box type — nuScenes convention adapted for Waymo classes */
-export const BOX_TYPE_COLORS: Record<number, string> = {
-  [BoxType.TYPE_UNKNOWN]: '#6B7280',
-  [BoxType.TYPE_VEHICLE]: '#FF9E00',    // orange (nuScenes car)
-  [BoxType.TYPE_PEDESTRIAN]: '#CCFF00', // lemon-lime (high visibility)
-  [BoxType.TYPE_SIGN]: '#FF44FF',       // bright magenta (Waymo-only class)
-  [BoxType.TYPE_CYCLIST]: '#DC143C',    // crimson (nuScenes bicycle)
-}
-
 /** Highlight color for cross-modal 2D↔3D hover (unified for self + linked) */
 export const HIGHLIGHT_COLOR = '#00E5FF'   // bright cyan — stands out against all box type colors
 

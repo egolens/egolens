@@ -303,7 +303,8 @@ export default function PointCloud() {
 
     // Always read latest state from store (no stale closure)
     const { currentFrame: curFrame, visibleSensors: visSensors,
-            colormapMode: cmap, worldMode: wmode, activeCam: aCam } =
+            colormapMode: cmap, worldMode: wmode, activeCam: aCam,
+            cameraCalibrations: camCalibs } =
       useSceneStore.getState()
 
     const geom = geometryRef.current
@@ -337,7 +338,7 @@ export default function PointCloud() {
     const stride = manifest.pointStride
 
     // POV frustum culling: hide points inside the active camera's view cone
-    const culler = buildFrustumCuller(curFrame.cameraCalibrations, aCam)
+    const culler = buildFrustumCuller(camCalibs, aCam)
 
     let lidarTotal = 0
     let radarTotal = 0

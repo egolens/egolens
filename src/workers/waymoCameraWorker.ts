@@ -24,8 +24,6 @@ import type {
   CameraFrameResult,
   CameraBatchRequest,
   CameraBatchResult,
-  CameraWorkerReady,
-  CameraWorkerError,
   CameraWorkerResponse,
 } from './types'
 

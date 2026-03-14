@@ -20,7 +20,6 @@ import type {
   SensorCloudResult,
   LidarFrameResult,
   LidarBatchRequest,
-  LidarBatchResult,
   LidarWorkerResponse,
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'

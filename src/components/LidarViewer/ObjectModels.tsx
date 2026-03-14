@@ -176,3 +176,51 @@ export function CyclistModel({ color, opacity }: { color: string; opacity: numbe
     </Suspense>
   )
 }
+
+// ============================================================================
+// Traffic Cone — public/models/cone.glb
+// ============================================================================
+
+export function TrafficConeModel({ color, opacity }: { color: string; opacity: number }) {
+  return (
+    <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
+      <GLBModel url={`${import.meta.env.BASE_URL}models/cone.glb`} color={color} opacity={opacity} />
+    </Suspense>
+  )
+}
+
+// ============================================================================
+// Barrier — public/models/barrier.glb
+// ============================================================================
+
+export function BarrierModel({ color, opacity }: { color: string; opacity: number }) {
+  return (
+    <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
+      <GLBModel url={`${import.meta.env.BASE_URL}models/barrier.glb`} color={color} opacity={opacity} />
+    </Suspense>
+  )
+}
+
+// ============================================================================
+// Bicycle — public/models/bicycle.glb
+// ============================================================================
+
+export function BicycleModel({ color, opacity }: { color: string; opacity: number }) {
+  return (
+    <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
+      <GLBModel url={`${import.meta.env.BASE_URL}models/bicycle.glb`} color={color} opacity={opacity} yawOffset={Math.PI} />
+    </Suspense>
+  )
+}
+
+// ============================================================================
+// Motorcycle — public/models/motorcycle.glb
+// ============================================================================
+
+export function MotorcycleModel({ color, opacity }: { color: string; opacity: number }) {
+  return (
+    <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
+      <GLBModel url={`${import.meta.env.BASE_URL}models/motorcycle.glb`} color={color} opacity={opacity} yawOffset={Math.PI} />
+    </Suspense>
+  )
+}

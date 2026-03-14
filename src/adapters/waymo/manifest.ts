@@ -43,11 +43,11 @@ export const waymoManifest: DatasetManifest = {
   ],
 
   boxTypes: [
-    { id: 0, label: 'Unknown', color: '#6B7280' },
-    { id: 1, label: 'Vehicle', color: '#FF9E00' },
-    { id: 2, label: 'Pedestrian', color: '#CCFF00' },
-    { id: 3, label: 'Sign', color: '#FF44FF' },
-    { id: 4, label: 'Cyclist', color: '#DC143C' },
+    { id: 0, label: 'Unknown',    color: '#6B7280' },
+    { id: 1, label: 'Vehicle',    color: '#FF9E00', model: 'vehicle' },
+    { id: 2, label: 'Pedestrian', color: '#CCFF00', model: 'pedestrian' },
+    { id: 3, label: 'Sign',       color: '#FF44FF', model: 'sign' },
+    { id: 4, label: 'Cyclist',    color: '#DC143C', model: 'cyclist' },
   ],
 
   frameRate: 10,

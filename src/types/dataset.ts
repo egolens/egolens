@@ -28,10 +28,15 @@ export interface CameraSensorDef extends SensorDef {
   flex?: number
 }
 
+/** Which 3D model to render in "model" box mode */
+export type BoxModelType = 'vehicle' | 'pedestrian' | 'cyclist' | 'motorcycle' | 'bicycle' | 'sign' | 'cone' | 'barrier' | 'box'
+
 export interface BoxTypeDef {
   id: number
   label: string
   color: string
+  /** 3D model to use in model mode (default: 'box' wireframe fallback) */
+  model?: BoxModelType
 }
 
 // ---------------------------------------------------------------------------

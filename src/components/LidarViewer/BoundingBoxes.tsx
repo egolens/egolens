@@ -12,9 +12,33 @@
 import { useMemo, useCallback, useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useSceneStore, getObjectTrajectories, hasLaserAssociation, getPoseByFrameIndex } from '../../stores/useSceneStore'
-import { BoxType, BOX_TYPE_COLORS, HIGHLIGHT_COLOR } from '../../types/waymo'
-import { VehicleModel, PedestrianModel, CyclistModel, SignModel } from './ObjectModels'
+import { HIGHLIGHT_COLOR } from '../../types/waymo'
+import { VehicleModel, PedestrianModel, CyclistModel, MotorcycleModel, BicycleModel, SignModel, TrafficConeModel, BarrierModel } from './ObjectModels'
+import { getManifest } from '../../adapters/registry'
+import type { BoxModelType } from '../../types/dataset'
 import type { ParquetRow } from '../../utils/merge'
+
+// ---------------------------------------------------------------------------
+// Manifest-driven color + model lookup
+// ---------------------------------------------------------------------------
+
+const FALLBACK_COLOR = '#6B7280'
+
+/** Build a type→color map from the active manifest's boxTypes */
+function getBoxColorMap(): Map<number, string> {
+  const map = new Map<number, string>()
+  for (const bt of getManifest().boxTypes) map.set(bt.id, bt.color)
+  return map
+}
+
+/** Build a type→modelType map from the active manifest's boxTypes */
+function getBoxModelMap(): Map<number, BoxModelType> {
+  const map = new Map<number, BoxModelType>()
+  for (const bt of getManifest().boxTypes) {
+    if (bt.model) map.set(bt.id, bt.model)
+  }
+  return map
+}
 
 // ---------------------------------------------------------------------------
 // Parsed box data
@@ -54,7 +78,7 @@ function parseBoxes(rows: ParquetRow[]): ParsedBox[] {
       cx, cy, cz,
       sx, sy, sz,
       heading: heading ?? 0,
-      type: type ?? BoxType.TYPE_UNKNOWN,
+      type: type ?? 0,
       id,
       isAssociated: id ? hasLaserAssociation(id) : false,
     })
@@ -73,12 +97,13 @@ const _unitEdges = new THREE.EdgesGeometry(_unitBox)
 // "box" mode — semi-transparent solid + edge outline
 // ---------------------------------------------------------------------------
 
-function BoxMesh({ box, highlighted, onHover }: {
+function BoxMesh({ box, highlighted, onHover, colorMap }: {
   box: ParsedBox
   highlighted: 'self' | 'linked' | false
   onHover?: (id: string | null) => void
+  colorMap: Map<number, string>
 }) {
-  const baseColor = BOX_TYPE_COLORS[box.type] ?? BOX_TYPE_COLORS[BoxType.TYPE_UNKNOWN]
+  const baseColor = colorMap.get(box.type) ?? FALLBACK_COLOR
   const color = highlighted ? HIGHLIGHT_COLOR : baseColor
   const opacity = highlighted ? 0.5 : 0.25
 
@@ -116,14 +141,17 @@ function BoxMesh({ box, highlighted, onHover }: {
 
 const MODEL_OPACITY = 0.55
 
-function ModelMesh({ box, highlighted, onHover }: {
+function ModelMesh({ box, highlighted, onHover, colorMap, modelMap }: {
   box: ParsedBox
   highlighted: 'self' | 'linked' | false
   onHover?: (id: string | null) => void
+  colorMap: Map<number, string>
+  modelMap: Map<number, BoxModelType>
 }) {
-  const baseColor = BOX_TYPE_COLORS[box.type] ?? BOX_TYPE_COLORS[BoxType.TYPE_UNKNOWN]
+  const baseColor = colorMap.get(box.type) ?? FALLBACK_COLOR
   const color = highlighted ? HIGHLIGHT_COLOR : baseColor
   const opacity = highlighted ? 0.8 : MODEL_OPACITY
+  const modelType = modelMap.get(box.type) // undefined → box fallback
 
   const handlePointerEnter = useCallback((e: THREE.Event) => {
     if (onHover) {
@@ -136,22 +164,39 @@ function ModelMesh({ box, highlighted, onHover }: {
     if (onHover) onHover(null)
   }, [onHover])
 
+  // Types without a 3D model (Unknown, Barrier, Animal, etc.) → wireframe box
+  if (!modelType || modelType === 'box') {
+    return (
+      <BoxMesh box={box} highlighted={highlighted} onHover={onHover} colorMap={colorMap} />
+    )
+  }
+
   let model: React.ReactNode
-  switch (box.type) {
-    case BoxType.TYPE_VEHICLE:
+  switch (modelType) {
+    case 'vehicle':
       model = <VehicleModel color={color} opacity={opacity} />
       break
-    case BoxType.TYPE_PEDESTRIAN:
+    case 'pedestrian':
       model = <PedestrianModel color={color} opacity={opacity} />
       break
-    case BoxType.TYPE_CYCLIST:
+    case 'cyclist':
       model = <CyclistModel color={color} opacity={opacity} />
       break
-    case BoxType.TYPE_SIGN:
+    case 'motorcycle':
+      model = <MotorcycleModel color={color} opacity={opacity} />
+      break
+    case 'bicycle':
+      model = <BicycleModel color={color} opacity={opacity} />
+      break
+    case 'sign':
       model = <SignModel color={color} opacity={opacity} />
       break
-    default:
-      model = <VehicleModel color={color} opacity={opacity} />
+    case 'cone':
+      model = <TrafficConeModel color={color} opacity={opacity} />
+      break
+    case 'barrier':
+      model = <BarrierModel color={color} opacity={opacity} />
+      break
   }
 
   return (
@@ -190,14 +235,15 @@ function transformPoint(pose: number[], x: number, y: number, z: number): [numbe
   ]
 }
 
-function TrajectoryTrail({ objectId, type, currentFrame, trailLength, worldMode }: {
+function TrajectoryTrail({ objectId, type, currentFrame, trailLength, worldMode, colorMap }: {
   objectId: string
   type: number
   currentFrame: number
   trailLength: number
   worldMode: boolean
+  colorMap: Map<number, string>
 }) {
-  const color = BOX_TYPE_COLORS[type] ?? BOX_TYPE_COLORS[BoxType.TYPE_UNKNOWN]
+  const color = colorMap.get(type) ?? FALLBACK_COLOR
 
   const geometry = useMemo(() => {
     if (trailLength <= 0) return null
@@ -281,9 +327,11 @@ export default function BoundingBoxes() {
     return parseBoxes(boxRows)
   }, [boxRows])
 
-  if (boxMode === 'off' || parsed.length === 0) return null
+  // Build color/model maps from manifest (stable across renders for same dataset)
+  const colorMap = useMemo(() => getBoxColorMap(), [])
+  const modelMap = useMemo(() => getBoxModelMap(), [])
 
-  const Renderer = boxMode === 'model' ? ModelMesh : BoxMesh
+  if (boxMode === 'off' || parsed.length === 0) return null
 
   return (
     <>
@@ -293,12 +341,22 @@ export default function BoundingBoxes() {
           : highlightedLaserBoxId === box.id ? 'linked'
           : false
 
-        return (
-          <Renderer
+        return boxMode === 'model' ? (
+          <ModelMesh
             key={i}
             box={box}
             highlighted={highlighted}
             onHover={box.isAssociated ? handleHover : undefined}
+            colorMap={colorMap}
+            modelMap={modelMap}
+          />
+        ) : (
+          <BoxMesh
+            key={i}
+            box={box}
+            highlighted={highlighted}
+            onHover={box.isAssociated ? handleHover : undefined}
+            colorMap={colorMap}
           />
         )
       })}
@@ -322,6 +380,8 @@ export function TrajectoryTrails() {
     return parseBoxes(boxRows)
   }, [boxRows])
 
+  const colorMap = useMemo(() => getBoxColorMap(), [])
+
   if (boxMode === 'off' || !worldMode || trailLength <= 0 || parsed.length === 0) return null
 
   return (
@@ -335,6 +395,7 @@ export function TrajectoryTrails() {
             currentFrame={currentFrameIndex}
             trailLength={trailLength}
             worldMode={worldMode}
+            colorMap={colorMap}
           />
         ) : null,
       )}

@@ -457,6 +457,7 @@ export default function LidarViewer() {
   const visibleSensors = useSceneStore((s) => s.visibleSensors)
   const toggleSensor = useSceneStore((s) => s.actions.toggleSensor)
   const sensorClouds = useSceneStore((s) => s.currentFrame?.sensorClouds)
+  const boxRows = useSceneStore((s) => s.currentFrame?.boxes)
   const boxMode = useSceneStore((s) => s.boxMode)
   const setBoxMode = useSceneStore((s) => s.actions.setBoxMode)
   const trailLength = useSceneStore((s) => s.trailLength)
@@ -974,21 +975,38 @@ export default function LidarViewer() {
             </div>
 
             {boxMode !== 'off' && (<>
-              {/* Class legend */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', padding: '4px 8px' }}>
-                {getManifest().boxTypes.filter(bt => bt.id !== 0).map(({ id, label, color }) => (
-                  <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '1px',
-                      backgroundColor: color,
-                      display: 'inline-block', flexShrink: 0,
-                    }} />
-                    <span style={{ fontSize: '9px', fontFamily: fonts.sans, color: colors.textSecondary }}>
-                      {label}
-                    </span>
+              {/* Class legend — only types present in current frame */}
+              {(() => {
+                const presentTypes = new Set<number>()
+                if (boxRows) {
+                  for (const row of boxRows) {
+                    const t = (row['[LiDARBoxComponent].type'] as number) ?? 0
+                    presentTypes.add(t)
+                  }
+                }
+                // Remove unknown (0) from legend — not informative
+                presentTypes.delete(0)
+                if (presentTypes.size === 0) return null
+                const manifest = getManifest()
+                // Sort by manifest order (preserves logical grouping)
+                const sorted = manifest.boxTypes.filter(bt => presentTypes.has(bt.id))
+                return (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', padding: '4px 8px' }}>
+                    {sorted.map(({ id, label, color }) => (
+                      <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{
+                          width: 6, height: 6, borderRadius: '1px',
+                          backgroundColor: color,
+                          display: 'inline-block', flexShrink: 0,
+                        }} />
+                        <span style={{ fontSize: '9px', fontFamily: fonts.sans, color: colors.textSecondary }}>
+                          {label}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )
+              })()}
 
               {/* Trail slider — only in world mode */}
               {worldMode && (

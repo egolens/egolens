@@ -16,7 +16,6 @@ import type {
   CameraImageResult,
   CameraFrameResult,
   CameraBatchRequest,
-  CameraBatchResult,
   CameraWorkerResponse,
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'

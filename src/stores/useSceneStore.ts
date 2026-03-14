@@ -188,12 +188,12 @@ const internal = {
   cameraImageCache: new Map<number, Map<number, ArrayBuffer>>(),
   playIntervalId: null as ReturnType<typeof setInterval> | null,
   /** Worker pool for parallel batch loading (lidar) */
-  workerPool: null as WorkerPool | null,
+  workerPool: null as WorkerPool<Record<string, unknown>, LidarBatchResult> | null,
   numBatches: 0,
   /** Track which lidar batches have been loaded or are in-flight */
   loadedRowGroups: new Set<number>(),
   /** Camera worker pool */
-  cameraPool: null as WorkerPool | null,
+  cameraPool: null as WorkerPool<Record<string, unknown>, CameraBatchResult> | null,
   cameraNumBatches: 0,
   /** Track which camera batches have been loaded or are in-flight */
   cameraLoadedRowGroups: new Set<number>(),
@@ -980,7 +980,7 @@ async function initDataWorker(
   const lidarSource = sources.get('lidar')
   if (!lidarSource) return
 
-  const pool = new WorkerPool(
+  const pool = new WorkerPool<Record<string, unknown>, LidarBatchResult>(
     WORKER_CONCURRENCY,
     () => new Worker(new URL('../workers/waymoLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
@@ -1000,7 +1000,7 @@ async function initCameraWorker(
   const cameraSource = sources.get('camera_image')
   if (!cameraSource) return
 
-  const pool = new WorkerPool(
+  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
     2,
     () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
   )
@@ -1235,7 +1235,7 @@ async function initNuScenesLidarWorker(
     if (file) fileEntries.push([filename, file])
   }
 
-  const pool = new WorkerPool(
+  const pool = new WorkerPool<Record<string, unknown>, LidarBatchResult>(
     WORKER_CONCURRENCY,
     () => new Worker(new URL('../workers/nuScenesLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
@@ -1271,7 +1271,7 @@ async function initNuScenesCameraWorker(
     if (file) fileEntries.push([filename, file])
   }
 
-  const pool = new WorkerPool(
+  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
     2,
     () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
   )
