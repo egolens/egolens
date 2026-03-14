@@ -101,10 +101,17 @@ export function BevMinimapRenderer({
       gl.render(scene, cam)
     }
 
-    /** Schedule render after next rAF (lets R3F update scene first) */
+    /**
+     * Schedule render after TWO rAFs (lets React reconcile + R3F update scene first).
+     * A single rAF isn't enough for scene-graph changes (e.g. boxMode toggle
+     * unmounts BoxMesh and mounts ModelMesh) because R3F's reconciler may not
+     * have committed the new Three.js objects within one animation frame.
+     */
     const scheduleRender = () => {
       cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(render)
+      rafId = requestAnimationFrame(() => {
+        rafId = requestAnimationFrame(render)
+      })
     }
 
     scheduleRender()

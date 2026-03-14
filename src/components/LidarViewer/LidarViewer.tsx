@@ -83,6 +83,10 @@ function PovController({
   const returnTarget = useRef<{ pos: THREE.Vector3; fov: number; target: THREE.Vector3 } | null>(null)
   /** Intermediate lookAt point — lerped each frame for smooth orientation */
   const returnLookAt = useRef<THREE.Vector3 | null>(null)
+  /** True while entry/camera-switch animation is running (not on frame changes) */
+  const enteringPov = useRef(false)
+  /** Track which camera ID is active to detect camera switches vs frame changes */
+  const prevCameraId = useRef<number | null>(null)
 
   // Save orbital camera state when entering POV
   useEffect(() => {
@@ -103,6 +107,14 @@ function PovController({
           target: orbitRef.current?.target?.clone() ?? new THREE.Vector3(),
         }
       }
+      // Animate only on initial entry or camera switch (not frame changes)
+      const cameraChanged = prevCameraId.current !== targetCalib.cameraName
+      if (cameraChanged) {
+        enteringPov.current = true
+      }
+      prevCameraId.current = targetCalib.cameraName
+    } else {
+      prevCameraId.current = null
     }
   }, [targetCalib, camera, orbitRef, returningRef])
 
@@ -156,21 +168,38 @@ function PovController({
       const { worldMode, currentFrame } = useSceneStore.getState()
       const pose = currentFrame?.vehiclePose ?? null
 
+      // Compute target position & quaternion
+      let targetPos: THREE.Vector3
+      let targetQuat: THREE.Quaternion
       if (worldMode && pose) {
         _povPoseMat.fromArray(pose).transpose()
         _povWorldPos.copy(targetCalib.position).applyMatrix4(_povPoseMat)
         _povPoseQuat.setFromRotationMatrix(_povPoseMat)
         _povWorldQuat.copy(_povVehicleQuat).premultiply(_povPoseQuat)
-
-        camera.position.copy(_povWorldPos)
-        camera.quaternion.copy(_povWorldQuat)
+        targetPos = _povWorldPos
+        targetQuat = _povWorldQuat
       } else {
-        camera.position.copy(targetCalib.position)
-        camera.quaternion.copy(_povVehicleQuat)
+        targetPos = targetCalib.position
+        targetQuat = _povVehicleQuat
       }
 
       const targetFov = THREE.MathUtils.radToDeg(targetCalib.vFov)
-      pc.fov = targetFov
+
+      if (enteringPov.current) {
+        // Smooth entry animation
+        camera.position.lerp(targetPos, LERP_SPEED)
+        camera.quaternion.slerp(targetQuat, LERP_SPEED)
+        pc.fov = THREE.MathUtils.lerp(pc.fov, targetFov, LERP_SPEED)
+        // Snap once close enough
+        if (camera.position.distanceTo(targetPos) < SNAP_THRESHOLD) {
+          enteringPov.current = false
+        }
+      } else {
+        // Locked to camera — instant follow
+        camera.position.copy(targetPos)
+        camera.quaternion.copy(targetQuat)
+        pc.fov = targetFov
+      }
       pc.updateProjectionMatrix()
       return
     }

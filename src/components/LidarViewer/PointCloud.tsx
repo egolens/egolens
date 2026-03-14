@@ -15,6 +15,7 @@ import { useFrame } from '@react-three/fiber'
 import { useSceneStore } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { getManifest } from '../../adapters/registry'
+import { parseCameraCalibrations } from '../../utils/cameraCalibration'
 
 // ---------------------------------------------------------------------------
 // Colormaps
@@ -180,12 +181,71 @@ const VELOCITY_STOPS: [number, number, number][] = [
 /** Max speed for normalization (m/s). ~15 m/s ≈ 54 km/h covers most urban traffic. */
 const VELOCITY_MAX = 15
 
+// ---------------------------------------------------------------------------
+// POV frustum culling — hide points inside the active camera's view cone
+// ---------------------------------------------------------------------------
+
+/** Precomputed inverse camera transform + frustum half-tangents for fast per-point test */
+interface FrustumCuller {
+  /** 3×3 inverse rotation matrix (vehicle → camera optical frame), row-major */
+  invR: [number, number, number, number, number, number, number, number, number]
+  /** Camera position in vehicle frame */
+  cx: number; cy: number; cz: number
+  /** Half-tangent of horizontal & vertical FOV */
+  tanH: number; tanV: number
+}
+
+/** Minimum Z in camera space to start culling (avoids clipping points behind camera) */
+const CULL_NEAR = 0.5
+/** Maximum Z — only cull nearby points so distant scenery stays visible during POV */
+const CULL_FAR = 20
+
+/** Build culler from a CameraCalib. Returns null if activeCam is null. */
+function buildFrustumCuller(
+  cameraCalibrations: any[],
+  activeCam: number | null,
+): FrustumCuller | null {
+  if (activeCam === null || cameraCalibrations.length === 0) return null
+  const calibMap = parseCameraCalibrations(cameraCalibrations)
+  const calib = calibMap.get(activeCam)
+  if (!calib) return null
+
+  // Inverse quaternion: camera optical → vehicle  ⇒  vehicle → camera optical
+  const qInv = calib.quaternion.clone().invert()
+  const m = new THREE.Matrix4().makeRotationFromQuaternion(qInv)
+  const e = m.elements // column-major
+  const invR: FrustumCuller['invR'] = [
+    e[0], e[4], e[8],
+    e[1], e[5], e[9],
+    e[2], e[6], e[10],
+  ]
+
+  return {
+    invR,
+    cx: calib.position.x, cy: calib.position.y, cz: calib.position.z,
+    tanH: Math.tan(calib.hFov / 2),
+    tanV: Math.tan(calib.vFov / 2),
+  }
+}
+
+/** Returns true if point (px,py,pz) in vehicle frame is inside the camera frustum */
+function insideFrustum(c: FrustumCuller, px: number, py: number, pz: number): boolean {
+  // Translate to camera origin
+  const dx = px - c.cx
+  const dy = py - c.cy
+  const dz = pz - c.cz
+  // Rotate to camera optical frame (X=right, Y=down, Z=forward)
+  const camZ = c.invR[6] * dx + c.invR[7] * dy + c.invR[8] * dz
+  if (camZ < CULL_NEAR || camZ > CULL_FAR) return false
+  const camX = c.invR[0] * dx + c.invR[1] * dy + c.invR[2] * dz
+  if (Math.abs(camX) > camZ * c.tanH) return false
+  const camY = c.invR[3] * dx + c.invR[4] * dy + c.invR[5] * dz
+  if (Math.abs(camY) > camZ * c.tanV) return false
+  return true
+}
+
 export default function PointCloud() {
-  const currentFrame = useSceneStore((s) => s.currentFrame)
-  const visibleSensors = useSceneStore((s) => s.visibleSensors)
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
-  const colormapMode = useSceneStore((s) => s.colormapMode)
-  const worldMode = useSceneStore((s) => s.worldMode)
   const geometryRef = useRef<THREE.BufferGeometry>(null)
   const radarGeometryRef = useRef<THREE.BufferGeometry>(null)
 
@@ -207,25 +267,54 @@ export default function PointCloud() {
     return { radarPosAttr: pos, radarColorAttr: col }
   }, [])
 
-  // Mark dirty when any input changes — actual buffer update happens in useFrame
-  // to avoid R3F reconciler resetting needsUpdate between useEffect and render.
+  // Dirty flag — set synchronously by Zustand subscribe (no React timing dependency)
   const dirtyRef = useRef(true)
-  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode, worldMode])
+
+  useEffect(() => {
+    // Track previous values to detect relevant changes only
+    const s0 = useSceneStore.getState()
+    const prev = {
+      frame: s0.currentFrame,
+      sensors: s0.visibleSensors,
+      cmap: s0.colormapMode,
+      world: s0.worldMode,
+      cam: s0.activeCam,
+    }
+    return useSceneStore.subscribe((state) => {
+      if (state.currentFrame !== prev.frame ||
+          state.visibleSensors !== prev.sensors ||
+          state.colormapMode !== prev.cmap ||
+          state.worldMode !== prev.world ||
+          state.activeCam !== prev.cam) {
+        dirtyRef.current = true
+        prev.frame = state.currentFrame
+        prev.sensors = state.visibleSensors
+        prev.cmap = state.colormapMode
+        prev.world = state.worldMode
+        prev.cam = state.activeCam
+      }
+    })
+  }, [])
 
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
     if (!dirtyRef.current) return
     dirtyRef.current = false
 
+    // Always read latest state from store (no stale closure)
+    const { currentFrame: curFrame, visibleSensors: visSensors,
+            colormapMode: cmap, worldMode: wmode, activeCam: aCam } =
+      useSceneStore.getState()
+
     const geom = geometryRef.current
     const radarGeom = radarGeometryRef.current
-    if (!currentFrame) {
+    if (!curFrame) {
       if (geom) geom.setDrawRange(0, 0)
       if (radarGeom) radarGeom.setDrawRange(0, 0)
       return
     }
 
-    const sensorClouds = currentFrame.sensorClouds
+    const sensorClouds = curFrame.sensorClouds
     if (!sensorClouds || sensorClouds.size === 0) {
       if (geom) geom.setDrawRange(0, 0)
       if (radarGeom) radarGeom.setDrawRange(0, 0)
@@ -236,21 +325,24 @@ export default function PointCloud() {
     const colArr = colorAttr.array as Float32Array
     const radarPosArr = radarPosAttr.array as Float32Array
     const radarColArr = radarColorAttr.array as Float32Array
-    const stops = COLORMAP_STOPS[colormapMode]
-    const attrOff = ATTR_OFFSET[colormapMode]
+    const stops = COLORMAP_STOPS[cmap]
+    const attrOff = ATTR_OFFSET[cmap]
     const manifest = getManifest()
     // Intensity range differs per dataset (Waymo: 0–1, nuScenes: 0–255)
-    const [attrMin, attrMax] = colormapMode === 'intensity' && manifest.intensityRange
+    const [attrMin, attrMax] = cmap === 'intensity' && manifest.intensityRange
       ? manifest.intensityRange
-      : ATTR_RANGE[colormapMode]
+      : ATTR_RANGE[cmap]
     const attrSpan = attrMax - attrMin
 
     const stride = manifest.pointStride
 
+    // POV frustum culling: hide points inside the active camera's view cone
+    const culler = buildFrustumCuller(curFrame.cameraCalibrations, aCam)
+
     let lidarTotal = 0
     let radarTotal = 0
     for (const [laserName, cloud] of sensorClouds) {
-      if (!visibleSensors.has(laserName)) continue
+      if (!visSensors.has(laserName)) continue
       const { positions } = cloud
       const isRadar = laserName >= RADAR_SENSOR_ID_MIN
 
@@ -259,7 +351,7 @@ export default function PointCloud() {
         const RADAR_STRIDE = 5
         // World mode → speedComp (offset 3): true object velocity
         // Vehicle mode → speedRaw (offset 4): velocity relative to ego
-        const speedOffset = worldMode ? 3 : 4
+        const speedOffset = wmode ? 3 : 4
         const count = Math.min(cloud.pointCount, MAX_RADAR_POINTS - radarTotal)
         for (let i = 0; i < count; i++) {
           const src = i * RADAR_STRIDE
@@ -278,19 +370,24 @@ export default function PointCloud() {
         radarTotal += count
       } else {
         // LiDAR: colormap-based
-        const count = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
+        const maxCount = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
 
         // Segment mode: use per-point label → palette lookup
-        const isSegMode = colormapMode === 'segment'
+        const isSegMode = cmap === 'segment'
         const segLabels = cloud.segLabels
         const segLabelCount = segLabels ? segLabels.length : 0
 
-        for (let i = 0; i < count; i++) {
+        let written = 0
+        for (let i = 0; i < maxCount; i++) {
           const src = i * stride
-          const dst = (lidarTotal + i) * 3
           const px = positions[src]
           const py = positions[src + 1]
           const pz = positions[src + 2]
+
+          // POV frustum culling: skip points inside the camera's view cone
+          if (culler && insideFrustum(culler, px, py, pz)) continue
+
+          const dst = (lidarTotal + written) * 3
           posArr[dst] = px
           posArr[dst + 1] = py
           posArr[dst + 2] = pz
@@ -313,8 +410,9 @@ export default function PointCloud() {
           colArr[dst] = r
           colArr[dst + 1] = g
           colArr[dst + 2] = b
+          written++
         }
-        lidarTotal += count
+        lidarTotal += written
       }
     }
 
