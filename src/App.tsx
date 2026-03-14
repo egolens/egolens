@@ -374,7 +374,7 @@ const DOWNLOAD_SCRIPT = `# Install Google Cloud CLI: https://cloud.google.com/sd
 gcloud auth login
 
 BUCKET="gs://waymo_open_dataset_v_2_0_1/training"
-COMPONENTS="vehicle_pose lidar_calibration camera_calibration lidar_box lidar camera_image"
+COMPONENTS="vehicle_pose lidar_calibration camera_calibration lidar_box lidar camera_image lidar_segmentation camera_segmentation lidar_hkp camera_hkp"
 N=1  # Number of segments to download (~500 MB each)
 
 SEGMENTS=$(gsutil ls "$BUCKET/vehicle_pose/*.parquet" | head -$N | xargs -I{} basename {} .parquet)

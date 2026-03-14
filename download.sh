@@ -1,6 +1,6 @@
 # Change to ".../validation" for the validation split
 BUCKET="gs://waymo_open_dataset_v_2_0_1/training"
-COMPONENTS="vehicle_pose lidar_calibration camera_calibration lidar_box camera_box camera_to_lidar_box_association lidar camera_image stats"
+COMPONENTS="vehicle_pose lidar_calibration camera_calibration lidar_box camera_box camera_to_lidar_box_association lidar camera_image stats lidar_segmentation camera_segmentation lidar_hkp camera_hkp"
 
 # ---------------------------------------------------------------------------
 # Download mode: by INDEX or by COUNT

@@ -763,6 +763,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         'vehicle_pose', 'lidar_calibration', 'camera_calibration',
         'lidar_box', 'camera_box', 'camera_to_lidar_box_association',
         'lidar', 'camera_image', 'stats',
+        'lidar_segmentation', 'camera_segmentation', 'lidar_hkp', 'camera_hkp',
       ]
       const sources = new Map<string, string>()
       for (const comp of components) {
