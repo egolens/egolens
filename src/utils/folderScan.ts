@@ -42,6 +42,7 @@ export async function scanDirectoryHandle(
   // Determine root: if child dirs match known components, this IS the data root
   // Otherwise, look one level deeper (e.g. user dropped a folder containing waymo_data/)
   let componentDirs: Map<string, FileSystemDirectoryHandle>
+  let resolvedDirHandle = dirHandle  // Track the actual data root for AV2
 
   const hasComponents = [...childDirs.keys()].some((n) => getAllKnownComponents().has(n))
   if (hasComponents) {
@@ -55,16 +56,22 @@ export async function scanDirectoryHandle(
           componentDirs.set(name, handle as FileSystemDirectoryHandle)
         }
       }
-      if (componentDirs.size > 0) break
+      if (componentDirs.size > 0) {
+        resolvedDirHandle = childDir  // The actual log/data directory is one level down
+        break
+      }
     }
   }
 
   if (componentDirs.size === 0) return segments
 
-  // Detect dataset type — nuScenes requires different scanning strategy
+  // Detect dataset type — nuScenes/AV2 require different scanning strategies
   const detectedManifest = detectDataset([...componentDirs.keys()])
   if (detectedManifest?.id === 'nuscenes') {
     return scanNuScenesDirectoryHandle(componentDirs)
+  }
+  if (detectedManifest?.id === 'argoverse2') {
+    return scanAV2DirectoryHandle(resolvedDirHandle, componentDirs)
   }
 
   // Scan each component directory for .parquet files
@@ -159,6 +166,146 @@ async function scanNuScenesDirectoryHandle(
   }
 
   return new Map([['__nuscenes__', allFiles]])
+}
+
+// ---------------------------------------------------------------------------
+// Argoverse 2-specific directory scanning
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan an Argoverse 2 Sensor Dataset directory.
+ *
+ * AV2 has two possible input structures:
+ * 1. Single log: user drops a log directory containing sensors/ and calibration/
+ * 2. Multi-log: user drops a parent directory containing multiple log subdirectories
+ *
+ * Returns a single entry with sentinel key '__argoverse2__' containing all files
+ * for the detected log(s), or one entry per log if multiple are found.
+ *
+ * Single log structure:
+ *   {log_id}/
+ *   ├── sensors/
+ *   │   ├── lidar/{timestamp_ns}.feather
+ *   │   └── cameras/{cam_name}/{timestamp_ns}.jpg
+ *   ├── calibration/
+ *   │   ├── egovehicle_SE3_sensor.feather
+ *   │   └── intrinsics.feather
+ *   ├── annotations.feather
+ *   └── city_SE3_egovehicle.feather
+ */
+async function scanAV2DirectoryHandle(
+  dirHandle: FileSystemDirectoryHandle,
+  componentDirs: Map<string, FileSystemDirectoryHandle>,
+): Promise<Map<string, Map<string, File>>> {
+  // Check if this IS a single log directory (has sensors/ and calibration/ directly)
+  if (componentDirs.has('sensors') && componentDirs.has('calibration')) {
+    const allFiles = await scanSingleAV2Log(dirHandle, componentDirs)
+    const logId = dirHandle.name || 'av2_log'
+    return new Map([['__argoverse2__', new Map([
+      ...allFiles.entries(),
+      ['__logId__', new File([], logId)] as [string, File],  // Sentinel to pass logId
+    ])]])
+  }
+
+  // Otherwise, this might be a parent directory with multiple log subdirs
+  // Scan each child directory to see if it's an AV2 log
+  const result = new Map<string, Map<string, File>>()
+  const logDirs: [string, FileSystemDirectoryHandle][] = []
+
+  for await (const [name, handle] of dirHandle as any) {
+    if (handle.kind !== 'directory') continue
+    // Check if this child has sensors/ and calibration/
+    const childDirs = new Map<string, FileSystemDirectoryHandle>()
+    for await (const [childName, childHandle] of handle as any) {
+      if (childHandle.kind === 'directory') {
+        childDirs.set(childName, childHandle as FileSystemDirectoryHandle)
+      }
+    }
+    if (childDirs.has('sensors') && childDirs.has('calibration')) {
+      logDirs.push([name, handle as FileSystemDirectoryHandle])
+    }
+  }
+
+  if (logDirs.length === 0) return result
+
+  // For now, load first log only (multi-log support can be added later)
+  const [logId, logHandle] = logDirs[0]
+  const logComponentDirs = new Map<string, FileSystemDirectoryHandle>()
+  for await (const [name, handle] of logHandle as any) {
+    if (handle.kind === 'directory') {
+      logComponentDirs.set(name, handle as FileSystemDirectoryHandle)
+    }
+  }
+
+  const allFiles = await scanSingleAV2Log(logHandle, logComponentDirs)
+  return new Map([['__argoverse2__', new Map([
+    ...allFiles.entries(),
+    ['__logId__', new File([], logId)] as [string, File],
+  ])]])
+}
+
+/**
+ * Scan a single AV2 log directory and collect all files.
+ */
+async function scanSingleAV2Log(
+  logHandle: FileSystemDirectoryHandle,
+  componentDirs: Map<string, FileSystemDirectoryHandle>,
+): Promise<Map<string, File>> {
+  const allFiles = new Map<string, File>()
+
+  // Read top-level feather files (annotations, poses)
+  for await (const [fileName, handle] of logHandle as any) {
+    if (handle.kind === 'file' && fileName.endsWith('.feather')) {
+      allFiles.set(fileName, await (handle as FileSystemFileHandle).getFile())
+    }
+  }
+
+  // Read calibration files
+  const calibDir = componentDirs.get('calibration')
+  if (calibDir) {
+    for await (const [fileName, handle] of calibDir as any) {
+      if (handle.kind === 'file' && fileName.endsWith('.feather')) {
+        allFiles.set(`calibration/${fileName}`, await (handle as FileSystemFileHandle).getFile())
+      }
+    }
+  }
+
+  // Read sensor files: sensors/lidar/*.feather and sensors/cameras/{cam}/*.jpg
+  const sensorsDir = componentDirs.get('sensors')
+  if (sensorsDir) {
+    for await (const [sensorType, handle] of sensorsDir as any) {
+      if (handle.kind !== 'directory') continue
+      const sensorTypeDir = handle as FileSystemDirectoryHandle
+
+      if (sensorType === 'lidar') {
+        // sensors/lidar/{timestamp_ns}.feather
+        for await (const [fileName, fileHandle] of sensorTypeDir as any) {
+          if (fileHandle.kind === 'file' && fileName.endsWith('.feather')) {
+            allFiles.set(
+              `sensors/lidar/${fileName}`,
+              await (fileHandle as FileSystemFileHandle).getFile(),
+            )
+          }
+        }
+      } else if (sensorType === 'cameras') {
+        // sensors/cameras/{cam_name}/{timestamp_ns}.jpg
+        for await (const [camName, camHandle] of sensorTypeDir as any) {
+          if (camHandle.kind !== 'directory') continue
+          const camDir = camHandle as FileSystemDirectoryHandle
+          for await (const [fileName, fileHandle] of camDir as any) {
+            if (fileHandle.kind === 'file' && fileName.endsWith('.jpg')) {
+              allFiles.set(
+                `sensors/cameras/${camName}/${fileName}`,
+                await (fileHandle as FileSystemFileHandle).getFile(),
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return allFiles
 }
 
 // ---------------------------------------------------------------------------

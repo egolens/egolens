@@ -48,6 +48,17 @@ import type {
   NuScenesCameraFrameDescriptor,
   NuScenesCameraImageDescriptor,
 } from '../workers/nuScenesCameraWorker'
+import { argoverse2Manifest } from '../adapters/argoverse2/manifest'
+import {
+  buildAV2LogDatabase,
+  loadAV2LogMetadata,
+  type AV2LogDatabase,
+} from '../adapters/argoverse2/metadata'
+import type { AV2LidarFrameDescriptor } from '../workers/av2LidarWorker'
+import type {
+  AV2CameraFrameDescriptor,
+  AV2CameraImageDescriptor,
+} from '../workers/av2CameraWorker'
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 
@@ -225,6 +236,11 @@ const internal = {
   nuScenesDb: null as NuScenesDatabase | null,
   /** nuScenes sample data files keyed by relative path (e.g. "samples/LIDAR_TOP/xxx.pcd.bin") */
   nuScenesSampleFiles: null as Map<string, File> | null,
+  // -- Argoverse 2-specific state --
+  /** Parsed AV2 log database */
+  av2Db: null as AV2LogDatabase | null,
+  /** AV2 sensor data files keyed by relative path */
+  av2SampleFiles: null as Map<string, File> | null,
 }
 
 function resetInternal() {
@@ -703,6 +719,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // If the dataset type changed, visibleSensors IDs may be stale — validate them.
       if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
         setManifest(nuScenesManifest)
+      } else if (internal.datasetId === 'argoverse2' && internal.av2Db) {
+        setManifest(argoverse2Manifest)
       }
 
       // Validate preserved visibleSensors against current manifest's sensor IDs
@@ -715,6 +733,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
       if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
         await loadNuScenesScene(segmentId, set, get)
+        return
+      }
+
+      if (internal.datasetId === 'argoverse2' && internal.av2Db) {
+        await loadAV2Scene(segmentId, set, get)
         return
       }
 
@@ -780,10 +803,45 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
+      // Check for Argoverse 2 sentinel key (produced by folder scanner)
+      if (segments.has('__argoverse2__')) {
+        const allFiles = segments.get('__argoverse2__')!
+
+        // Extract log ID from sentinel file
+        const logIdFile = allFiles.get('__logId__')
+        const logId = logIdFile?.name || 'av2_log'
+
+        // Remove sentinel entries
+        const sampleFiles = new Map<string, File>()
+        for (const [path, file] of allFiles) {
+          if (path !== '__logId__') {
+            sampleFiles.set(path, file)
+          }
+        }
+
+        // Initialize AV2 state
+        internal.datasetId = 'argoverse2'
+        internal.av2SampleFiles = sampleFiles
+        setManifest(argoverse2Manifest)
+
+        // Build log database from Feather files
+        set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
+        internal.av2Db = await buildAV2LogDatabase(sampleFiles, logId)
+
+        // AV2 has a single "scene" per log — use log ID as segment name
+        set({ availableSegments: [logId], loadProgress: 0.1 })
+
+        // Auto-select the single log
+        await get().actions.selectSegment(logId)
+        return
+      }
+
       // Waymo path — store file references for later use by selectSegment
       internal.datasetId = 'waymo'
       internal.nuScenesDb = null
       internal.nuScenesSampleFiles = null
+      internal.av2Db = null
+      internal.av2SampleFiles = null
       setManifest(waymoManifest)
       internal.filesBySegment = segments
       const segmentIds = [...segments.keys()].sort()
@@ -1280,6 +1338,230 @@ async function initNuScenesCameraWorker(
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
     2,
     () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
+  )
+  const { numBatches } = await pool.init({
+    frameBatches: batches,
+    fileEntries,
+  })
+
+  internal.cameraPool = pool
+  internal.cameraNumBatches = numBatches
+  useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+}
+
+// ---------------------------------------------------------------------------
+// Argoverse 2 loading
+// ---------------------------------------------------------------------------
+
+/** Number of frames per worker batch for AV2 */
+const AV2_BATCH_SIZE = 10
+
+async function loadAV2Scene(
+  logId: string,
+  set: (partial: Partial<SceneState>) => void,
+  get: () => SceneState,
+) {
+  if (!internal.av2Db || !internal.av2SampleFiles) {
+    throw new Error('AV2 database not loaded')
+  }
+
+  set({
+    status: 'loading',
+    error: null,
+    loadProgress: 0,
+    loadStep: 'parsing' as LoadStep,
+    availableComponents: ['sensors', 'calibration'],
+    cachedFrames: [],
+  })
+
+  try {
+    memLog.snap('av2:scene-start', { note: logId })
+
+    // 1. Load metadata → MetadataBundle
+    const bundle = loadAV2LogMetadata(internal.av2Db)
+    set({ loadProgress: 0.2 })
+
+    // 2. Extract frame batch info BEFORE applying bundle
+    const { lidarBatches, cameraBatches } = buildAV2FrameBatches(bundle)
+
+    // 3. Apply metadata bundle to internal state
+    applyMetadataBundle(bundle, set, get)
+    set({ loadProgress: 0.3 })
+    memLog.snap('av2:metadata-applied', {
+      note: `${bundle.timestamps.length} frames, ${lidarBatches.length} lidar batches, ${cameraBatches.length} camera batches`,
+    })
+
+    // 4. Init AV2 workers in parallel
+    set({ loadStep: 'workers' as LoadStep })
+    await Promise.all([
+      initAV2LidarWorker(lidarBatches),
+      initAV2CameraWorker(cameraBatches),
+    ])
+    set({ loadProgress: 0.5 })
+    memLog.snap('av2:workers-initialized')
+
+    // 5. Load first batches (LiDAR + Camera in parallel)
+    set({ loadStep: 'first-frame' as LoadStep })
+    const rgT0 = performance.now()
+    const firstFramePromises: Promise<void>[] = []
+    if (internal.workerPool?.isReady()) {
+      firstFramePromises.push(loadAndCacheRowGroup(0, set))
+      if (internal.numBatches > 1) {
+        firstFramePromises.push(loadAndCacheRowGroup(1, set))
+      }
+    }
+    if (internal.cameraPool?.isReady()) {
+      firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
+      if (internal.cameraNumBatches > 1) {
+        firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
+      }
+    }
+    await Promise.all(firstFramePromises)
+    const rgMs = performance.now() - rgT0
+    memLog.snap('av2:first-batches-loaded', {
+      note: `${rgMs.toFixed(0)}ms`,
+    })
+
+    // 6. Show first frame
+    const firstFrame = internal.frameCache.get(0)
+    if (firstFrame) {
+      const camData = internal.cameraImageCache.get(0)
+      set({
+        currentFrameIndex: 0,
+        currentFrame: {
+          ...firstFrame,
+          cameraImages: camData ? new Map(camData) : new Map(),
+        },
+        lastFrameLoadMs: rgMs,
+        lastConvertMs: internal.lastConvertMs,
+      })
+    }
+
+    set({ status: 'ready', loadProgress: 1 })
+    memLog.snap('av2:first-frame-rendered')
+    get().actions.play()
+
+    // 7. Prefetch remaining batches
+    if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
+      internal.prefetchStarted = true
+      prefetchAllRowGroups(set, get)
+    }
+    if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
+      internal.cameraPrefetchStarted = true
+      prefetchAllCameraRowGroups(set)
+    }
+  } catch (e) {
+    console.error('[loadAV2Scene] Error:', e)
+    set({
+      status: 'error',
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}
+
+/**
+ * Extract frame descriptors from AV2 MetadataBundle and group into batches.
+ */
+function buildAV2FrameBatches(bundle: MetadataBundle) {
+  const lidarFrames: AV2LidarFrameDescriptor[] = []
+  const cameraFrames: AV2CameraFrameDescriptor[] = []
+
+  for (let fi = 0; fi < bundle.timestamps.length; fi++) {
+    const ts = bundle.timestamps[fi]
+    const sensorFiles = bundle.vehiclePoseByFrame.get(ts) as Record<string, unknown>[] | undefined
+    if (!sensorFiles) continue
+
+    // LiDAR frame
+    const lidarFile = sensorFiles.find(sf => sf.modality === 'lidar')
+    if (lidarFile) {
+      lidarFrames.push({
+        timestamp: ts.toString(),
+        filename: lidarFile.filename as string,
+      })
+    }
+
+    // Camera frame (all cameras for this frame)
+    const camImages: AV2CameraImageDescriptor[] = []
+    for (const sf of sensorFiles) {
+      if (sf.modality === 'camera') {
+        camImages.push({
+          cameraId: sf.sensorId as number,
+          filename: sf.filename as string,
+        })
+      }
+    }
+    if (camImages.length > 0) {
+      cameraFrames.push({
+        timestamp: ts.toString(),
+        images: camImages,
+      })
+    }
+  }
+
+  // Group into batches
+  const lidarBatches: AV2LidarFrameDescriptor[][] = []
+  for (let i = 0; i < lidarFrames.length; i += AV2_BATCH_SIZE) {
+    lidarBatches.push(lidarFrames.slice(i, i + AV2_BATCH_SIZE))
+  }
+
+  const cameraBatches: AV2CameraFrameDescriptor[][] = []
+  for (let i = 0; i < cameraFrames.length; i += AV2_BATCH_SIZE) {
+    cameraBatches.push(cameraFrames.slice(i, i + AV2_BATCH_SIZE))
+  }
+
+  return { lidarBatches, cameraBatches }
+}
+
+/** Init AV2 LiDAR worker pool */
+async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
+  if (!internal.av2SampleFiles || batches.length === 0) return
+
+  const neededFiles = new Set<string>()
+  for (const batch of batches) {
+    for (const frame of batch) {
+      neededFiles.add(frame.filename)
+    }
+  }
+  const fileEntries: [string, File][] = []
+  for (const filename of neededFiles) {
+    const file = internal.av2SampleFiles.get(filename)
+    if (file) fileEntries.push([filename, file])
+  }
+
+  const pool = new WorkerPool<Record<string, unknown>, LidarBatchResult>(
+    WORKER_CONCURRENCY,
+    () => new Worker(new URL('../workers/av2LidarWorker.ts', import.meta.url), { type: 'module' }),
+  )
+  const { numBatches } = await pool.init({
+    frameBatches: batches,
+    fileEntries,
+  })
+
+  internal.workerPool = pool
+  internal.numBatches = numBatches
+}
+
+/** Init AV2 camera worker pool */
+async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
+  if (!internal.av2SampleFiles || batches.length === 0) return
+
+  const neededFiles = new Set<string>()
+  for (const batch of batches) {
+    for (const frame of batch) {
+      for (const img of frame.images) {
+        neededFiles.add(img.filename)
+      }
+    }
+  }
+  const fileEntries: [string, File][] = []
+  for (const filename of neededFiles) {
+    const file = internal.av2SampleFiles.get(filename)
+    if (file) fileEntries.push([filename, file])
+  }
+
+  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
+    2,
+    () => new Worker(new URL('../workers/av2CameraWorker.ts', import.meta.url), { type: 'module' }),
   )
   const { numBatches } = await pool.init({
     frameBatches: batches,

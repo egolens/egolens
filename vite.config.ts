@@ -78,4 +78,17 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    watch: {
+      // Exclude large dataset directories from file watching to avoid ENOSPC
+      ignored: [
+        '**/waymo_data/**',
+        '**/v1.0-mini/**',
+        '**/v1.0-trainval/**',
+        '**/argo/**',
+        '**/samples/**',
+        '**/sweeps/**',
+      ],
+    },
+  },
 })

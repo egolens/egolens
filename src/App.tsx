@@ -487,12 +487,18 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 
   const handleFiles = useCallback(async (segments: Map<string, Map<string, File>>) => {
     if (segments.size === 0) {
-      setError('No dataset found. Drop a Waymo (vehicle_pose/*.parquet) or nuScenes (v1.0-mini + samples/) folder.')
+      setError('No dataset found. Drop a Waymo, nuScenes, or Argoverse 2 dataset folder.')
       setScanning(false)
       return
     }
     // nuScenes sentinel key — pass directly (store handles validation)
     if (segments.has('__nuscenes__')) {
+      setError(null)
+      await onFilesLoaded(segments)
+      return
+    }
+    // Argoverse 2 sentinel key — pass directly (store handles validation)
+    if (segments.has('__argoverse2__')) {
       setError(null)
       await onFilesLoaded(segments)
       return

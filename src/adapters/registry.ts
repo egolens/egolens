@@ -10,6 +10,7 @@
 import type { DatasetManifest } from '../types/dataset'
 import { waymoManifest } from './waymo/manifest'
 import { nuScenesManifest } from './nuscenes/manifest'
+import { argoverse2Manifest } from './argoverse2/manifest'
 
 // ---------------------------------------------------------------------------
 // Registry — all known dataset manifests
@@ -19,6 +20,7 @@ import { nuScenesManifest } from './nuscenes/manifest'
 const manifests: DatasetManifest[] = [
   waymoManifest,
   nuScenesManifest,
+  argoverse2Manifest,
 ]
 
 // ---------------------------------------------------------------------------
