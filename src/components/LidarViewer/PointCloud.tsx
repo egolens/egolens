@@ -194,6 +194,7 @@ export default function PointCloud() {
     const attrSpan = attrMax - attrMin
 
     const stride = manifest.pointStride
+    const semanticPalette = manifest.semanticPalette ?? null
 
     let lidarTotal = 0
     let radarTotal = 0
@@ -257,7 +258,7 @@ export default function PointCloud() {
             ;[r, g, b] = computePointColor(
               cmap, i, positions, stride,
               stops, attrOff, attrMin, attrSpan,
-              segLabels, panopticLabels,
+              segLabels, panopticLabels, semanticPalette,
             )
           }
 

@@ -19,6 +19,7 @@ import {
   instanceColor,
   computePointColor,
 } from '../colormaps'
+import { WAYMO_SEG_PALETTE } from '../waymoSemanticClasses'
 import type { ColormapMode } from '../../stores/useSceneStore'
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,18 @@ describe('instanceColor', () => {
       }
     }
   })
+
+  it('uses custom palette when provided (Waymo)', () => {
+    const color = instanceColor(1, 0, WAYMO_SEG_PALETTE) // Waymo class 1 = Car
+    expect(color).toEqual(WAYMO_SEG_PALETTE[1])
+  })
+
+  it('varies lightness per instance with custom palette', () => {
+    const base = instanceColor(10, 0, WAYMO_SEG_PALETTE)  // Waymo Pedestrian, inst 0
+    const inst1 = instanceColor(10, 1, WAYMO_SEG_PALETTE)  // Waymo Pedestrian, inst 1
+    const diff = Math.abs(base[0] - inst1[0]) + Math.abs(base[1] - inst1[1]) + Math.abs(base[2] - inst1[2])
+    expect(diff).toBeGreaterThan(0.01)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -298,6 +311,39 @@ describe('computePointColor', () => {
       expect(b).toBeGreaterThanOrEqual(0)
       expect(b).toBeLessThanOrEqual(1)
     }
+  })
+
+  it('segment mode: uses custom palette (Waymo) when provided', () => {
+    const pos = makePositions(1, 2, 3)
+    const segLabels = new Uint8Array([1]) // Waymo class 1 = Car
+    const [r, g, b] = computePointColor(
+      'segment', 0, pos, stride, SIMPLE_STOPS, -2, 0, 31,
+      segLabels, null, WAYMO_SEG_PALETTE,
+    )
+    expect(r).toBeCloseTo(WAYMO_SEG_PALETTE[1][0])
+    expect(g).toBeCloseTo(WAYMO_SEG_PALETTE[1][1])
+    expect(b).toBeCloseTo(WAYMO_SEG_PALETTE[1][2])
+  })
+
+  it('panoptic mode: uses custom palette (Waymo) when provided', () => {
+    const pos = makePositions(1, 2, 3)
+    const panopticLabels = new Int32Array([1000]) // Waymo sem=1 (Car), inst=0
+    const [r, g, b] = computePointColor(
+      'panoptic', 0, pos, stride, SIMPLE_STOPS, -3, 0, 31,
+      null, panopticLabels, WAYMO_SEG_PALETTE,
+    )
+    expect(r).toBeCloseTo(WAYMO_SEG_PALETTE[1][0])
+    expect(g).toBeCloseTo(WAYMO_SEG_PALETTE[1][1])
+    expect(b).toBeCloseTo(WAYMO_SEG_PALETTE[1][2])
+  })
+
+  it('segment mode without palette falls back to LIDARSEG_PALETTE (backward compat)', () => {
+    const pos = makePositions(1, 2, 3)
+    const segLabels = new Uint8Array([17]) // nuScenes vehicle.car
+    const [r, g, b] = computePointColor('segment', 0, pos, stride, SIMPLE_STOPS, -2, 0, 31, segLabels)
+    expect(r).toBeCloseTo(LIDARSEG_PALETTE[17][0])
+    expect(g).toBeCloseTo(LIDARSEG_PALETTE[17][1])
+    expect(b).toBeCloseTo(LIDARSEG_PALETTE[17][2])
   })
 })
 

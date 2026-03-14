@@ -104,6 +104,7 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
       drawProjectedPoints(
         ctx, projected, cloud, stride, t, cmap,
         stops, attrOff, attrMin, attrSpan,
+        manifest.semanticPalette,
       )
     }
   }, [cameraName, projectors])
@@ -168,9 +169,11 @@ function drawProjectedPoints(
   attrOff: number,
   attrMin: number,
   attrSpan: number,
+  semanticPalette?: [number, number, number][],
 ) {
   const { positions, segLabels, panopticLabels } = cloud
   const dotRadius = POINT_RADIUS * t.scale
+  const pal = semanticPalette ?? null
 
   // Sort back-to-front: draw far points first so near points occlude them
   projected.sort((a, b) => b.depth - a.depth)
@@ -185,7 +188,7 @@ function drawProjectedPoints(
     const [r, g, b] = computePointColor(
       colormapMode, srcIndex, positions, stride,
       stops, attrOff, attrMin, attrSpan,
-      segLabels, panopticLabels,
+      segLabels, panopticLabels, pal,
     )
 
     ctx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`

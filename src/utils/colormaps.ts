@@ -175,16 +175,17 @@ export function colormapColor(stops: [number, number, number][], t: number): [nu
  * elongation/distance). Camera mode is NOT handled here because it requires
  * async JPEG-sampled data that only PointCloud manages.
  *
- * @param colormapMode  Current mode (panoptic | segment | intensity | ...)
- * @param srcIndex      Index of the point in its sensor cloud
- * @param positions     Interleaved float32 buffer [x,y,z,attr0,attr1,...,x,y,z,...]
- * @param stride        Floats per point in positions buffer
- * @param stops         Gradient stops for the current mode
- * @param attrOff       Attribute offset within stride (-1 = distance from xyz)
- * @param attrMin       Min value for 0..1 normalization
- * @param attrSpan      (attrMax - attrMin) range for normalization
- * @param segLabels     Optional per-point semantic label array
- * @param panopticLabels Optional per-point panoptic label array (sem*1000+inst)
+ * @param colormapMode    Current mode (panoptic | segment | intensity | ...)
+ * @param srcIndex        Index of the point in its sensor cloud
+ * @param positions       Interleaved float32 buffer [x,y,z,attr0,attr1,...,x,y,z,...]
+ * @param stride          Floats per point in positions buffer
+ * @param stops           Gradient stops for the current mode
+ * @param attrOff         Attribute offset within stride (-1 = distance from xyz)
+ * @param attrMin         Min value for 0..1 normalization
+ * @param attrSpan        (attrMax - attrMin) range for normalization
+ * @param segLabels       Optional per-point semantic label array
+ * @param panopticLabels  Optional per-point panoptic label array (sem*1000+inst)
+ * @param semanticPalette Optional dataset-specific palette — defaults to LIDARSEG_PALETTE (nuScenes)
  * @returns [r, g, b] in [0..1]
  */
 export function computePointColor(
@@ -198,17 +199,20 @@ export function computePointColor(
   attrSpan: number,
   segLabels?: Uint8Array | Int32Array | null,
   panopticLabels?: Int32Array | null,
+  semanticPalette?: [number, number, number][] | null,
 ): [number, number, number] {
+  const pal = semanticPalette ?? LIDARSEG_PALETTE
+
   if (colormapMode === 'panoptic') {
     const panLabel = panopticLabels ? panopticLabels[srcIndex] ?? 0 : 0
     const sem = Math.floor(panLabel / 1000)
     const inst = panLabel % 1000
-    return instanceColor(sem, inst)
+    return instanceColor(sem, inst, pal)
   }
 
   if (colormapMode === 'segment') {
     const label = segLabels ? segLabels[srcIndex] ?? 0 : 0
-    const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
+    const c = pal[label] ?? pal[0]
     return [c[0], c[1], c[2]]
   }
 
@@ -274,19 +278,43 @@ const LIDARSEG_HSL: [number, number, number][] = LIDARSEG_PALETTE.map(
   ([r, g, b]) => rgbToHsl(r, g, b),
 )
 
+/** Weak cache for HSL conversions of custom palettes (avoids recomputing every frame). */
+const hslCache = new WeakMap<[number, number, number][], [number, number, number][]>()
+
+/** Get (or lazily compute) HSL values for a palette. */
+function getHslForPalette(palette: [number, number, number][]): [number, number, number][] {
+  if (palette === LIDARSEG_PALETTE) return LIDARSEG_HSL
+  let cached = hslCache.get(palette)
+  if (!cached) {
+    cached = palette.map(([r, g, b]) => rgbToHsl(r, g, b))
+    hslCache.set(palette, cached)
+  }
+  return cached
+}
+
 /**
  * Instance-aware coloring: keeps the semantic class hue from the palette,
  * but varies lightness per instance so each object is distinguishable
  * while remaining visually linked to its class color in the legend.
+ *
+ * @param semanticLabel  Semantic class index into the palette
+ * @param instanceId     Instance ID (0 = "stuff" class, >0 = "thing" instance)
+ * @param palette        Optional RGB palette — defaults to LIDARSEG_PALETTE (nuScenes)
  */
-export function instanceColor(semanticLabel: number, instanceId: number): [number, number, number] {
-  const base = LIDARSEG_PALETTE[semanticLabel] ?? LIDARSEG_PALETTE[0]
+export function instanceColor(
+  semanticLabel: number,
+  instanceId: number,
+  palette?: [number, number, number][],
+): [number, number, number] {
+  const pal = palette ?? LIDARSEG_PALETTE
+  const base = pal[semanticLabel] ?? pal[0]
   if (instanceId === 0) {
     // "Stuff" classes (no instance) — use semantic palette directly
     return base
   }
   // "Thing" classes — same hue as palette, vary lightness per instance
-  const [h, s] = LIDARSEG_HSL[semanticLabel] ?? LIDARSEG_HSL[0]
+  const hslArr = getHslForPalette(pal)
+  const [h, s] = hslArr[semanticLabel] ?? hslArr[0]
   // Golden ratio spread across lightness range [0.30 .. 0.80]
   const GOLDEN_RATIO = 0.618033988749895
   const spread = (instanceId * GOLDEN_RATIO) % 1.0
