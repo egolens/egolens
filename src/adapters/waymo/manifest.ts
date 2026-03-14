@@ -52,7 +52,7 @@ export const waymoManifest: DatasetManifest = {
 
   frameRate: 10,
   pointStride: 6, // x, y, z, intensity, range, elongation
-  colormapModes: ['intensity', 'range', 'elongation'],
+  colormapModes: ['intensity', 'range', 'elongation', 'camera'],
 
   cameraColors: {
     1: colors.camFront,

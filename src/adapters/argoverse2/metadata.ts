@@ -313,7 +313,7 @@ export function loadAV2LogMetadata(db: AV2LogDatabase): MetadataBundle {
       [`${CAM_PREFIX}.intrinsic.f_v`]: intrinsics.fy,
       [`${CAM_PREFIX}.intrinsic.c_u`]: intrinsics.cx,
       [`${CAM_PREFIX}.intrinsic.c_v`]: intrinsics.cy,
-      '__isOpticalFrame': false, // AV2 extrinsics are sensor frame, not optical
+      '__isOpticalFrame': true, // AV2 camera sensor frame is optical convention (X=right, Y=down, Z=forward)
     })
   }
 

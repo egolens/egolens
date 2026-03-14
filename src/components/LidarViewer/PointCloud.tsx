@@ -9,12 +9,14 @@
  * When sensors are filtered, per-sensor coloring overrides colormap.
  */
 
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { useSceneStore } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { getManifest } from '../../adapters/registry'
+import { buildCameraRgbForFrame } from '../../utils/cameraRgbSampler'
+import { buildCameraProjectors, type CameraProjector } from '../../utils/lidarProjection'
 
 // ---------------------------------------------------------------------------
 // Colormaps
@@ -71,6 +73,7 @@ export const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = 
   distance: DISTANCE_STOPS,
   segment: INTENSITY_STOPS, // placeholder — segment mode uses its own palette
   panoptic: INTENSITY_STOPS, // placeholder — panoptic mode uses its own palette
+  camera: INTENSITY_STOPS, // placeholder — camera mode uses per-point RGB
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +152,7 @@ export const ATTR_OFFSET: Record<ColormapMode, number> = {
   distance: -1,   // computed: sqrt(x² + y² + z²)
   segment: -2,    // uses segLabels array (not from positions buffer)
   panoptic: -3,   // uses panopticLabels array (not from positions buffer)
+  camera: -4,     // uses cameraRgb array (not from positions buffer)
 }
 
 /** Normalization ranges per attribute (min, max) for mapping to 0..1 */
@@ -159,6 +163,7 @@ export const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
   distance: [0, 50],        // meters from ego center (devkit uses ~50m typical urban range)
   segment: [0, 31],         // 32 classes (unused — segment mode uses direct palette lookup)
   panoptic: [0, 31],        // unused — panoptic uses direct instance coloring
+  camera: [0, 1],           // unused — camera mode uses direct RGB
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +232,12 @@ function instanceColor(semanticLabel: number, instanceId: number): [number, numb
 // Component
 // ---------------------------------------------------------------------------
 
+/** sRGB → linear conversion (inverse of the sRGB OETF).
+ *  Camera JPEG pixels are sRGB but Three.js vertex colors are linear. */
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+}
+
 /** Maximum points we'll ever allocate buffers for (avoids realloc). */
 const MAX_POINTS = 400_000
 /** Maximum radar points (5 sensors × ~100 pts each). */
@@ -271,6 +282,49 @@ export default function PointCloud() {
 
   // Dirty flag — set synchronously by Zustand subscribe (no React timing dependency)
   const dirtyRef = useRef(true)
+
+  // Camera RGB cache: per-sensor Uint8Array (3 bytes per point), keyed by frame timestamp
+  const cameraRgbRef = useRef<{ timestamp: bigint; data: Map<number, Uint8Array> } | null>(null)
+  const cameraRgbPendingRef = useRef<bigint | null>(null)
+  // Cached CameraProjector map (built once from calibration rows)
+  const projectorsRef = useRef<Map<number, CameraProjector> | null>(null)
+
+  // Async camera RGB builder — projects LiDAR points mathematically to camera images
+  // using camera calibration (intrinsics + extrinsics), then samples RGB from decoded JPEGs
+  const triggerCameraRgbBuild = useCallback(async (
+    timestamp: bigint,
+    sensorClouds: Map<number, { positions: Float32Array; pointCount: number }>,
+    cameraImages: Map<number, ArrayBuffer>,
+  ) => {
+    // Already have this frame's RGB
+    if (cameraRgbRef.current?.timestamp === timestamp) return
+    // Already building
+    if (cameraRgbPendingRef.current === timestamp) return
+    if (cameraImages.size === 0) return
+
+    // Build projectors once from camera calibration data
+    if (!projectorsRef.current) {
+      const calRows = useSceneStore.getState().cameraCalibrations
+      if (!calRows || calRows.length === 0) return
+      projectorsRef.current = buildCameraProjectors(calRows)
+    }
+    const projectors = projectorsRef.current
+    if (projectors.size === 0) return
+
+    cameraRgbPendingRef.current = timestamp
+    try {
+      const rgbMap = await buildCameraRgbForFrame(timestamp, sensorClouds, cameraImages, projectors)
+      // Only apply if still the current frame
+      const curTs = useSceneStore.getState().currentFrame?.timestamp
+      if (curTs === timestamp) {
+        cameraRgbRef.current = { timestamp, data: rgbMap }
+        dirtyRef.current = true // trigger re-render with RGB data
+      }
+    } catch (e) {
+      console.warn('[PointCloud] Camera RGB build failed:', e)
+    }
+    cameraRgbPendingRef.current = null
+  }, [])
 
   useEffect(() => {
     // Track previous values to detect relevant changes only
@@ -321,6 +375,15 @@ export default function PointCloud() {
       if (geom) geom.setDrawRange(0, 0)
       if (radarGeom) radarGeom.setDrawRange(0, 0)
       return
+    }
+
+    // Camera colormap: trigger async JPEG decode if needed
+    const isCameraMode = cmap === 'camera'
+    const camRgbData = cameraRgbRef.current?.timestamp === curFrame.timestamp
+      ? cameraRgbRef.current.data : null
+    if (isCameraMode && !camRgbData) {
+      // Kick off async build; will set dirtyRef when done
+      triggerCameraRgbBuild(curFrame.timestamp, sensorClouds, curFrame.cameraImages)
     }
 
     const posArr = posAttr.array as Float32Array
@@ -378,6 +441,8 @@ export default function PointCloud() {
         const segLabelCount = segLabels ? segLabels.length : 0
         const panopticLabels = cloud.panopticLabels
         const panopticLabelCount = panopticLabels ? panopticLabels.length : 0
+        // Camera RGB: pre-sampled Uint8Array (3 bytes per point)
+        const camRgb = isCameraMode && camRgbData ? camRgbData.get(laserName) : null
 
         let written = 0
         for (let i = 0; i < maxCount; i++) {
@@ -392,7 +457,14 @@ export default function PointCloud() {
           posArr[dst + 2] = pz
 
           let r: number, g: number, b: number
-          if (isPanopticMode) {
+          if (isCameraMode && camRgb) {
+            // Camera coloring: use pre-sampled RGB from decoded camera images
+            // Convert sRGB → linear because Three.js vertex colors are in linear space
+            const ci = i * 3
+            r = srgbToLinear(camRgb[ci] / 255)
+            g = srgbToLinear(camRgb[ci + 1] / 255)
+            b = srgbToLinear(camRgb[ci + 2] / 255)
+          } else if (isPanopticMode) {
             // Panoptic coloring: unique color per instance, semantic-influenced
             const panLabel = i < panopticLabelCount && panopticLabels ? panopticLabels[i] : 0
             const semLabel = Math.floor(panLabel / 1000)

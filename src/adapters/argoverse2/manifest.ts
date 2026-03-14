@@ -126,7 +126,7 @@ export const argoverse2Manifest: DatasetManifest = {
 
   frameRate: 10, // 10 Hz LiDAR
   pointStride: 4, // x, y, z, intensity (after worker transformation)
-  colormapModes: ['distance', 'intensity'],
+  colormapModes: ['distance', 'intensity', 'camera'],
   intensityRange: [0, 255], // AV2 intensity is uint8-like
 
   cameraColors: {

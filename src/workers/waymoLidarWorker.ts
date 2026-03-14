@@ -89,6 +89,7 @@ const LIDAR_COLUMNS = [
   '[LiDARComponent].range_image_return1.values',
 ]
 
+
 // ---------------------------------------------------------------------------
 // Message handler
 // ---------------------------------------------------------------------------
@@ -143,6 +144,7 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
 
       // 1. Read entire row group — one decompression pass
       const allRows = await readRowGroupRows(lidarPf, msg.batchIndex, LIDAR_COLUMNS)
+
       wMem.snap(`rg${msg.batchIndex}:decompress-done`, {
         note: `${allRows.length} rows decompressed`,
       })
@@ -183,9 +185,8 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
 
         const sensorClouds: SensorCloudResult[] = []
         for (const [laserName, cloud] of result.perSensor) {
-          const scResult: SensorCloudResult = { laserName, positions: cloud.positions, pointCount: cloud.pointCount }
-
-          sensorClouds.push(scResult)
+          const sc: SensorCloudResult = { laserName, positions: cloud.positions, pointCount: cloud.pointCount }
+          sensorClouds.push(sc)
           transferBuffers.push(cloud.positions.buffer as ArrayBuffer)
         }
 

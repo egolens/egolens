@@ -713,7 +713,7 @@ export default function LidarViewer() {
                 return `${active[0].label}+${active.length - 1}`
               })(),
               ...((getManifest().colormapModes?.length ?? 3) > 1
-                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong', segment: 'Seg', panoptic: 'Pan' }[colormapMode]]
+                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong', segment: 'Seg', panoptic: 'Pan', camera: 'Cam' }[colormapMode]]
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
               ...(showLidarOverlay ? ['LiDAR→Cam'] : []),
@@ -767,7 +767,7 @@ export default function LidarViewer() {
               return (
                 <button
                   key={isWorld ? 'world' : 'vehicle'}
-                  onClick={active ? undefined : toggleWorldMode}
+                  onClick={active ? undefined : () => { toggleWorldMode(); resetRequestedRef.current = true }}
                   style={{
                     flex: 1, padding: '4px 0', fontSize: '10px',
                     fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
@@ -851,7 +851,7 @@ export default function LidarViewer() {
 
           {/* Colormap — hide when dataset only supports one mode */}
           {(() => {
-            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg'], ['panoptic', 'Pan']]
+            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg'], ['panoptic', 'Pan'], ['camera', 'Cam']]
             const manifest = getManifest()
             const availableModes = manifest.colormapModes
               ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))

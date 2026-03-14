@@ -36,6 +36,8 @@ export interface SensorCloudResult {
   segLabels?: Uint8Array
   /** Per-point panoptic labels (uint16, encoded as category_id*1000 + instance_id). nuScenes panoptic only. */
   panopticLabels?: Uint16Array
+  /** Per-point camera projection: [camName, pixelX, pixelY] × pointCount. Waymo lidar_camera_projection. */
+  cameraProjection?: Int16Array
 }
 
 /** A single converted LiDAR frame within a batch */

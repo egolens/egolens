@@ -50,6 +50,10 @@ export interface PointCloud {
   segLabels?: Uint8Array
   /** Per-point panoptic labels (uint16, encoded as category_id*1000 + instance_id). nuScenes panoptic only. */
   panopticLabels?: Uint16Array
+  /** Per-point camera projection: [camName, pixelX, pixelY] × pointCount (Int16). Waymo only. */
+  cameraProjection?: Int16Array
+  /** Per-point camera RGB colors: [R, G, B] × pointCount (Uint8, 0–255). Computed from cameraProjection + camera images. */
+  cameraRgb?: Uint8Array
 }
 
 // ---------------------------------------------------------------------------
@@ -135,9 +139,19 @@ export function computeAzimuths(width: number, azCorrection: number): Float32Arr
  * Only valid points (range > 0) are included.
  *
  */
+/**
+ * Optional projection data — same shape as range image [H, W, 6].
+ * Channels: [cam1, x1, y1, cam2, x2, y2] per pixel.
+ */
+export interface ProjectionImage {
+  values: number[] | Float32Array
+  shape: [number, number, number]
+}
+
 export function convertRangeImageToPointCloud(
   rangeImage: RangeImage,
   calibration: LidarCalibration,
+  projection?: ProjectionImage,
 ): PointCloud {
   const [height, width, channels] = rangeImage.shape
   const values = rangeImage.values
@@ -171,6 +185,10 @@ export function convertRangeImageToPointCloud(
   // Worst case: all pixels valid → POINT_STRIDE floats per point
   const maxPoints = height * width
   const output = new Float32Array(maxPoints * POINT_STRIDE)
+  // Optional projection output: 3 int16s per point (camName, pixelX, pixelY)
+  const projValues = projection?.values
+  const projChannels = projection ? projection.shape[2] : 0
+  const projOutput = projValues ? new Int16Array(maxPoints * 3) : null
   let pointCount = 0
 
   for (let row = 0; row < height; row++) {
@@ -204,15 +222,22 @@ export function convertRangeImageToPointCloud(
       output[outIdx + 4] = range
       output[outIdx + 5] = elongation
 
+      // Extract camera projection (1st projection only — channels 0,1,2)
+      if (projOutput && projValues) {
+        const projIdx = (row * width + col) * projChannels
+        projOutput[pointCount * 3] = projValues[projIdx]       // camName
+        projOutput[pointCount * 3 + 1] = projValues[projIdx + 1] // pixelX
+        projOutput[pointCount * 3 + 2] = projValues[projIdx + 2] // pixelY
+      }
+
       pointCount++
     }
   }
 
   // slice() creates an independent trimmed copy instead of a view on the full buffer.
-  // This prevents transferring the entire maxPoints allocation (~3.9 MB for TOP)
-  // when only valid points (~0.9 MB) are needed — saves ~73% memory across 199 frames.
   const positions = output.slice(0, pointCount * POINT_STRIDE)
-  return { positions, pointCount }
+  const cameraProjection = projOutput ? projOutput.slice(0, pointCount * 3) : undefined
+  return { positions, pointCount, cameraProjection }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +265,7 @@ export interface MultiSensorResult {
 export function convertAllSensors(
   rangeImages: Map<number, RangeImage>,
   calibrations: Map<number, LidarCalibration>,
+  projections?: Map<number, ProjectionImage>,
 ): MultiSensorResult {
   const perSensor = new Map<number, PointCloud>()
   let totalPointCount = 0
@@ -250,7 +276,8 @@ export function convertAllSensors(
       console.warn(`[rangeImage] No calibration for laser_name=${laserName}, skipping`)
       continue
     }
-    const cloud = convertRangeImageToPointCloud(rangeImage, calib)
+    const proj = projections?.get(laserName)
+    const cloud = convertRangeImageToPointCloud(rangeImage, calib, proj)
     perSensor.set(laserName, cloud)
     totalPointCount += cloud.pointCount
   }

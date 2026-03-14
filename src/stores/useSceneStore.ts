@@ -61,6 +61,7 @@ import type {
 } from '../workers/av2CameraWorker'
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
+import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,7 +69,7 @@ import { multiplyRowMajor4x4 } from '../utils/matrix'
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
-export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment' | 'panoptic'
+export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment' | 'panoptic' | 'camera'
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -255,6 +256,8 @@ function resetInternal() {
   internal.vehiclePoseByFrame.clear()
   internal.frameCache.clear()
   internal.cameraImageCache.clear()
+  // Clear decoded camera RGB cache
+  clearCameraRgbCache()
   internal.objectTrajectories.clear()
   internal.assocCamToLaser.clear()
   internal.assocLaserToCams.clear()
@@ -328,6 +331,7 @@ function cacheRowGroupFrames(
           pointCount: sc.pointCount,
           segLabels: sc.segLabels,
           panopticLabels: sc.panopticLabels,
+          cameraProjection: sc.cameraProjection,
         })
       }
     }
@@ -1704,4 +1708,5 @@ export function hasLaserAssociation(laserObjectId: string): boolean {
 export function getPoseByFrameIndex(): Map<number, number[]> {
   return internal.poseByFrameIndex
 }
+
 
