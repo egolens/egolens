@@ -165,6 +165,66 @@ export function colormapColor(stops: [number, number, number][], t: number): [nu
 }
 
 // ---------------------------------------------------------------------------
+// Point color computation (shared by PointCloud + LidarProjectionOverlay)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the RGB color for a single LiDAR point given the current colormap mode.
+ *
+ * Handles panoptic, segment, and standard gradient modes (intensity/range/
+ * elongation/distance). Camera mode is NOT handled here because it requires
+ * async JPEG-sampled data that only PointCloud manages.
+ *
+ * @param colormapMode  Current mode (panoptic | segment | intensity | ...)
+ * @param srcIndex      Index of the point in its sensor cloud
+ * @param positions     Interleaved float32 buffer [x,y,z,attr0,attr1,...,x,y,z,...]
+ * @param stride        Floats per point in positions buffer
+ * @param stops         Gradient stops for the current mode
+ * @param attrOff       Attribute offset within stride (-1 = distance from xyz)
+ * @param attrMin       Min value for 0..1 normalization
+ * @param attrSpan      (attrMax - attrMin) range for normalization
+ * @param segLabels     Optional per-point semantic label array
+ * @param panopticLabels Optional per-point panoptic label array (sem*1000+inst)
+ * @returns [r, g, b] in [0..1]
+ */
+export function computePointColor(
+  colormapMode: ColormapMode,
+  srcIndex: number,
+  positions: Float32Array,
+  stride: number,
+  stops: [number, number, number][],
+  attrOff: number,
+  attrMin: number,
+  attrSpan: number,
+  segLabels?: Uint8Array | Int32Array | null,
+  panopticLabels?: Int32Array | null,
+): [number, number, number] {
+  if (colormapMode === 'panoptic') {
+    const panLabel = panopticLabels ? panopticLabels[srcIndex] ?? 0 : 0
+    const sem = Math.floor(panLabel / 1000)
+    const inst = panLabel % 1000
+    return instanceColor(sem, inst)
+  }
+
+  if (colormapMode === 'segment') {
+    const label = segLabels ? segLabels[srcIndex] ?? 0 : 0
+    const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
+    return [c[0], c[1], c[2]]
+  }
+
+  // Standard gradient colormap: distance is computed from xyz, others read from buffer
+  const src = srcIndex * stride
+  const px = positions[src]
+  const py = positions[src + 1]
+  const pz = positions[src + 2]
+  const raw = attrOff === -1
+    ? Math.sqrt(px * px + py * py + pz * pz)
+    : (attrOff < stride ? positions[src + attrOff] : 0)
+  const t = Math.max(0, Math.min(1, (raw - attrMin) / attrSpan))
+  return colormapColor(stops, t)
+}
+
+// ---------------------------------------------------------------------------
 // Color space conversions
 // ---------------------------------------------------------------------------
 

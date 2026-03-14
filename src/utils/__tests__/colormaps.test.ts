@@ -17,6 +17,7 @@ import {
   hslToRgb,
   srgbToLinear,
   instanceColor,
+  computePointColor,
 } from '../colormaps'
 import type { ColormapMode } from '../../stores/useSceneStore'
 
@@ -198,6 +199,109 @@ describe('palette integrity', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// computePointColor — unified color computation
+// ---------------------------------------------------------------------------
+
+describe('computePointColor', () => {
+  const SIMPLE_STOPS: [number, number, number][] = [[0, 0, 0], [1, 1, 1]]
+  const stride = 6 // x, y, z, intensity, range, elongation
+
+  /** Helper: create positions buffer for one point */
+  function makePositions(x: number, y: number, z: number, intensity = 0.5, range = 20, elongation = 0.3): Float32Array {
+    return new Float32Array([x, y, z, intensity, range, elongation])
+  }
+
+  it('segment mode: looks up palette by label', () => {
+    const pos = makePositions(1, 2, 3)
+    const segLabels = new Uint8Array([17]) // vehicle.car
+    const [r, g, b] = computePointColor('segment', 0, pos, stride, SIMPLE_STOPS, -2, 0, 31, segLabels)
+    expect(r).toBeCloseTo(LIDARSEG_PALETTE[17][0])
+    expect(g).toBeCloseTo(LIDARSEG_PALETTE[17][1])
+    expect(b).toBeCloseTo(LIDARSEG_PALETTE[17][2])
+  })
+
+  it('segment mode: falls back to label 0 for missing segLabels', () => {
+    const pos = makePositions(1, 2, 3)
+    const [r, g, b] = computePointColor('segment', 0, pos, stride, SIMPLE_STOPS, -2, 0, 31, null)
+    expect(r).toBe(LIDARSEG_PALETTE[0][0])
+    expect(g).toBe(LIDARSEG_PALETTE[0][1])
+    expect(b).toBe(LIDARSEG_PALETTE[0][2])
+  })
+
+  it('panoptic mode: stuff class (inst=0) returns palette color', () => {
+    const pos = makePositions(1, 2, 3)
+    const panopticLabels = new Int32Array([17000]) // sem=17, inst=0
+    const [r, g, b] = computePointColor('panoptic', 0, pos, stride, SIMPLE_STOPS, -3, 0, 31, null, panopticLabels)
+    expect(r).toBeCloseTo(LIDARSEG_PALETTE[17][0])
+    expect(g).toBeCloseTo(LIDARSEG_PALETTE[17][1])
+    expect(b).toBeCloseTo(LIDARSEG_PALETTE[17][2])
+  })
+
+  it('panoptic mode: thing class (inst>0) varies from palette', () => {
+    const pos = makePositions(1, 2, 3)
+    const panopticLabels = new Int32Array([17005]) // sem=17, inst=5
+    const [r, g, b] = computePointColor('panoptic', 0, pos, stride, SIMPLE_STOPS, -3, 0, 31, null, panopticLabels)
+    const base = LIDARSEG_PALETTE[17]
+    const diff = Math.abs(r - base[0]) + Math.abs(g - base[1]) + Math.abs(b - base[2])
+    expect(diff).toBeGreaterThan(0.01)
+  })
+
+  it('intensity mode: reads attribute at offset 3', () => {
+    // intensity = 0.5 → t = (0.5 - 0) / 1 = 0.5
+    const pos = makePositions(0, 0, 10, 0.5)
+    const stops = COLORMAP_STOPS['intensity']
+    const [attrMin, attrMax] = ATTR_RANGE['intensity']
+    const [r, g, b] = computePointColor('intensity', 0, pos, stride, stops, 3, attrMin, attrMax - attrMin)
+    // Should return midpoint of intensity gradient
+    const expected = colormapColor(stops, 0.5)
+    expect(r).toBeCloseTo(expected[0], 5)
+    expect(g).toBeCloseTo(expected[1], 5)
+    expect(b).toBeCloseTo(expected[2], 5)
+  })
+
+  it('distance mode: computes sqrt(x²+y²+z²)', () => {
+    // Point at (3, 4, 0) → distance = 5
+    const pos = makePositions(3, 4, 0)
+    const stops = COLORMAP_STOPS['distance']
+    const [attrMin, attrMax] = ATTR_RANGE['distance']
+    const [r, g, b] = computePointColor('distance', 0, pos, stride, stops, -1, attrMin, attrMax - attrMin)
+    const expected = colormapColor(stops, 5 / 50)
+    expect(r).toBeCloseTo(expected[0], 5)
+    expect(g).toBeCloseTo(expected[1], 5)
+    expect(b).toBeCloseTo(expected[2], 5)
+  })
+
+  it('clamps normalized value to [0, 1]', () => {
+    // Very far point → distance > 50 → should clamp
+    const pos = makePositions(100, 0, 0)
+    const stops = COLORMAP_STOPS['distance']
+    const [r, g, b] = computePointColor('distance', 0, pos, stride, stops, -1, 0, 50)
+    const expected = colormapColor(stops, 1)
+    expect(r).toBeCloseTo(expected[0], 5)
+    expect(g).toBeCloseTo(expected[1], 5)
+    expect(b).toBeCloseTo(expected[2], 5)
+  })
+
+  it('returns values in [0, 1] range for all modes', () => {
+    const pos = makePositions(5, 5, 5, 0.7, 30, 0.4)
+    for (const mode of ['intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic'] as const) {
+      const stops = COLORMAP_STOPS[mode]
+      const off = ATTR_OFFSET[mode]
+      const [min, max] = ATTR_RANGE[mode]
+      const [r, g, b] = computePointColor(mode, 0, pos, stride, stops, off, min, max - min)
+      expect(r).toBeGreaterThanOrEqual(0)
+      expect(r).toBeLessThanOrEqual(1)
+      expect(g).toBeGreaterThanOrEqual(0)
+      expect(g).toBeLessThanOrEqual(1)
+      expect(b).toBeGreaterThanOrEqual(0)
+      expect(b).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 
 describe('COLORMAP_STOPS / ATTR_OFFSET / ATTR_RANGE completeness', () => {
   const ALL_MODES: ColormapMode[] = ['intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic', 'camera']

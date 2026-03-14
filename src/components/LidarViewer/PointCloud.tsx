@@ -18,11 +18,10 @@ import { buildCameraRgbForFrame } from '../../utils/cameraRgbSampler'
 import { buildCameraProjectors, type CameraProjector } from '../../utils/lidarProjection'
 import {
   COLORMAP_STOPS,
-  LIDARSEG_PALETTE,
   ATTR_OFFSET,
   ATTR_RANGE,
   colormapColor,
-  instanceColor,
+  computePointColor,
   srgbToLinear,
 } from '../../utils/colormaps'
 
@@ -229,13 +228,8 @@ export default function PointCloud() {
         // LiDAR: colormap-based
         const maxCount = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
 
-        // Segment mode: use per-point label → palette lookup
-        const isSegMode = cmap === 'segment'
-        const isPanopticMode = cmap === 'panoptic'
         const segLabels = cloud.segLabels
-        const segLabelCount = segLabels ? segLabels.length : 0
         const panopticLabels = cloud.panopticLabels
-        const panopticLabelCount = panopticLabels ? panopticLabels.length : 0
         // Camera RGB: pre-sampled Uint8Array (3 bytes per point)
         const camRgb = isCameraMode && camRgbData ? camRgbData.get(laserName) : null
 
@@ -259,24 +253,12 @@ export default function PointCloud() {
             r = srgbToLinear(camRgb[ci] / 255)
             g = srgbToLinear(camRgb[ci + 1] / 255)
             b = srgbToLinear(camRgb[ci + 2] / 255)
-          } else if (isPanopticMode) {
-            // Panoptic coloring: unique color per instance, semantic-influenced
-            const panLabel = i < panopticLabelCount && panopticLabels ? panopticLabels[i] : 0
-            const semLabel = Math.floor(panLabel / 1000)
-            const instId = panLabel % 1000
-            ;[r, g, b] = instanceColor(semLabel, instId)
-          } else if (isSegMode) {
-            // Segment coloring: palette lookup from uint8 label
-            const label = i < segLabelCount && segLabels ? segLabels[i] : 0
-            const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
-            r = c[0]; g = c[1]; b = c[2]
           } else {
-            // Standard colormap: distance computes from xyz, others from buffer
-            const raw = attrOff === -1
-              ? Math.sqrt(px * px + py * py + pz * pz)
-              : (attrOff < stride ? positions[src + attrOff] : 0)
-            const t = (raw - attrMin) / attrSpan
-            ;[r, g, b] = colormapColor(stops, t)
+            ;[r, g, b] = computePointColor(
+              cmap, i, positions, stride,
+              stops, attrOff, attrMin, attrSpan,
+              segLabels, panopticLabels,
+            )
           }
 
           colArr[dst] = r

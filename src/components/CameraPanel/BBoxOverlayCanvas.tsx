@@ -13,6 +13,7 @@ import { useRef, useEffect, useCallback } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { BoxType, CAMERA_RESOLUTION, HIGHLIGHT_COLOR } from '../../types/waymo'
 import { getManifest } from '../../adapters/registry'
+import { setupHiDpiCanvas } from '../../utils/canvasUtils'
 import type { ParquetRow } from '../../utils/merge'
 
 const BBOX_STROKE_WIDTH = 4
@@ -85,23 +86,10 @@ export default function BBoxOverlayCanvas({ cameraName, boxes }: BBoxOverlayCanv
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const dpr = window.devicePixelRatio || 1
-    const displayW = canvas.clientWidth
-    const displayH = canvas.clientHeight
-    if (displayW === 0 || displayH === 0) return
+    const setup = setupHiDpiCanvas(canvas, ctx)
+    if (!setup) return
 
-    // Set backing store size (only when changed)
-    const backingW = Math.round(displayW * dpr)
-    const backingH = Math.round(displayH * dpr)
-    if (canvas.width !== backingW || canvas.height !== backingH) {
-      canvas.width = backingW
-      canvas.height = backingH
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, backingW, backingH)
-    ctx.scale(dpr, dpr)
-
+    const { displayW, displayH } = setup
     const t = computeTransform(displayW, displayH, res.width, res.height)
     transformRef.current = t
 

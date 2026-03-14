@@ -17,6 +17,7 @@
  */
 
 import type { ParquetRow } from './merge'
+import { invertRowMajor4x4 } from './matrix'
 
 const CAM_PREFIX = '[CameraCalibrationComponent]'
 
@@ -34,25 +35,6 @@ export interface CameraProjector {
   invExtrinsic: number[]
   /** Is the sensor frame already optical convention? (nuScenes=true, Waymo=false) */
   isOpticalFrame: boolean
-}
-
-/** Invert a 4×4 rigid-body transform: [R|t] → [R^T | -R^T·t] */
-function invertRigid4x4(m: number[]): number[] {
-  // Rotation part (3×3 transpose)
-  const r00 = m[0], r01 = m[1], r02 = m[2]
-  const r10 = m[4], r11 = m[5], r12 = m[6]
-  const r20 = m[8], r21 = m[9], r22 = m[10]
-  const tx = m[3], ty = m[7], tz = m[11]
-  // -R^T · t
-  const itx = -(r00 * tx + r10 * ty + r20 * tz)
-  const ity = -(r01 * tx + r11 * ty + r21 * tz)
-  const itz = -(r02 * tx + r12 * ty + r22 * tz)
-  return [
-    r00, r10, r20, itx,
-    r01, r11, r21, ity,
-    r02, r12, r22, itz,
-    0,   0,   0,   1,
-  ]
 }
 
 /**
@@ -85,7 +67,7 @@ export function buildCameraProjectors(rows: ParquetRow[]): Map<number, CameraPro
       f_v,
       c_u,
       c_v,
-      invExtrinsic: invertRigid4x4(extrinsic),
+      invExtrinsic: invertRowMajor4x4(extrinsic),
       isOpticalFrame,
     })
   }
@@ -158,6 +140,35 @@ function boxCorners3D(
 }
 
 /**
+ * Transform a point from ego/vehicle frame into camera optical frame.
+ *
+ * 1. Apply inv(extrinsic): ego → camera sensor frame
+ * 2. If not already optical, convert sensor → optical:
+ *    optical X = -sensor Y, optical Y = -sensor Z, optical Z = sensor X
+ *
+ * Exported for testing; used internally by projectBoxToCamera and
+ * projectPointsToCamera.
+ *
+ * @returns [camX, camY, camZ] in camera optical frame
+ */
+export function transformToCameraFrame(
+  ex: number, ey: number, ez: number,
+  inv: number[],
+  isOpticalFrame: boolean,
+): [number, number, number] {
+  let camX = inv[0] * ex + inv[1] * ey + inv[2] * ez + inv[3]
+  let camY = inv[4] * ex + inv[5] * ey + inv[6] * ez + inv[7]
+  let camZ = inv[8] * ex + inv[9] * ey + inv[10] * ez + inv[11]
+
+  if (!isOpticalFrame) {
+    const ox = -camY, oy = -camZ, oz = camX
+    camX = ox; camY = oy; camZ = oz
+  }
+
+  return [camX, camY, camZ]
+}
+
+/**
  * Project a 3D bounding box onto a camera image plane.
  * Replicates nuScenes devkit Box.render() logic:
  *  1. Compute 8 corners in ego frame
@@ -180,15 +191,7 @@ export function projectBoxToCamera(
   let anyVisible = false
 
   for (const [ex, ey, ez] of corners3D) {
-    // Ego → camera transform
-    let camX = inv[0] * ex + inv[1] * ey + inv[2] * ez + inv[3]
-    let camY = inv[4] * ex + inv[5] * ey + inv[6] * ez + inv[7]
-    let camZ = inv[8] * ex + inv[9] * ey + inv[10] * ez + inv[11]
-
-    if (!isOpticalFrame) {
-      const ox = -camY, oy = -camZ, oz = camX
-      camX = ox; camY = oy; camZ = oz
-    }
+    const [camX, camY, camZ] = transformToCameraFrame(ex, ey, ez, inv, isOpticalFrame)
 
     if (camZ <= 0.1) {
       allInFront = false
@@ -245,19 +248,7 @@ export function projectPointsToCamera(
     const ey = positions[src + 1]
     const ez = positions[src + 2]
 
-    // Transform ego → camera: p_cam = inv(extrinsic) × p_ego
-    let cx = inv[0] * ex + inv[1] * ey + inv[2] * ez + inv[3]
-    let cy = inv[4] * ex + inv[5] * ey + inv[6] * ez + inv[7]
-    let cz = inv[8] * ex + inv[9] * ey + inv[10] * ez + inv[11]
-
-    if (!isOpticalFrame) {
-      // Waymo: sensor frame is vehicle-aligned, convert to optical
-      // optical X = -sensor Y, optical Y = -sensor Z, optical Z = sensor X
-      const ox = -cy
-      const oy = -cz
-      const oz = cx
-      cx = ox; cy = oy; cz = oz
-    }
+    const [cx, cy, cz] = transformToCameraFrame(ex, ey, ez, inv, isOpticalFrame)
 
     // Depth check: point must be in front of camera
     if (cz < minDepth) continue

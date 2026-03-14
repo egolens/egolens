@@ -25,6 +25,7 @@ import {
   type ProjectedBox,
 } from '../../utils/lidarProjection'
 import { computeTransform } from './BBoxOverlayCanvas'
+import { setupHiDpiCanvas } from '../../utils/canvasUtils'
 import { getManifest } from '../../adapters/registry'
 import { HIGHLIGHT_COLOR } from '../../types/waymo'
 
@@ -110,22 +111,10 @@ export default function BoxProjectionOverlay({ cameraName }: BoxProjectionOverla
     const projector = projectors.get(cameraName)
     if (!projector) return
 
-    const dpr = window.devicePixelRatio || 1
-    const displayW = canvas.clientWidth
-    const displayH = canvas.clientHeight
-    if (displayW === 0 || displayH === 0) return
+    const setup = setupHiDpiCanvas(canvas, ctx)
+    if (!setup) return
 
-    const backingW = Math.round(displayW * dpr)
-    const backingH = Math.round(displayH * dpr)
-    if (canvas.width !== backingW || canvas.height !== backingH) {
-      canvas.width = backingW
-      canvas.height = backingH
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, backingW, backingH)
-    ctx.scale(dpr, dpr)
-
+    const { displayW, displayH } = setup
     const t = computeTransform(displayW, displayH, projector.width, projector.height)
     transformRef.current = t
 

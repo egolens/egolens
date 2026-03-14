@@ -20,13 +20,12 @@ import {
   projectPointsToCamera,
 } from '../../utils/lidarProjection'
 import { computeTransform } from './BBoxOverlayCanvas'
+import { setupHiDpiCanvas } from '../../utils/canvasUtils'
 import {
-  LIDARSEG_PALETTE,
   COLORMAP_STOPS,
   ATTR_OFFSET,
   ATTR_RANGE,
-  colormapColor,
-  instanceColor,
+  computePointColor,
 } from '../../utils/colormaps'
 import { getManifest } from '../../adapters/registry'
 import type { PointCloud } from '../../utils/rangeImage'
@@ -66,23 +65,10 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
     const projector = projectors.get(cameraName)
     if (!projector) return
 
-    const dpr = window.devicePixelRatio || 1
-    const displayW = canvas.clientWidth
-    const displayH = canvas.clientHeight
-    if (displayW === 0 || displayH === 0) return
+    const setup = setupHiDpiCanvas(canvas, ctx)
+    if (!setup) return
 
-    // Set backing store size
-    const backingW = Math.round(displayW * dpr)
-    const backingH = Math.round(displayH * dpr)
-    if (canvas.width !== backingW || canvas.height !== backingH) {
-      canvas.width = backingW
-      canvas.height = backingH
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, backingW, backingH)
-    ctx.scale(dpr, dpr)
-
+    const { displayW, displayH } = setup
     // Image→display transform (xMidYMid slice, same as BBoxOverlayCanvas)
     const t = computeTransform(displayW, displayH, projector.width, projector.height)
 
@@ -196,30 +182,11 @@ function drawProjectedPoints(
     const dx = u * t.scale + t.offsetX
     const dy = v * t.scale + t.offsetY
 
-    // Compute color — same logic as PointCloud.tsx
-    let r: number, g: number, b: number
-
-    if (colormapMode === 'panoptic') {
-      const panLabel = panopticLabels ? panopticLabels[srcIndex] ?? 0 : 0
-      const sem = Math.floor(panLabel / 1000)
-      const inst = panLabel % 1000
-      ;[r, g, b] = instanceColor(sem, inst)
-    } else if (colormapMode === 'segment') {
-      const label = segLabels ? segLabels[srcIndex] ?? 0 : 0
-      const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
-      r = c[0]; g = c[1]; b = c[2]
-    } else {
-      // Standard colormap: distance computes from xyz, others read from buffer
-      const src = srcIndex * stride
-      const px = positions[src]
-      const py = positions[src + 1]
-      const pz = positions[src + 2]
-      const raw = attrOff === -1
-        ? Math.sqrt(px * px + py * py + pz * pz)  // distance
-        : (attrOff < stride ? positions[src + attrOff] : 0)
-      const tNorm = Math.max(0, Math.min(1, (raw - attrMin) / attrSpan))
-      ;[r, g, b] = colormapColor(stops, tNorm)
-    }
+    const [r, g, b] = computePointColor(
+      colormapMode, srcIndex, positions, stride,
+      stops, attrOff, attrMin, attrSpan,
+      segLabels, panopticLabels,
+    )
 
     ctx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
     ctx.beginPath()
