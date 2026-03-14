@@ -16,6 +16,7 @@ import * as THREE from 'three'
 import PointCloud from './PointCloud'
 import { LIDARSEG_PALETTE, LIDARSEG_LABELS } from '../../utils/colormaps'
 import BoundingBoxes, { TrajectoryTrails } from './BoundingBoxes'
+import KeypointSkeleton from './KeypointSkeleton'
 import CameraFrustums from './CameraFrustums'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
@@ -532,6 +533,7 @@ export default function LidarViewer() {
         <group ref={sceneGroupRef} matrixAutoUpdate={false}>
           <PointCloud />
           <BoundingBoxes />
+          <KeypointSkeleton />
           <CameraFrustums activeCam={activeCam} />
           {/* Vehicle origin marker (moves with vehicle in world mode) */}
           <mesh position={[0, 0, 0]}>
@@ -722,7 +724,7 @@ export default function LidarViewer() {
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
               ...(showLidarOverlay ? ['LiDAR→Cam'] : []),
-              ...(showKeypoints ? ['Skeleton'] : []),
+              ...(showKeypoints ? ['Keypoints 3D'] : []),
             ].map((text, i, arr) => (
               <span key={i} style={{
                 fontSize: '10px',
@@ -1106,7 +1108,7 @@ export default function LidarViewer() {
                   display: 'inline-block', flexShrink: 0,
                   transition: 'all 0.15s',
                 }} />
-                Skeleton
+                Keypoints 3D
               </button>
             )}
 

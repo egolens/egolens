@@ -143,48 +143,131 @@ export const WAYMO_CAMERA_SEG_LABELS: string[] = [
 
 // ---------------------------------------------------------------------------
 // 14 keypoint types + skeleton bone connections
+// Values from keypoint.proto: waymo.open_dataset.keypoints.KeypointType
 // ---------------------------------------------------------------------------
 
-export const WAYMO_KEYPOINT_TYPES: string[] = [
-  'Nose',           //  0
-  'Left Shoulder',  //  1
-  'Right Shoulder', //  2
-  'Left Elbow',     //  3
-  'Right Elbow',    //  4
-  'Left Wrist',     //  5
-  'Right Wrist',    //  6
-  'Left Hip',       //  7 — note: plan doc has inconsistent ordering, using Waymo spec
-  'Right Hip',      //  8
-  'Left Knee',      //  9
-  'Right Knee',     // 10
-  'Left Ankle',     // 11
-  'Right Ankle',    // 12
-  'Head Center',    // 13
-]
+/**
+ * Waymo KeypointType proto enum → human-readable label.
+ * Sparse map because proto enum values are NOT contiguous (0,1,5-10,13-20).
+ */
+export const WAYMO_KEYPOINT_LABELS: Record<number, string> = {
+  0:  'Unspecified',
+  1:  'Nose',
+  5:  'Left Shoulder',
+  6:  'Left Elbow',
+  7:  'Left Wrist',
+  8:  'Left Hip',
+  9:  'Left Knee',
+  10: 'Left Ankle',
+  13: 'Right Shoulder',
+  14: 'Right Elbow',
+  15: 'Right Wrist',
+  16: 'Right Hip',
+  17: 'Right Knee',
+  18: 'Right Ankle',
+  19: 'Forehead',
+  20: 'Head Center',
+}
+
+/** Proto enum constants for KeypointType */
+export const KP = {
+  NOSE: 1,
+  L_SHOULDER: 5,
+  L_ELBOW: 6,
+  L_WRIST: 7,
+  L_HIP: 8,
+  L_KNEE: 9,
+  L_ANKLE: 10,
+  R_SHOULDER: 13,
+  R_ELBOW: 14,
+  R_WRIST: 15,
+  R_HIP: 16,
+  R_KNEE: 17,
+  R_ANKLE: 18,
+  FOREHEAD: 19,
+  HEAD_CENTER: 20,
+} as const
 
 /**
- * Skeleton bone connections as [fromIndex, toIndex] pairs.
- * Defines the human body topology for rendering lines between keypoints.
+ * Per-joint colors for colorful skeleton rendering (Waymo reference style).
+ * Returns [r, g, b] in 0..1 range.
+ */
+export const WAYMO_KEYPOINT_COLORS: Record<number, [number, number, number]> = {
+  [KP.NOSE]:        [0.00, 1.00, 0.00],  // green
+  [KP.HEAD_CENTER]: [0.00, 0.80, 0.80],  // cyan
+  [KP.FOREHEAD]:    [0.00, 0.90, 0.70],  // teal
+  [KP.L_SHOULDER]:  [1.00, 0.85, 0.00],  // yellow
+  [KP.R_SHOULDER]:  [0.00, 0.60, 1.00],  // blue
+  [KP.L_ELBOW]:     [1.00, 0.55, 0.00],  // orange
+  [KP.R_ELBOW]:     [0.20, 0.40, 1.00],  // dark blue
+  [KP.L_WRIST]:     [1.00, 0.30, 0.00],  // dark orange
+  [KP.R_WRIST]:     [0.40, 0.20, 1.00],  // indigo
+  [KP.L_HIP]:       [0.80, 1.00, 0.00],  // lime-yellow
+  [KP.R_HIP]:       [1.00, 0.00, 1.00],  // magenta
+  [KP.L_KNEE]:      [0.60, 0.90, 0.00],  // yellow-green
+  [KP.R_KNEE]:      [1.00, 0.00, 0.60],  // hot pink
+  [KP.L_ANKLE]:     [0.40, 0.80, 0.00],  // green
+  [KP.R_ANKLE]:     [1.00, 0.20, 0.40],  // red-pink
+}
+
+/**
+ * Per-bone colors — each bone inherits a blend or uses the "from" joint color.
+ */
+export const WAYMO_BONE_COLORS: Record<string, [number, number, number]> = {
+  // Head
+  [`${KP.NOSE}-${KP.L_SHOULDER}`]:  [0.50, 0.93, 0.00],
+  [`${KP.NOSE}-${KP.R_SHOULDER}`]:  [0.00, 0.80, 0.50],
+  [`${KP.HEAD_CENTER}-${KP.NOSE}`]: [0.00, 0.90, 0.40],
+  // Left arm — warm
+  [`${KP.L_SHOULDER}-${KP.L_ELBOW}`]: [1.00, 0.70, 0.00],
+  [`${KP.L_ELBOW}-${KP.L_WRIST}`]:   [1.00, 0.42, 0.00],
+  // Right arm — cool
+  [`${KP.R_SHOULDER}-${KP.R_ELBOW}`]: [0.10, 0.50, 1.00],
+  [`${KP.R_ELBOW}-${KP.R_WRIST}`]:   [0.30, 0.30, 1.00],
+  // Torso — pink/purple
+  [`${KP.L_SHOULDER}-${KP.R_SHOULDER}`]: [0.50, 0.50, 1.00],
+  [`${KP.L_SHOULDER}-${KP.L_HIP}`]:     [0.90, 0.90, 0.00],
+  [`${KP.R_SHOULDER}-${KP.R_HIP}`]:     [0.50, 0.00, 1.00],
+  [`${KP.L_HIP}-${KP.R_HIP}`]:          [0.90, 0.00, 0.80],
+  // Left leg — warm
+  [`${KP.L_HIP}-${KP.L_KNEE}`]:   [0.70, 0.95, 0.00],
+  [`${KP.L_KNEE}-${KP.L_ANKLE}`]: [0.50, 0.85, 0.00],
+  // Right leg — cool
+  [`${KP.R_HIP}-${KP.R_KNEE}`]:   [1.00, 0.00, 0.80],
+  [`${KP.R_KNEE}-${KP.R_ANKLE}`]: [1.00, 0.10, 0.50],
+}
+
+/**
+ * Skeleton bone connections as [fromType, toType] pairs.
+ * Uses Waymo proto KeypointType enum values directly.
  */
 export const WAYMO_SKELETON_BONES: [number, number][] = [
   // Head → shoulders
-  [0, 1],   // Nose → Left Shoulder
-  [0, 2],   // Nose → Right Shoulder
+  [KP.NOSE, KP.L_SHOULDER],       // Nose → Left Shoulder
+  [KP.NOSE, KP.R_SHOULDER],       // Nose → Right Shoulder
+  [KP.HEAD_CENTER, KP.NOSE],      // Head Center → Nose
   // Left arm
-  [1, 3],   // Left Shoulder → Left Elbow
-  [3, 5],   // Left Elbow → Left Wrist
+  [KP.L_SHOULDER, KP.L_ELBOW],    // Left Shoulder → Left Elbow
+  [KP.L_ELBOW, KP.L_WRIST],       // Left Elbow → Left Wrist
   // Right arm
-  [2, 4],   // Right Shoulder → Right Elbow
-  [4, 6],   // Right Elbow → Right Wrist
+  [KP.R_SHOULDER, KP.R_ELBOW],    // Right Shoulder → Right Elbow
+  [KP.R_ELBOW, KP.R_WRIST],       // Right Elbow → Right Wrist
   // Torso
-  [1, 2],   // Left Shoulder → Right Shoulder
-  [1, 7],   // Left Shoulder → Left Hip
-  [2, 8],   // Right Shoulder → Right Hip
-  [7, 8],   // Left Hip → Right Hip (pelvis)
+  [KP.L_SHOULDER, KP.R_SHOULDER], // Left Shoulder → Right Shoulder
+  [KP.L_SHOULDER, KP.L_HIP],      // Left Shoulder → Left Hip
+  [KP.R_SHOULDER, KP.R_HIP],      // Right Shoulder → Right Hip
+  [KP.L_HIP, KP.R_HIP],           // Left Hip → Right Hip (pelvis)
   // Left leg
-  [7, 9],   // Left Hip → Left Knee
-  [9, 11],  // Left Knee → Left Ankle
+  [KP.L_HIP, KP.L_KNEE],          // Left Hip → Left Knee
+  [KP.L_KNEE, KP.L_ANKLE],        // Left Knee → Left Ankle
   // Right leg
-  [8, 10],  // Right Hip → Right Knee
-  [10, 12], // Right Knee → Right Ankle
+  [KP.R_HIP, KP.R_KNEE],          // Right Hip → Right Knee
+  [KP.R_KNEE, KP.R_ANKLE],        // Right Knee → Right Ankle
+]
+
+/** Kept for backwards compatibility with tests — maps 0-based index to label */
+export const WAYMO_KEYPOINT_TYPES: string[] = [
+  'Nose', 'Left Shoulder', 'Right Shoulder', 'Left Elbow', 'Right Elbow',
+  'Left Wrist', 'Right Wrist', 'Left Hip', 'Right Hip', 'Left Knee',
+  'Right Knee', 'Left Ankle', 'Right Ankle', 'Head Center',
 ]

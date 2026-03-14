@@ -62,6 +62,7 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
+import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -313,6 +314,7 @@ function resetInternal() {
   internal.blobUrls = []
   // Segmentation & keypoint caches
   internal.keypointsByFrame.clear()
+  setKeypointsByFrameRef(internal.keypointsByFrame)
   internal.cameraKeypointsByFrame.clear()
   internal.cameraSeg.clear()
 }
@@ -1075,6 +1077,8 @@ function applyMetadataBundle(
   // Segmentation & keypoint data
   if (bundle.keypointsByFrame) {
     internal.keypointsByFrame = bundle.keypointsByFrame
+    // Share reference with KeypointSkeleton component for direct access
+    setKeypointsByFrameRef(bundle.keypointsByFrame)
   }
   if (bundle.cameraKeypointsByFrame) {
     internal.cameraKeypointsByFrame = bundle.cameraKeypointsByFrame
