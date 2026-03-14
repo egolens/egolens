@@ -10,6 +10,7 @@
 
 import { colors } from '../../theme'
 import type { DatasetManifest } from '../../types/dataset'
+import { LIDARSEG_PALETTE, LIDARSEG_LABELS } from '../../utils/colormaps'
 
 /**
  * Numeric IDs for nuScenes cameras.
@@ -117,6 +118,14 @@ export const nuScenesManifest: DatasetManifest = {
   pointStride: 4, // x, y, z, intensity
   colormapModes: ['distance', 'intensity', 'segment', 'panoptic', 'camera'], // distance + intensity + semantic seg + panoptic + camera RGB
   intensityRange: [0, 255], // Velodyne HDL-32E raw reflectance 0–255
+
+  // nuScenes perception capabilities
+  overlayModes: ['bbox2d', 'lidarProjection'],
+  annotationModes: ['bbox3d'],
+
+  // nuScenes 32-class lidarseg/panoptic palette
+  semanticPalette: LIDARSEG_PALETTE,
+  semanticLabels: LIDARSEG_LABELS,
 
   cameraColors: {
     [CAM.FRONT]: colors.camFront,

@@ -98,6 +98,16 @@ export interface MetadataBundle {
 }
 
 // ---------------------------------------------------------------------------
+// Overlay / annotation mode enums
+// ---------------------------------------------------------------------------
+
+/** Camera panel overlay capabilities (what can be drawn on top of camera images) */
+export type OverlayMode = 'bbox2d' | 'segmentation' | 'keypoints2d' | 'lidarProjection'
+
+/** 3D scene annotation capabilities (what can be drawn in the 3D viewport) */
+export type AnnotationMode = 'bbox3d' | 'keypoints3d'
+
+// ---------------------------------------------------------------------------
 // Dataset manifest
 // ---------------------------------------------------------------------------
 
@@ -148,6 +158,34 @@ export interface DatasetManifest {
   cameraColors: Record<number, string>
   /** POV label shown when a camera is active (cameraId → short name) */
   cameraPovLabels: Record<number, string>
+
+  // -- Perception capabilities (gated by runtime data availability) --------
+
+  /**
+   * Camera panel overlay capabilities this dataset format supports.
+   * UI only shows toggles for modes listed here AND confirmed by store has* flags.
+   * If undefined, defaults to ['bbox2d', 'lidarProjection'] for backward compat.
+   */
+  overlayModes?: OverlayMode[]
+
+  /**
+   * 3D scene annotation capabilities this dataset format supports.
+   * If undefined, defaults to ['bbox3d'] for backward compat.
+   */
+  annotationModes?: AnnotationMode[]
+
+  /**
+   * Semantic segmentation palette: RGB [0..1] indexed by class ID.
+   * Waymo: 23 classes, nuScenes: 32 classes. Used by both LiDAR and camera seg.
+   * If undefined, falls back to LIDARSEG_PALETTE in colormaps.ts (nuScenes default).
+   */
+  semanticPalette?: [number, number, number][]
+
+  /**
+   * Human-readable labels for semantic segmentation classes, indexed by class ID.
+   * If undefined, falls back to LIDARSEG_LABELS in colormaps.ts (nuScenes default).
+   */
+  semanticLabels?: string[]
 
   // -- Parquet column mapping -----------------------------------------------
 
