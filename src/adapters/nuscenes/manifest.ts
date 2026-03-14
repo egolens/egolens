@@ -66,7 +66,7 @@ export const nuScenesManifest: DatasetManifest = {
 
   // Top-level directories recognized in a nuScenes dataset root
   knownComponents: [
-    'samples', 'sweeps', 'maps',
+    'samples', 'sweeps', 'maps', 'lidarseg', 'panoptic',
     'v1.0-mini', 'v1.0-trainval', 'v1.0-test',
     'LICENSE',
   ],
@@ -102,9 +102,8 @@ export const nuScenesManifest: DatasetManifest = {
 
   frameRate: 2,   // nuScenes keyframe rate
   pointStride: 4, // x, y, z, intensity
-  colormapModes: ['distance', 'intensity'], // distance (viridis, devkit default) + intensity
+  colormapModes: ['distance', 'intensity', 'segment'], // distance (viridis) + intensity + semantic seg
   intensityRange: [0, 255], // Velodyne HDL-32E raw reflectance 0–255
-  maxSweeps: 9, // 10-sweep accumulation (1 keyframe + 9 sweeps = 0.5s at 20Hz)
 
   cameraColors: {
     [CAM.FRONT]: colors.camFront,

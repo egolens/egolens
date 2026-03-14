@@ -43,7 +43,7 @@ import {
   loadNuScenesSceneMetadata,
   type NuScenesDatabase,
 } from '../adapters/nuscenes/metadata'
-import type { NuScenesFrameDescriptor, NuScenesRadarFileDescriptor, NuScenesSweepDescriptor } from '../workers/nuScenesLidarWorker'
+import type { NuScenesFrameDescriptor, NuScenesRadarFileDescriptor } from '../workers/nuScenesLidarWorker'
 import type {
   NuScenesCameraFrameDescriptor,
   NuScenesCameraImageDescriptor,
@@ -57,7 +57,7 @@ import { multiplyRowMajor4x4 } from '../utils/matrix'
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
-export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance'
+export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment'
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -83,7 +83,6 @@ interface SceneActions {
   cycleBoxMode: () => void
   setBoxMode: (mode: BoxMode) => void
   setTrailLength: (len: number) => void
-  setSweepCount: (count: number) => void
   setPointOpacity: (opacity: number) => void
   setColormapMode: (mode: ColormapMode) => void
   setActiveCam: (cam: number | null) => void
@@ -139,8 +138,6 @@ export interface SceneState {
   boxMode: BoxMode
   /** Number of past frames to show in trajectory trail (0 = off) */
   trailLength: number
-  /** Number of LiDAR sweeps to accumulate (0 = keyframe only, 9 = full 10-sweep). nuScenes only. */
-  sweepCount: number
   /** Point cloud opacity (0..1) */
   pointOpacity: number
   /** Point cloud colormap mode */
@@ -310,7 +307,7 @@ function cacheRowGroupFrames(
         sensorClouds.set(sc.laserName, {
           positions: sc.positions,
           pointCount: sc.pointCount,
-          sweepCumulativeCounts: sc.sweepCumulativeCounts,
+          segLabels: sc.segLabels,
         })
       }
     }
@@ -412,7 +409,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
   boxMode: 'box' as BoxMode,
   trailLength: 10,
-  sweepCount: 9,
   pointOpacity: 0.85,
   colormapMode: 'intensity' as ColormapMode,
   hasBoxData: false,
@@ -646,10 +642,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set({ trailLength: Math.max(0, Math.min(50, len)) })
     },
 
-    setSweepCount: (count: number) => {
-      set({ sweepCount: Math.max(0, Math.min(9, count)) })
-    },
-
     setPointOpacity: (opacity: number) => {
       set({ pointOpacity: Math.max(0.1, Math.min(1, opacity)) })
     },
@@ -828,7 +820,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         visibleSensors: prev.visibleSensors,
         boxMode: prev.boxMode,
         trailLength: prev.trailLength,
-        sweepCount: prev.sweepCount,
         pointOpacity: prev.pointOpacity,
         colormapMode: prev.colormapMode,
         hasBoxData: false,
@@ -1161,7 +1152,7 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
     const sensorFiles = bundle.vehiclePoseByFrame.get(ts) as Record<string, unknown>[] | undefined
     if (!sensorFiles) continue
 
-    // LiDAR frame + radar files + sweep files
+    // LiDAR frame + radar files
     const lidarFile = sensorFiles.find(sf => sf.modality === 'lidar')
     if (lidarFile) {
       // Collect radar files for this frame
@@ -1174,16 +1165,14 @@ function buildNuScenesFrameBatches(bundle: MetadataBundle) {
           })
         }
       }
-      // Extract sweep descriptors (pre-computed in metadata)
-      const rawSweeps = lidarFile.sweeps as { filename: string; transform: number[] }[] | undefined
-      const sweepFiles: NuScenesSweepDescriptor[] | undefined = rawSweeps && rawSweeps.length > 0
-        ? rawSweeps
-        : undefined
+      // Extract lidarseg label filename (if available)
+      const lidarsegFile = lidarFile.lidarsegFile as string | undefined
+
       lidarFrames.push({
         timestamp: ts.toString(),
         filename: lidarFile.filename as string,
         radarFiles: radarFiles.length > 0 ? radarFiles : undefined,
-        sweepFiles,
+        lidarsegFile,
       })
     }
 
@@ -1227,7 +1216,7 @@ async function initNuScenesLidarWorker(
 ) {
   if (!internal.nuScenesSampleFiles || batches.length === 0) return
 
-  // Collect only the files referenced by the batches (LiDAR + radar + sweeps)
+  // Collect only the files referenced by the batches (LiDAR + radar + lidarseg)
   const neededFiles = new Set<string>()
   for (const batch of batches) {
     for (const frame of batch) {
@@ -1235,8 +1224,8 @@ async function initNuScenesLidarWorker(
       if (frame.radarFiles) {
         for (const rf of frame.radarFiles) neededFiles.add(rf.filename)
       }
-      if (frame.sweepFiles) {
-        for (const sf of frame.sweepFiles) neededFiles.add(sf.filename)
+      if (frame.lidarsegFile) {
+        neededFiles.add(frame.lidarsegFile)
       }
     }
   }

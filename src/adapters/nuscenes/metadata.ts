@@ -34,6 +34,13 @@ import { multiplyRowMajor4x4, invertRowMajor4x4 } from '../../utils/matrix'
 // Parsed database — built once, reused across scene switches
 // ---------------------------------------------------------------------------
 
+/** Lidarseg JSON entry: maps sample_data_token → label file */
+interface NuScenesLidarsegEntry {
+  token: string
+  sample_data_token: string
+  filename: string
+}
+
 export interface NuScenesDatabase {
   scenes: NuScenesScene[]
   sampleByToken: Map<string, NuScenesSample>
@@ -52,6 +59,11 @@ export interface NuScenesDatabase {
   sampleDataBySample: Map<string, NuScenesSampleData[]>
   /** instance_token → category name */
   instanceCategoryName: Map<string, string>
+
+  /** sample_data_token → lidarseg label filename (e.g. "lidarseg/v1.0-mini/<token>_lidarseg.bin") */
+  lidarsegBySampleData: Map<string, string>
+  /** Ordered category names for lidarseg index → name lookup (index=uint8 label) */
+  lidarsegCategories: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +110,7 @@ export async function buildNuScenesDatabase(
     instances,
     categories,
     logs,
+    lidarsegEntries,
   ] = await Promise.all([
     readJsonFile<NuScenesScene>(jsonFiles, 'scene.json'),
     readJsonFile<NuScenesSample>(jsonFiles, 'sample.json'),
@@ -109,6 +122,7 @@ export async function buildNuScenesDatabase(
     readJsonFile<NuScenesInstance>(jsonFiles, 'instance.json'),
     readJsonFile<NuScenesCategory>(jsonFiles, 'category.json'),
     readJsonFile<NuScenesLog>(jsonFiles, 'log.json'),
+    readJsonFile<NuScenesLidarsegEntry>(jsonFiles, 'lidarseg.json'),
   ])
 
   // Build token → entry maps
@@ -154,6 +168,22 @@ export async function buildNuScenesDatabase(
     }
   }
 
+  // Build lidarseg lookup: sample_data_token → filename
+  const lidarsegBySampleData = new Map<string, string>()
+  for (const entry of lidarsegEntries) {
+    lidarsegBySampleData.set(entry.sample_data_token, entry.filename)
+  }
+
+  // Build ordered category list for lidarseg label index → name lookup.
+  // category.json entries have an `index` field (0–31) when lidarseg data is present.
+  const lidarsegCategories: string[] = []
+  for (const cat of categories) {
+    const idx = (cat as unknown as { index: number }).index
+    if (idx !== undefined) {
+      lidarsegCategories[idx] = cat.name
+    }
+  }
+
   return {
     scenes,
     sampleByToken,
@@ -168,6 +198,8 @@ export async function buildNuScenesDatabase(
     annotationsBySample,
     sampleDataBySample,
     instanceCategoryName,
+    lidarsegBySampleData,
+    lidarsegCategories,
   }
 }
 
@@ -201,46 +233,6 @@ function inferTimeOfDay(logfile: string): string {
   if (hour >= 8 && hour < 17) return 'Day'
   if (hour >= 17 && hour < 19) return 'Dawn/Dusk'
   return 'Night'
-}
-
-// ---------------------------------------------------------------------------
-// LiDAR sweep accumulation
-// ---------------------------------------------------------------------------
-
-/** Max number of previous sweeps to collect per keyframe (10 total incl. keyframe). */
-const NUSCENES_MAX_SWEEPS = 9
-
-/**
- * Walk the LIDAR_TOP sample_data `prev` linked list to collect sweep files.
- * For each sweep, pre-computes the transform: inv(kf_ego) × sweep_ego × lidar_extrinsic.
- * This single 4×4 matrix transforms a sweep point directly into the keyframe's ego frame.
- */
-function collectLidarSweeps(
-  db: NuScenesDatabase,
-  keyframeSd: NuScenesSampleData,
-  invKfEgo: number[],
-  lidarExtrinsic: number[],
-): { filename: string; transform: number[] }[] {
-  const sweeps: { filename: string; transform: number[] }[] = []
-  let curToken = keyframeSd.prev
-  for (let i = 0; i < NUSCENES_MAX_SWEEPS && curToken; i++) {
-    const sd = db.sampleDataByToken.get(curToken)
-    if (!sd) break
-    // Stop at next keyframe boundary (we only want non-keyframe sweeps)
-    if (sd.is_key_frame) break
-
-    const egoPose = db.egoPoseByToken.get(sd.ego_pose_token)
-    if (egoPose) {
-      const sweepEgo = quaternionToMatrix4x4(egoPose.rotation, egoPose.translation)
-      // Combined: inv(kf_ego) × sweep_ego × lidar_extrinsic
-      const sweepEgoTimesExt = multiplyRowMajor4x4(sweepEgo, lidarExtrinsic)
-      const transform = multiplyRowMajor4x4(invKfEgo, sweepEgoTimesExt)
-      sweeps.push({ filename: sd.filename, transform })
-    }
-
-    curToken = sd.prev
-  }
-  return sweeps
 }
 
 /**
@@ -434,13 +426,9 @@ export function loadNuScenesSceneMetadata(
     trail.sort((a, b) => a.frameIndex - b.frameIndex)
   }
 
-  // 7. Build sensor file paths per frame + LiDAR sweep data
+  // 7. Build sensor file paths per frame
   //    Store sample_data grouped by sample for later use by workers.
   //    This is stored as vehiclePoseByFrame (repurposed) keyed by timestamp.
-  //    Also collects LiDAR sweep data (up to 9 prev sweeps per keyframe).
-  const lidarTopCalib = lidarCalibrations.get(1) // LIDAR_TOP = sensor ID 1
-  const lidarExt = lidarTopCalib?.extrinsic ?? null
-
   const vehiclePoseByFrame = new Map<bigint, Record<string, unknown>[]>()
   for (let fi = 0; fi < orderedSamples.length; fi++) {
     const sample = orderedSamples[fi]
@@ -464,13 +452,11 @@ export function loadNuScenesSceneMetadata(
         ego_pose_token: sd.ego_pose_token,
       }
 
-      // For LIDAR_TOP, collect sweep data (9 prev non-keyframe scans)
-      if (sensor.channel === 'LIDAR_TOP' && lidarExt) {
-        const kfEgoPose = db.egoPoseByToken.get(sd.ego_pose_token)
-        if (kfEgoPose) {
-          const kfEgoMatrix = quaternionToMatrix4x4(kfEgoPose.rotation, kfEgoPose.translation)
-          const invKfEgo = invertRowMajor4x4(kfEgoMatrix)
-          entry.sweeps = collectLidarSweeps(db, sd, invKfEgo, lidarExt)
+      // For LIDAR_TOP, attach lidarseg label filename (if available)
+      if (sensor.channel === 'LIDAR_TOP') {
+        const lidarsegFile = db.lidarsegBySampleData.get(sd.token)
+        if (lidarsegFile) {
+          entry.lidarsegFile = lidarsegFile
         }
       }
 

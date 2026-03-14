@@ -46,11 +46,8 @@ export interface PointCloud {
   positions: Float32Array
   /** Number of valid points */
   pointCount: number
-  /**
-   * Cumulative point counts for sweep accumulation (nuScenes only).
-   * Index 0 = keyframe-only count, 1 = keyframe + sweep1, ..., N = all sweeps.
-   */
-  sweepCumulativeCounts?: number[]
+  /** Per-point semantic segmentation labels (uint8, 0–31). nuScenes lidarseg only. */
+  segLabels?: Uint8Array
 }
 
 // ---------------------------------------------------------------------------

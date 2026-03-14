@@ -69,7 +69,58 @@ const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = {
   range: RANGE_STOPS,
   elongation: ELONGATION_STOPS,
   distance: DISTANCE_STOPS,
+  segment: INTENSITY_STOPS, // placeholder — segment mode uses its own palette
 }
+
+// ---------------------------------------------------------------------------
+// nuScenes lidarseg 32-class palette (matches devkit colors)
+// ---------------------------------------------------------------------------
+
+/** RGB [0..1] palette indexed by lidarseg label (0–31). Based on nuScenes devkit color_map.py. */
+export const LIDARSEG_PALETTE: [number, number, number][] = [
+  [0.00, 0.00, 0.00],  //  0 noise (black)
+  [0.44, 0.29, 0.00],  //  1 animal
+  [0.85, 0.33, 0.10],  //  2 human.pedestrian.adult
+  [0.85, 0.55, 0.20],  //  3 human.pedestrian.child
+  [1.00, 0.60, 0.00],  //  4 human.pedestrian.construction_worker
+  [0.80, 0.32, 0.33],  //  5 human.pedestrian.personal_mobility
+  [0.00, 0.53, 0.80],  //  6 human.pedestrian.police_officer
+  [0.58, 0.40, 0.11],  //  7 human.pedestrian.stroller
+  [0.42, 0.27, 0.07],  //  8 human.pedestrian.wheelchair
+  [0.47, 0.47, 0.47],  //  9 movable_object.barrier
+  [0.26, 0.20, 0.00],  // 10 movable_object.debris
+  [0.39, 0.25, 0.65],  // 11 movable_object.pushable_pullable
+  [1.00, 0.58, 0.25],  // 12 movable_object.trafficcone
+  [0.87, 0.87, 0.00],  // 13 static_object.bicycle_rack
+  [1.00, 0.00, 0.00],  // 14 vehicle.bicycle
+  [0.00, 0.00, 0.90],  // 15 vehicle.bus.bendy
+  [0.00, 0.00, 0.70],  // 16 vehicle.bus.rigid
+  [1.00, 0.62, 0.00],  // 17 vehicle.car
+  [0.93, 0.57, 0.13],  // 18 vehicle.construction
+  [0.85, 0.10, 0.10],  // 19 vehicle.emergency.ambulance
+  [0.00, 0.00, 0.55],  // 20 vehicle.emergency.police
+  [0.00, 0.46, 0.86],  // 21 vehicle.motorcycle
+  [0.50, 0.35, 0.00],  // 22 vehicle.trailer
+  [0.60, 0.00, 1.00],  // 23 vehicle.truck
+  [0.63, 0.63, 0.78],  // 24 flat.driveable_surface
+  [0.55, 0.42, 0.35],  // 25 flat.other
+  [0.47, 0.47, 0.62],  // 26 flat.sidewalk
+  [0.40, 0.55, 0.26],  // 27 flat.terrain
+  [0.35, 0.35, 0.35],  // 28 static.manmade
+  [0.20, 0.20, 0.20],  // 29 static.other
+  [0.00, 0.68, 0.12],  // 30 static.vegetation
+  [0.64, 0.00, 0.00],  // 31 vehicle.ego
+]
+
+/** Short display names for legend (last segment of dotted name) */
+export const LIDARSEG_LABELS: string[] = [
+  'noise', 'animal', 'adult', 'child', 'constr. worker', 'pers. mobility',
+  'police', 'stroller', 'wheelchair', 'barrier', 'debris', 'pushable',
+  'traffic cone', 'bike rack', 'bicycle', 'bus (bendy)', 'bus (rigid)',
+  'car', 'construction', 'ambulance', 'police car', 'motorcycle',
+  'trailer', 'truck', 'driveable', 'other flat', 'sidewalk', 'terrain',
+  'manmade', 'other static', 'vegetation', 'ego',
+]
 
 function colormapColor(stops: [number, number, number][], t: number): [number, number, number] {
   const tc = Math.max(0, Math.min(1, t))
@@ -95,6 +146,7 @@ const ATTR_OFFSET: Record<ColormapMode, number> = {
   range: 4,       // positions[src + 4]
   elongation: 5,  // positions[src + 5]
   distance: -1,   // computed: sqrt(x² + y² + z²)
+  segment: -2,    // uses segLabels array (not from positions buffer)
 }
 
 /** Normalization ranges per attribute (min, max) for mapping to 0..1 */
@@ -103,14 +155,14 @@ const ATTR_RANGE: Record<ColormapMode, [number, number]> = {
   range: [0, 75],           // meters (max useful range ~75m for visualization)
   elongation: [0, 1],       // already 0..1 in Waymo data
   distance: [0, 50],        // meters from ego center (devkit uses ~50m typical urban range)
+  segment: [0, 31],         // 32 classes (unused — segment mode uses direct palette lookup)
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-/** Maximum points we'll ever allocate buffers for (avoids realloc).
- *  nuScenes with 10-sweep accumulation: ~34K × 10 = ~340K points. */
+/** Maximum points we'll ever allocate buffers for (avoids realloc). */
 const MAX_POINTS = 400_000
 /** Maximum radar points (5 sensors × ~100 pts each). */
 const MAX_RADAR_POINTS = 2_000
@@ -134,7 +186,6 @@ export default function PointCloud() {
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const worldMode = useSceneStore((s) => s.worldMode)
-  const sweepCount = useSceneStore((s) => s.sweepCount)
   const geometryRef = useRef<THREE.BufferGeometry>(null)
   const radarGeometryRef = useRef<THREE.BufferGeometry>(null)
 
@@ -159,7 +210,7 @@ export default function PointCloud() {
   // Mark dirty when any input changes — actual buffer update happens in useFrame
   // to avoid R3F reconciler resetting needsUpdate between useEffect and render.
   const dirtyRef = useRef(true)
-  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode, worldMode, sweepCount])
+  useEffect(() => { dirtyRef.current = true }, [currentFrame, visibleSensors, colormapMode, worldMode])
 
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
@@ -227,32 +278,14 @@ export default function PointCloud() {
         radarTotal += count
       } else {
         // LiDAR: colormap-based
-        // If sweep data exists, limit points based on sweepCount slider
-        const cumCounts = cloud.sweepCumulativeCounts
-        let effectivePointCount = cloud.pointCount
-        if (cumCounts && cumCounts.length > 0) {
-          // sweepCount=0 → index 0 (keyframe only), sweepCount=N → index N
-          const idx = Math.min(sweepCount, cumCounts.length - 1)
-          effectivePointCount = cumCounts[idx]
-        }
-        const count = Math.min(effectivePointCount, MAX_POINTS - lidarTotal)
+        const count = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
 
-        // Time-based fade: keyframe=full brightness, older sweeps fade darker.
-        // Pre-compute sweep boundary index for efficient per-point fade.
-        const hasSweepFade = cumCounts && cumCounts.length > 1 && sweepCount > 0
-        let sweepBoundaryIdx = 0
-        let nextBoundary = hasSweepFade ? cumCounts[0] : count
-        // Total number of active sweep layers (for fade normalization)
-        const activeSweepLayers = hasSweepFade ? Math.min(sweepCount, cumCounts.length - 1) : 0
+        // Segment mode: use per-point label → palette lookup
+        const isSegMode = colormapMode === 'segment'
+        const segLabels = cloud.segLabels
+        const segLabelCount = segLabels ? segLabels.length : 0
 
         for (let i = 0; i < count; i++) {
-          // Advance sweep boundary when point index crosses it
-          if (hasSweepFade && i >= nextBoundary && sweepBoundaryIdx < activeSweepLayers) {
-            sweepBoundaryIdx++
-            nextBoundary = sweepBoundaryIdx < cumCounts.length
-              ? cumCounts[sweepBoundaryIdx] : count
-          }
-
           const src = i * stride
           const dst = (lidarTotal + i) * 3
           const px = positions[src]
@@ -261,21 +294,20 @@ export default function PointCloud() {
           posArr[dst] = px
           posArr[dst + 1] = py
           posArr[dst + 2] = pz
-          // Distance mode: compute sqrt(x²+y²+z²) from xyz; others read from buffer
-          const raw = attrOff === -1
-            ? Math.sqrt(px * px + py * py + pz * pz)
-            : (attrOff < stride ? positions[src + attrOff] : 0)
-          const t = (raw - attrMin) / attrSpan
-          let [r, g, b] = colormapColor(stops, t)
 
-          // Fade sweep points: keyframe (idx 0) = 1.0, oldest sweep = 0.10
-          // Quadratic curve for aggressive drop-off on older sweeps
-          if (hasSweepFade && sweepBoundaryIdx > 0) {
-            const ratio = sweepBoundaryIdx / activeSweepLayers  // 0..1
-            const fade = 1.0 - ratio * ratio * 0.90  // quadratic: 1.0 → 0.10
-            r *= fade
-            g *= fade
-            b *= fade
+          let r: number, g: number, b: number
+          if (isSegMode) {
+            // Segment coloring: palette lookup from uint8 label
+            const label = i < segLabelCount && segLabels ? segLabels[i] : 0
+            const c = LIDARSEG_PALETTE[label] ?? LIDARSEG_PALETTE[0]
+            r = c[0]; g = c[1]; b = c[2]
+          } else {
+            // Standard colormap: distance computes from xyz, others from buffer
+            const raw = attrOff === -1
+              ? Math.sqrt(px * px + py * py + pz * pz)
+              : (attrOff < stride ? positions[src + attrOff] : 0)
+            const t = (raw - attrMin) / attrSpan
+            ;[r, g, b] = colormapColor(stops, t)
           }
 
           colArr[dst] = r

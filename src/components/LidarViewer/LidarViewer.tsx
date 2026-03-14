@@ -13,7 +13,7 @@ import { useEffect, useRef, useMemo, useState } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei'
 import * as THREE from 'three'
-import PointCloud from './PointCloud'
+import PointCloud, { LIDARSEG_PALETTE, LIDARSEG_LABELS } from './PointCloud'
 import BoundingBoxes, { TrajectoryTrails } from './BoundingBoxes'
 import CameraFrustums from './CameraFrustums'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
@@ -432,8 +432,6 @@ export default function LidarViewer() {
   const setBoxMode = useSceneStore((s) => s.actions.setBoxMode)
   const trailLength = useSceneStore((s) => s.trailLength)
   const setTrailLength = useSceneStore((s) => s.actions.setTrailLength)
-  const sweepCount = useSceneStore((s) => s.sweepCount)
-  const setSweepCount = useSceneStore((s) => s.actions.setSweepCount)
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
   const setPointOpacity = useSceneStore((s) => s.actions.setPointOpacity)
   const colormapMode = useSceneStore((s) => s.colormapMode)
@@ -683,7 +681,7 @@ export default function LidarViewer() {
                 return `${active[0].label}+${active.length - 1}`
               })(),
               ...((getManifest().colormapModes?.length ?? 3) > 1
-                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong' }[colormapMode]]
+                ? [{ distance: 'Dist', intensity: 'Int', range: 'Range', elongation: 'Elong', segment: 'Seg' }[colormapMode]]
                 : []),
               ...(hasBoxData ? [{ off: 'Off', box: 'Boxes', model: 'Models' }[boxMode]] : []),
             ].map((text, i, arr) => (
@@ -818,34 +816,9 @@ export default function LidarViewer() {
             </div>
           )}
 
-          {/* Sweep accumulation slider — under Sensor section for datasets with sweep support */}
-          {(() => {
-            const ms = getManifest().maxSweeps
-            if (!ms || ms <= 0) return null
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
-                <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                  Sweeps
-                </span>
-                <input
-                  type="range" min={0} max={ms}
-                  value={sweepCount}
-                  onChange={(e) => setSweepCount(Number(e.target.value))}
-                  style={{ width: 52, height: 2, accentColor: colors.accentBlue }}
-                />
-                <span style={{
-                  fontSize: '10px', fontFamily: fonts.mono, color: colors.textPrimary,
-                  minWidth: 16, textAlign: 'right',
-                }}>
-                  {sweepCount}
-                </span>
-              </div>
-            )
-          })()}
-
           {/* Colormap — hide when dataset only supports one mode */}
           {(() => {
-            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong']]
+            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg']]
             const manifest = getManifest()
             const availableModes = manifest.colormapModes
               ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))
@@ -885,6 +858,47 @@ export default function LidarViewer() {
                   })}
                 </div>
               </>
+            )
+          })()}
+
+          {/* Semantic segmentation legend — visible only in segment mode */}
+          {colormapMode === 'segment' && (() => {
+            // Show only classes present in the current frame's segLabels
+            const presentClasses = new Set<number>()
+            const clouds = sensorClouds
+            if (clouds) {
+              for (const [, cloud] of clouds) {
+                const labels = cloud.segLabels
+                if (!labels) continue
+                for (let i = 0; i < labels.length; i++) {
+                  presentClasses.add(labels[i])
+                }
+              }
+            }
+            // Remove noise (0) and ego (31) from legend — they're uninteresting
+            presentClasses.delete(0)
+            presentClasses.delete(31)
+            if (presentClasses.size === 0) return null
+            const sorted = [...presentClasses].sort((a, b) => a - b)
+            return (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', padding: '4px 8px' }}>
+                {sorted.map((cls) => {
+                  const [r, g, b] = LIDARSEG_PALETTE[cls] ?? [0.5, 0.5, 0.5]
+                  const cssColor = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
+                  return (
+                    <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '1px',
+                        backgroundColor: cssColor,
+                        display: 'inline-block', flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textSecondary }}>
+                        {LIDARSEG_LABELS[cls] ?? cls}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
             )
           })()}
 

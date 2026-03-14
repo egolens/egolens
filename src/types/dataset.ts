@@ -137,8 +137,6 @@ export interface DatasetManifest {
    * Example: nuScenes only has ['intensity'] because range/elongation aren't in the data.
    */
   colormapModes?: string[]
-  /** Max number of LiDAR sweeps for accumulation (0 or undefined = no sweep support). nuScenes=9. */
-  maxSweeps?: number
   /** Intensity value range [min, max] for normalization. Waymo: [0,1], nuScenes: [0,255]. Default [0,1]. */
   intensityRange?: [number, number]
   /** Per-sensor colormap for 3D frustum / UI accents (cameraId → color) */
