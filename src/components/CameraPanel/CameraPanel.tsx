@@ -20,6 +20,7 @@ import BBoxOverlayCanvas from './BBoxOverlayCanvas'
 import LidarProjectionOverlay from './LidarProjectionOverlay'
 import BoxProjectionOverlay from './BoxProjectionOverlay'
 import KeypointOverlay from './KeypointOverlay'
+import CameraSegOverlay from './CameraSegOverlay'
 
 /** Height of the camera strip in pixels */
 const STRIP_HEIGHT = 160
@@ -99,6 +100,8 @@ interface CameraViewProps {
 function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover }: CameraViewProps) {
   const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
   const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
+  const showCameraSeg = useSceneStore((s) => s.showCameraSeg)
+  const hasCameraSeg = useSceneStore((s) => s.hasCameraSegmentation)
   /** The URL currently displayed (kept until a new image fully loads) */
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
   /** The newest blob URL being loaded (may not be visible yet) */
@@ -189,6 +192,11 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
         }}>
           No image
         </div>
+      )}
+
+      {/* Camera segmentation overlay (below lidar/bbox overlays) */}
+      {showCameraSeg && hasCameraSeg && (
+        <CameraSegOverlay cameraName={cameraName} />
       )}
 
       {/* LiDAR point projection overlay (separate toggle) */}

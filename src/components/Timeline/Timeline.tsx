@@ -59,6 +59,7 @@ export default function Timeline() {
   const colormapMode = useSceneStore((s) => s.colormapMode)
   const showKeypoints3D = useSceneStore((s) => s.showKeypoints3D)
   const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
+  const showCameraSeg = useSceneStore((s) => s.showCameraSeg)
   const hasCameraSegmentation = useSceneStore((s) => s.hasCameraSegmentation)
   const segLabelFrames = useSceneStore((s) => s.segLabelFrames)
   const keypointFrames = useSceneStore((s) => s.keypointFrames)
@@ -194,7 +195,7 @@ export default function Timeline() {
             }}
           />
         ))}
-        {hasCameraSegmentation && maxFrame > 0 && [...cameraSegFrames].map((fi) => (
+        {showCameraSeg && hasCameraSegmentation && maxFrame > 0 && [...cameraSegFrames].map((fi) => (
           <div
             key={`cseg-${fi}`}
             style={{

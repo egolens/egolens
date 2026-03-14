@@ -475,6 +475,9 @@ export default function LidarViewer() {
   const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
   const toggleKeypoints3D = useSceneStore((s) => s.actions.toggleKeypoints3D)
   const toggleKeypoints2D = useSceneStore((s) => s.actions.toggleKeypoints2D)
+  const hasCameraSegmentation = useSceneStore((s) => s.hasCameraSegmentation)
+  const showCameraSeg = useSceneStore((s) => s.showCameraSeg)
+  const toggleCameraSeg = useSceneStore((s) => s.actions.toggleCameraSeg)
   const showLidarOverlay = useSceneStore((s) => s.showLidarOverlay)
   const toggleLidarOverlay = useSceneStore((s) => s.actions.toggleLidarOverlay)
   const cameraCalibrations = useSceneStore((s) => s.cameraCalibrations)
@@ -728,6 +731,7 @@ export default function LidarViewer() {
               ...(showLidarOverlay ? ['LiDAR→Cam'] : []),
               ...(showKeypoints3D ? ['KP 3D'] : []),
               ...(showKeypoints2D ? ['KP 2D'] : []),
+              ...(showCameraSeg ? ['CamSeg'] : []),
             ].map((text, i, arr) => (
               <span key={i} style={{
                 fontSize: '10px',
@@ -1136,6 +1140,30 @@ export default function LidarViewer() {
                   transition: 'all 0.15s',
                 }} />
                 Keypoints 2D
+              </button>
+            )}
+            {/* Camera Segmentation toggle */}
+            {hasCameraSegmentation && (
+              <button
+                onClick={toggleCameraSeg}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  width: '100%', padding: '4px 8px',
+                  fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500,
+                  border: 'none', cursor: 'pointer',
+                  backgroundColor: showCameraSeg ? 'rgba(255, 68, 255, 0.1)' : 'transparent',
+                  color: showCameraSeg ? '#FF44FF' : colors.textDim,
+                  transition: 'all 0.15s', textAlign: 'left',
+                }}
+              >
+                <span style={{
+                  width: 8, height: 8, borderRadius: '2px',
+                  border: `1.5px solid ${showCameraSeg ? '#FF44FF' : colors.textDim}`,
+                  backgroundColor: showCameraSeg ? '#FF44FF' : 'transparent',
+                  display: 'inline-block', flexShrink: 0,
+                  transition: 'all 0.15s',
+                }} />
+                Cam Seg
               </button>
             )}
 

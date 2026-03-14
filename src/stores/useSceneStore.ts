@@ -64,6 +64,7 @@ import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
+import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,6 +112,7 @@ interface SceneActions {
   toggleLidarOverlay: () => void
   toggleKeypoints3D: () => void
   toggleKeypoints2D: () => void
+  toggleCameraSeg: () => void
   reset: () => void
 }
 
@@ -188,6 +190,8 @@ export interface SceneState {
   showKeypoints3D: boolean
   /** Show 2D camera keypoint overlays */
   showKeypoints2D: boolean
+  /** Show camera segmentation overlay */
+  showCameraSeg: boolean
   /** Frame indices with lidar segmentation labels (for Timeline markers) */
   segLabelFrames: Set<number>
   /** Frame indices with 3D lidar keypoint data (for Timeline markers) */
@@ -324,6 +328,7 @@ function resetInternal() {
   internal.cameraKeypointsByFrame.clear()
   setCameraKeypointsByFrameRef(internal.cameraKeypointsByFrame)
   internal.cameraSeg.clear()
+  setCameraSegByFrameRef(internal.cameraSeg)
 }
 
 // ---------------------------------------------------------------------------
@@ -487,6 +492,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   hasCameraSegmentation: false,
   showKeypoints3D: false,
   showKeypoints2D: false,
+  showCameraSeg: false,
   segLabelFrames: new Set<number>(),
   keypointFrames: new Set<number>(),
   cameraKeypointFrames: new Set<number>(),
@@ -832,6 +838,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     toggleKeypoints2D: () => {
       set((s) => ({ showKeypoints2D: !s.showKeypoints2D }))
     },
+    toggleCameraSeg: () => {
+      set((s) => ({ showCameraSeg: !s.showCameraSeg }))
+    },
 
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Check for nuScenes sentinel key (produced by folder scanner)
@@ -957,9 +966,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         keypointFrames: new Set<number>(),
         cameraKeypointFrames: new Set<number>(),
         cameraSegFrames: new Set<number>(),
-        // Preserve keypoint toggles across segment switches (like boxMode)
+        // Preserve keypoint/seg toggles across segment switches (like boxMode)
         showKeypoints3D: prev.showKeypoints3D,
         showKeypoints2D: prev.showKeypoints2D,
+        showCameraSeg: prev.showCameraSeg,
         activeCam: null,
         hoveredCam: null,
         hoveredBoxId: null,
@@ -1100,6 +1110,7 @@ function applyMetadataBundle(
   }
   if (bundle.cameraSeg) {
     internal.cameraSeg = bundle.cameraSeg
+    setCameraSegByFrameRef(bundle.cameraSeg)
   }
 
   // Zustand state updates
