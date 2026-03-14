@@ -15,7 +15,6 @@ import { useFrame } from '@react-three/fiber'
 import { useSceneStore } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { getManifest } from '../../adapters/registry'
-import { parseCameraCalibrations } from '../../utils/cameraCalibration'
 
 // ---------------------------------------------------------------------------
 // Colormaps
@@ -246,68 +245,6 @@ const VELOCITY_STOPS: [number, number, number][] = [
 /** Max speed for normalization (m/s). ~15 m/s ≈ 54 km/h covers most urban traffic. */
 const VELOCITY_MAX = 15
 
-// ---------------------------------------------------------------------------
-// POV frustum culling — hide points inside the active camera's view cone
-// ---------------------------------------------------------------------------
-
-/** Precomputed inverse camera transform + frustum half-tangents for fast per-point test */
-interface FrustumCuller {
-  /** 3×3 inverse rotation matrix (vehicle → camera optical frame), row-major */
-  invR: [number, number, number, number, number, number, number, number, number]
-  /** Camera position in vehicle frame */
-  cx: number; cy: number; cz: number
-  /** Half-tangent of horizontal & vertical FOV */
-  tanH: number; tanV: number
-}
-
-/** Minimum Z in camera space to start culling (avoids clipping points behind camera) */
-const CULL_NEAR = 0.5
-/** Maximum Z — only cull nearby points so distant scenery stays visible during POV */
-const CULL_FAR = 20
-
-/** Build culler from a CameraCalib. Returns null if activeCam is null. */
-function buildFrustumCuller(
-  cameraCalibrations: any[],
-  activeCam: number | null,
-): FrustumCuller | null {
-  if (activeCam === null || cameraCalibrations.length === 0) return null
-  const calibMap = parseCameraCalibrations(cameraCalibrations)
-  const calib = calibMap.get(activeCam)
-  if (!calib) return null
-
-  // Inverse quaternion: camera optical → vehicle  ⇒  vehicle → camera optical
-  const qInv = calib.quaternion.clone().invert()
-  const m = new THREE.Matrix4().makeRotationFromQuaternion(qInv)
-  const e = m.elements // column-major
-  const invR: FrustumCuller['invR'] = [
-    e[0], e[4], e[8],
-    e[1], e[5], e[9],
-    e[2], e[6], e[10],
-  ]
-
-  return {
-    invR,
-    cx: calib.position.x, cy: calib.position.y, cz: calib.position.z,
-    tanH: Math.tan(calib.hFov / 2),
-    tanV: Math.tan(calib.vFov / 2),
-  }
-}
-
-/** Returns true if point (px,py,pz) in vehicle frame is inside the camera frustum */
-function insideFrustum(c: FrustumCuller, px: number, py: number, pz: number): boolean {
-  // Translate to camera origin
-  const dx = px - c.cx
-  const dy = py - c.cy
-  const dz = pz - c.cz
-  // Rotate to camera optical frame (X=right, Y=down, Z=forward)
-  const camZ = c.invR[6] * dx + c.invR[7] * dy + c.invR[8] * dz
-  if (camZ < CULL_NEAR || camZ > CULL_FAR) return false
-  const camX = c.invR[0] * dx + c.invR[1] * dy + c.invR[2] * dz
-  if (Math.abs(camX) > camZ * c.tanH) return false
-  const camY = c.invR[3] * dx + c.invR[4] * dy + c.invR[5] * dz
-  if (Math.abs(camY) > camZ * c.tanV) return false
-  return true
-}
 
 export default function PointCloud() {
   const pointOpacity = useSceneStore((s) => s.pointOpacity)
@@ -368,8 +305,7 @@ export default function PointCloud() {
 
     // Always read latest state from store (no stale closure)
     const { currentFrame: curFrame, visibleSensors: visSensors,
-            colormapMode: cmap, worldMode: wmode, activeCam: aCam,
-            cameraCalibrations: camCalibs } =
+            colormapMode: cmap, worldMode: wmode } =
       useSceneStore.getState()
 
     const geom = geometryRef.current
@@ -401,9 +337,6 @@ export default function PointCloud() {
     const attrSpan = attrMax - attrMin
 
     const stride = manifest.pointStride
-
-    // POV frustum culling: hide points inside the active camera's view cone
-    const culler = buildFrustumCuller(camCalibs, aCam)
 
     let lidarTotal = 0
     let radarTotal = 0
@@ -452,9 +385,6 @@ export default function PointCloud() {
           const px = positions[src]
           const py = positions[src + 1]
           const pz = positions[src + 2]
-
-          // POV frustum culling: skip points inside the camera's view cone
-          if (culler && insideFrustum(culler, px, py, pz)) continue
 
           const dst = (lidarTotal + written) * 3
           posArr[dst] = px
