@@ -21,7 +21,12 @@ src/
 │   │   ├── PointCloud.tsx     # Point cloud renderer (turbo colormap, per-sensor coloring)
 │   │   ├── BoundingBoxes.tsx  # 3D boxes (wireframe or GLB models) with tracking colors
 │   │   └── CameraFrustums.tsx # Camera FOV frustums with hover highlight
-│   ├── CameraPanel/    # 5 camera image strip with POV switching + hover highlight
+│   │   └── KeypointSkeleton.tsx  # 3D human keypoint skeleton (14 joints, per-joint colors)
+│   ├── CameraPanel/    # 5 camera image strip with POV switching + hover highlight + overlays
+│   │   ├── CameraPanel.tsx        # Camera strip layout + CameraView sub-component
+│   │   ├── BBoxOverlayCanvas.tsx  # 2D bounding box Canvas overlay
+│   │   ├── KeypointOverlay.tsx    # 2D camera keypoint skeleton overlay (Canvas 2D)
+│   │   └── CameraSegOverlay.tsx   # Camera panoptic segmentation overlay (UPNG uint16 decode)
 │   └── Timeline/       # Frame scrubber + play/pause + speed control + buffer bar
 ├── workers/
 │   ├── dataWorker.ts        # Parquet I/O + range image→xyz (runs in Web Worker)
@@ -45,28 +50,34 @@ src/
 npm run dev     # Start dev server
 npm run build   # Type-check + build
 npm run lint    # ESLint
-npm test        # Vitest (27 tests)
+npm test        # Vitest (415+ tests)
 ```
 
 ## Key Features (Implemented)
 - Multi-segment support with dropdown selector (auto-discovers segments from waymo_data/)
 - LiDAR point cloud: 5 sensors, ~168K points/frame, 4 colormap modes (intensity/height/range/elongation)
+- LiDAR segmentation: 23-class semantic coloring (TOP sensor, ~5-frame interval)
 - 3D bounding boxes: wireframe or GLB models (car/pedestrian/cyclist), class-colored
-- 2D camera bounding boxes: SVG overlay on camera panels, synced with boxMode toggle
+- 2D camera bounding boxes: Canvas overlay on camera panels, synced with boxMode toggle
 - Cross-modal hover highlight: hover 2D box → highlight linked 3D box (and vice versa) via association data
 - Trajectory trails: past N frames of object positions as fading polylines
+- 3D human keypoints: 14-joint skeleton per pedestrian, per-joint/bone colors, InstancedMesh
+- 2D camera keypoints: Canvas 2D overlay with occluded joint indicators (alpha + dashed bones)
+- Camera panoptic segmentation: UPNG uint16 PNG decode → 29-class colored overlay (alpha 0.35)
 - 5 camera image panels: preloaded JPEG, POV switching (click card), hover border highlight
 - Camera frustum visualization: base-only default, full wireframe on hover, per-camera FOV sizing
 - POV camera: quaternion slerp for gimbal-lock-free orbital↔POV transitions
 - Timeline: scrubber, play/pause (spacebar), speed control (0.5x–4x), YouTube-style buffer bar
-- Unified frosted glass control panel with conditional UI (opacity hidden when all sensors off)
+- Timeline annotation markers: per-feature colored dots (seg=cyan, KP3D=lime, KP2D=light-cyan, CamSeg=magenta)
+- Unified frosted glass control panel with conditional UI (data-driven: toggles hidden when data absent)
+- Independent toggles: Keypoints 3D, Keypoints 2D, Cam Seg (preserved across segment switches)
 - Parallel worker pools: 4 lidar workers + 2 camera workers for fast row group decompression
 
 ## Data Components Used
-9 essential: `vehicle_pose`, `lidar_calibration`, `camera_calibration`, `lidar_box`, `camera_box`, `camera_to_lidar_box_association`, `lidar`, `camera_image`, `stats`
+13 total: `vehicle_pose`, `lidar_calibration`, `camera_calibration`, `lidar_box`, `camera_box`, `camera_to_lidar_box_association`, `lidar`, `camera_image`, `stats`, `lidar_segmentation`, `lidar_hkp`, `camera_hkp`, `camera_segmentation`
 
 ## Download Script (`download.sh`)
 Supports two modes: **index-based** (pick specific segments by 0-based index) or **count-based** (first N segments). Set `INDICES="23 114 172 ..."` for specific segments, or comment it out and set `N=15` for sequential download.
 
 ## Current Phase
-Phase 2 — Camera views + 3D perception features complete. Next: 3DGS BEV integration.
+Phase 3 — Full perception pipeline complete (LiDAR seg, 3D/2D keypoints, camera panoptic seg). Next: 3DGS BEV integration.
