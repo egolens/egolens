@@ -85,7 +85,19 @@ export function decodePanopticToRGBA(
 
     const W = img.width
     const H = img.height
-    const data = new DataView(img.data)
+    // UPNG.decode().data may be ArrayBuffer or Uint8Array — normalize
+    const rawData = img.data
+    let ab: ArrayBuffer
+    if (rawData instanceof ArrayBuffer) {
+      ab = rawData
+    } else if (ArrayBuffer.isView(rawData)) {
+      const view = rawData as Uint8Array
+      ab = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+    } else {
+      console.warn('[CameraSegOverlay] Unexpected data type from UPNG.decode()')
+      return null
+    }
+    const data = new DataView(ab)
     const rgba = new Uint8ClampedArray(W * H * 4)
     const numClasses = WAYMO_CAMERA_SEG_PALETTE.length
 
