@@ -913,7 +913,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               }
             }}
             disabled={urlLoading}
-            placeholder="https://s3.amazonaws.com/bucket/log_id/"
+            placeholder="https://your-bucket.s3.amazonaws.com/av2/log_id/"
             style={{
               flex: 1,
               padding: '8px 12px',
@@ -970,35 +970,17 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           </div>
         )}
 
-        {/* Quick-load example */}
+        {/* Hint */}
         <div style={{
           fontSize: '11px',
           fontFamily: fonts.sans,
           color: colors.textDim,
           textAlign: 'center',
+          lineHeight: 1.6,
         }}>
-          Requires a <span style={{ fontFamily: fonts.mono }}>manifest.json</span> at the URL root.{' '}
-          <button
-            onClick={() => {
-              setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/01bb304d-7bd8-35f8-bbef-7086b688e35e/')
-              setUrlDataset('argoverse2')
-              setUrlError(null)
-            }}
-            disabled={urlLoading}
-            style={{
-              padding: 0,
-              fontSize: '11px',
-              fontFamily: fonts.sans,
-              color: colors.accent,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              opacity: urlLoading ? 0.5 : 1,
-            }}
-          >
-            Try example URL
-          </button>
+          Requires a <span style={{ fontFamily: fonts.mono }}>manifest.json</span> at the URL root.
+          <br />
+          Generate with: <span style={{ fontFamily: fonts.mono, color: colors.textSecondary }}>python scripts/generate_av2_manifest.py /path/to/log</span>
         </div>
       </div>
     </div>
