@@ -970,7 +970,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           </div>
         )}
 
-        {/* Hint */}
+        {/* Hint + example */}
         <div style={{
           fontSize: '11px',
           fontFamily: fonts.sans,
@@ -978,9 +978,28 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           textAlign: 'center',
           lineHeight: 1.6,
         }}>
-          Requires a <span style={{ fontFamily: fonts.mono }}>manifest.json</span> at the URL root.
-          <br />
-          Generate with: <span style={{ fontFamily: fonts.mono, color: colors.textSecondary }}>python scripts/generate_av2_manifest.py /path/to/log</span>
+          Supports S3-hosted data (public listing or <span style={{ fontFamily: fonts.mono }}>manifest.json</span>).{' '}
+          <button
+            onClick={() => {
+              setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/01bb304d-7bd8-35f8-bbef-7086b688e35e/')
+              setUrlDataset('argoverse2')
+              setUrlError(null)
+            }}
+            disabled={urlLoading}
+            style={{
+              padding: 0,
+              fontSize: '11px',
+              fontFamily: fonts.sans,
+              color: colors.accent,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              opacity: urlLoading ? 0.5 : 1,
+            }}
+          >
+            Try example
+          </button>
         </div>
       </div>
     </div>

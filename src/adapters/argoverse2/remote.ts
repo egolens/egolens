@@ -1,14 +1,14 @@
 /**
  * Argoverse 2 Remote Loading — URL-based data loading for AV2 logs.
  *
- * Entry point: `loadAV2FromUrl(baseUrl)` fetches manifest.json + metadata
- * feather files, builds an AV2LogDatabase, and constructs URL-based
- * fileEntries for worker pools.
+ * Entry point: `loadAV2FromUrl(baseUrl)` fetches metadata feather files,
+ * builds an AV2LogDatabase, and constructs URL-based fileEntries for
+ * worker pools.
  *
- * manifest.json is required for URL mode — provides frame timestamps and
- * camera-to-lidar matching (replaces local file-key scanning).
- *
- * Generate with: python scripts/generate_av2_manifest.py /path/to/log
+ * Frame discovery strategy (in order):
+ *   1. manifest.json — fast, single request, full camera matching
+ *   2. S3 ListObjectsV2 — fallback, auto-discovers files from bucket listing
+ *   3. Error — neither available
  *
  * NOTE: Manifest types (AV2Manifest, AV2ManifestFrame) and
  * discoverAV2FramesFromManifest() live in metadata.ts to avoid circular
@@ -31,14 +31,15 @@ export type { AV2Manifest, AV2ManifestFrame }
 export { discoverAV2FramesFromManifest } from './metadata'
 
 // ---------------------------------------------------------------------------
-// Manifest fetch
+// Manifest fetch (optional — returns null on 404)
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch and validate manifest.json from a base URL.
- * Also acts as a CORS probe — the first real fetch catches CORS errors.
+ * Try to fetch and validate manifest.json from a base URL.
+ * Returns null if 404 (allows S3 listing fallback).
+ * Throws on CORS / network / other errors.
  */
-export async function fetchAV2Manifest(baseUrl: string): Promise<AV2Manifest> {
+export async function fetchAV2Manifest(baseUrl: string): Promise<AV2Manifest | null> {
   const url = `${baseUrl}manifest.json`
 
   try {
@@ -47,13 +48,7 @@ export async function fetchAV2Manifest(baseUrl: string): Promise<AV2Manifest> {
     })
 
     if (!res.ok) {
-      if (res.status === 404) {
-        throw new DataLoadError(
-          'manifest.json not found at this URL.\n' +
-          'Generate with: python scripts/generate_av2_manifest.py /path/to/log',
-          'MANIFEST', url,
-        )
-      }
+      if (res.status === 404) return null
       throw classifyHttpError(res.status, url)
     }
 
@@ -78,6 +73,172 @@ export async function fetchAV2Manifest(baseUrl: string): Promise<AV2Manifest> {
     if (err instanceof DataLoadError) throw err
     throw classifyFetchError(err, url)
   }
+}
+
+// ---------------------------------------------------------------------------
+// S3 ListObjectsV2 fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse an S3-style base URL into bucket endpoint + prefix.
+ *
+ * Supports:
+ *   https://bucket.s3.region.amazonaws.com/prefix/path/
+ *   https://bucket.s3.amazonaws.com/prefix/path/
+ *   https://s3.region.amazonaws.com/bucket/prefix/path/
+ *
+ * Returns null if the URL is not recognizable as S3.
+ */
+export function parseS3Url(baseUrl: string): { bucketEndpoint: string; prefix: string } | null {
+  try {
+    const u = new URL(baseUrl)
+    const host = u.hostname
+
+    // Pattern 1: bucket.s3[.region].amazonaws.com
+    const virtualHosted = host.match(/^(.+?)\.s3[.-](.+\.)?amazonaws\.com$/)
+    if (virtualHosted) {
+      // bucketEndpoint = scheme + host (no path prefix)
+      const bucketEndpoint = `${u.protocol}//${u.hostname}`
+      // prefix = path without leading slash, keep trailing slash
+      const prefix = u.pathname.slice(1) // remove leading /
+      return { bucketEndpoint, prefix }
+    }
+
+    // Pattern 2: s3[.region].amazonaws.com/bucket/prefix
+    const pathStyle = host.match(/^s3[.-](.+\.)?amazonaws\.com$/)
+    if (pathStyle) {
+      const pathParts = u.pathname.slice(1).split('/')
+      const bucket = pathParts[0]
+      const prefix = pathParts.slice(1).join('/')
+      const bucketEndpoint = `${u.protocol}//${bucket}.${u.hostname}`
+      return { bucketEndpoint, prefix }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** Single page of S3 ListObjectsV2 response. */
+interface S3ListPage {
+  keys: string[]
+  isTruncated: boolean
+  nextContinuationToken?: string
+}
+
+/**
+ * Fetch one page of S3 ListObjectsV2 results.
+ */
+async function fetchS3ListPage(
+  bucketEndpoint: string,
+  prefix: string,
+  continuationToken?: string,
+): Promise<S3ListPage> {
+  const params = new URLSearchParams({
+    'list-type': '2',
+    'prefix': prefix,
+    'max-keys': '2000',
+  })
+  if (continuationToken) params.set('continuation-token', continuationToken)
+
+  const url = `${bucketEndpoint}/?${params}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new DataLoadError(
+        'S3 bucket listing is not publicly accessible (403 Forbidden). ' +
+        'Either enable public ListBucket access, or provide a manifest.json.',
+        'CORS', url,
+      )
+    }
+    throw classifyHttpError(res.status, url)
+  }
+
+  const xml = await res.text()
+  return parseS3ListXml(xml)
+}
+
+/**
+ * Parse S3 ListObjectsV2 XML response.
+ */
+export function parseS3ListXml(xml: string): S3ListPage {
+  const keys: string[] = []
+
+  // Extract <Key>...</Key> values
+  const keyRegex = /<Key>(.*?)<\/Key>/g
+  let m: RegExpExecArray | null
+  while ((m = keyRegex.exec(xml)) !== null) {
+    keys.push(m[1])
+  }
+
+  // Check truncation
+  const truncMatch = xml.match(/<IsTruncated>(.*?)<\/IsTruncated>/)
+  const isTruncated = truncMatch?.[1] === 'true'
+
+  // Next token
+  const tokenMatch = xml.match(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/)
+
+  return {
+    keys,
+    isTruncated,
+    nextContinuationToken: tokenMatch?.[1],
+  }
+}
+
+/**
+ * Discover AV2 frames by listing S3 objects under sensors/lidar/ and sensors/cameras/.
+ *
+ * Builds the same data structure as discoverAV2FramesFromManifest (manifest) or
+ * the local file-key scanning path — so buildAV2LogDatabase works identically.
+ *
+ * Returns a synthetic file key map for buildAV2LogDatabase to scan,
+ * plus the discovered logId.
+ */
+export async function discoverAV2FramesFromS3(
+  baseUrl: string,
+  onProgress?: (progress: number) => void,
+): Promise<{ fileKeys: string[]; logId: string }> {
+  const s3 = parseS3Url(baseUrl)
+  if (!s3) {
+    throw new DataLoadError(
+      'Cannot auto-discover files: URL is not a recognized S3 endpoint. ' +
+      'Provide a manifest.json at the URL root.',
+      'MANIFEST', baseUrl,
+    )
+  }
+
+  // Extract logId from prefix (last non-empty segment)
+  const segments = s3.prefix.replace(/\/$/, '').split('/')
+  const logId = segments[segments.length - 1] || 'unknown'
+
+  // List all objects under the prefix (paginated)
+  const allKeys: string[] = []
+  let continuationToken: string | undefined
+  let pageCount = 0
+
+  do {
+    const page = await fetchS3ListPage(s3.bucketEndpoint, s3.prefix, continuationToken)
+    allKeys.push(...page.keys)
+    continuationToken = page.isTruncated ? page.nextContinuationToken : undefined
+    pageCount++
+    onProgress?.(Math.min(0.05 * pageCount, 0.2))
+  } while (continuationToken && pageCount < 20) // safety cap
+
+  // Strip the prefix to get relative paths (same format as local file keys)
+  const fileKeys = allKeys
+    .map(k => k.startsWith(s3.prefix) ? k.slice(s3.prefix.length) : k)
+    .filter(k => k.length > 0)
+
+  if (fileKeys.length === 0) {
+    throw new DataLoadError(
+      'S3 listing returned no objects under this prefix. Check the URL path.',
+      'NOT_FOUND', baseUrl,
+    )
+  }
+
+  return { fileKeys, logId }
 }
 
 // ---------------------------------------------------------------------------
@@ -106,19 +267,35 @@ export interface AV2UrlLoadResult {
 /**
  * Load an AV2 log from a base URL.
  *
- * 1. Fetches metadata feather files in parallel
- * 2. Builds AV2LogDatabase using manifest for frame discovery
- * 3. Constructs URL-based file entries for workers
+ * Frame discovery: manifest-first, S3-listing fallback.
+ *   1. If manifest provided → use manifest for frame discovery
+ *   2. If manifest is null → use S3 ListObjectsV2 to discover file keys
+ *
+ * Then fetches metadata feather files, builds AV2LogDatabase,
+ * and constructs URL-based file entries for workers.
  *
  * @param baseUrl - Base URL with trailing slash (e.g. "https://s3.../log_id/")
- * @param manifest - Pre-fetched manifest.json
+ * @param manifest - Pre-fetched manifest.json, or null for S3 listing fallback
  * @param onProgress - Optional progress callback (0-1)
  */
 export async function loadAV2FromUrl(
   baseUrl: string,
-  manifest: AV2Manifest,
+  manifest: AV2Manifest | null,
   onProgress?: (progress: number) => void,
 ): Promise<AV2UrlLoadResult> {
+  // S3 listing fallback: discover file keys if no manifest
+  let s3FileKeys: string[] | null = null
+  let logId: string
+
+  if (manifest) {
+    logId = manifest.log_id
+  } else {
+    const discovery = await discoverAV2FramesFromS3(baseUrl, onProgress)
+    s3FileKeys = discovery.fileKeys
+    logId = discovery.logId
+    onProgress?.(0.05)
+  }
+
   // 1. Fetch metadata feather files in parallel
   const [extrinsicsBuf, intrinsicsBuf, posesBuf, annotationsBuf] = await Promise.all([
     fetchBuffer(`${baseUrl}calibration/egovehicle_SE3_sensor.feather`),
@@ -136,10 +313,22 @@ export async function loadAV2FromUrl(
   if (annotationsBuf) {
     metadataFiles.set('annotations.feather', annotationsBuf)
   }
+
+  // For S3 fallback: inject discovered file keys into the metadata map
+  // (as dummy values — buildAV2LogDatabase only scans the keys for frame discovery)
+  if (s3FileKeys) {
+    for (const key of s3FileKeys) {
+      if (!metadataFiles.has(key)) {
+        metadataFiles.set(key, new ArrayBuffer(0)) // placeholder — only key is scanned
+      }
+    }
+  }
   onProgress?.(0.15)
 
-  // 3. Build database using manifest for frame discovery
-  const db = await buildAV2LogDatabase(metadataFiles, manifest.log_id, manifest)
+  // 3. Build database
+  //    - manifest mode: uses manifest for frame discovery
+  //    - S3 fallback: uses file key scanning (local-mode logic in buildAV2LogDatabase)
+  const db = await buildAV2LogDatabase(metadataFiles, logId, manifest ?? undefined)
   onProgress?.(0.2)
 
   // 4. Build URL-based file entries for workers (deduplicating as we go)

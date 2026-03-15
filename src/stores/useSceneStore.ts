@@ -915,11 +915,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     loadFromUrl: async (dataset: string, baseUrl: string) => {
       if (dataset === 'argoverse2') {
-        // 1. Fetch manifest.json (also acts as CORS probe)
+        // 1. Try manifest.json first, fall back to S3 listing
         set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
         try {
           const manifest = await fetchAV2Manifest(baseUrl)
+          if (manifest) {
+            console.log('[loadFromUrl] Using manifest.json for frame discovery')
+          } else {
+            console.log('[loadFromUrl] No manifest.json — falling back to S3 listing')
+          }
           set({ loadProgress: 0.05 })
 
           // 2. Fetch metadata + build database

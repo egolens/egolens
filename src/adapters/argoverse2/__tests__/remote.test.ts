@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   fetchAV2Manifest,
   discoverAV2FramesFromManifest,
+  parseS3Url,
+  parseS3ListXml,
   type AV2Manifest,
 } from '../remote'
 import { DataLoadError } from '../../../utils/errors'
@@ -90,20 +92,14 @@ describe('fetchAV2Manifest', () => {
     )
   })
 
-  it('throws MANIFEST error on 404', async () => {
+  it('returns null on 404 (allows S3 listing fallback)', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 404,
     })
 
-    try {
-      await fetchAV2Manifest('https://s3.example.com/log/')
-      expect.unreachable('should have thrown')
-    } catch (e) {
-      expect(e).toBeInstanceOf(DataLoadError)
-      expect((e as DataLoadError).code).toBe('MANIFEST')
-      expect((e as DataLoadError).message).toContain('manifest.json not found')
-    }
+    const result = await fetchAV2Manifest('https://s3.example.com/log/')
+    expect(result).toBeNull()
   })
 
   it('throws on HTTP error (non-404)', async () => {
@@ -236,5 +232,89 @@ describe('discoverAV2FramesFromManifest', () => {
     const frame0 = cameraFilesByFrame.get(0)!
     expect(frame0).toHaveLength(1)
     expect(frame0[0].cameraId).toBe(4)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// parseS3Url
+// ---------------------------------------------------------------------------
+
+describe('parseS3Url', () => {
+  it('parses virtual-hosted S3 URL', () => {
+    const result = parseS3Url('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/log001/')
+    expect(result).toEqual({
+      bucketEndpoint: 'https://argoverse.s3.us-east-1.amazonaws.com',
+      prefix: 'datasets/av2/sensor/val/log001/',
+    })
+  })
+
+  it('parses virtual-hosted S3 URL without region', () => {
+    const result = parseS3Url('https://mybucket.s3.amazonaws.com/prefix/path/')
+    expect(result).toEqual({
+      bucketEndpoint: 'https://mybucket.s3.amazonaws.com',
+      prefix: 'prefix/path/',
+    })
+  })
+
+  it('parses path-style S3 URL', () => {
+    const result = parseS3Url('https://s3.us-east-1.amazonaws.com/argoverse/datasets/av2/')
+    expect(result).toEqual({
+      bucketEndpoint: 'https://argoverse.s3.us-east-1.amazonaws.com',
+      prefix: 'datasets/av2/',
+    })
+  })
+
+  it('returns null for non-S3 URL', () => {
+    expect(parseS3Url('https://example.com/data/')).toBeNull()
+  })
+
+  it('returns null for invalid URL', () => {
+    expect(parseS3Url('not-a-url')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// parseS3ListXml
+// ---------------------------------------------------------------------------
+
+describe('parseS3ListXml', () => {
+  it('parses keys from XML response', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>prefix/sensors/lidar/100.feather</Key></Contents>
+  <Contents><Key>prefix/sensors/lidar/200.feather</Key></Contents>
+  <Contents><Key>prefix/sensors/cameras/ring_front_center/100.jpg</Key></Contents>
+</ListBucketResult>`
+
+    const result = parseS3ListXml(xml)
+    expect(result.keys).toEqual([
+      'prefix/sensors/lidar/100.feather',
+      'prefix/sensors/lidar/200.feather',
+      'prefix/sensors/cameras/ring_front_center/100.jpg',
+    ])
+    expect(result.isTruncated).toBe(false)
+    expect(result.nextContinuationToken).toBeUndefined()
+  })
+
+  it('detects truncation and continuation token', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <IsTruncated>true</IsTruncated>
+  <NextContinuationToken>abc123</NextContinuationToken>
+  <Contents><Key>file1.txt</Key></Contents>
+</ListBucketResult>`
+
+    const result = parseS3ListXml(xml)
+    expect(result.isTruncated).toBe(true)
+    expect(result.nextContinuationToken).toBe('abc123')
+    expect(result.keys).toHaveLength(1)
+  })
+
+  it('handles empty listing', () => {
+    const xml = `<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`
+    const result = parseS3ListXml(xml)
+    expect(result.keys).toHaveLength(0)
+    expect(result.isTruncated).toBe(false)
   })
 })
