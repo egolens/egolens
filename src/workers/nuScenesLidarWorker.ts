@@ -23,6 +23,7 @@ import type {
   LidarWorkerResponse,
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
+import { resolveFileEntry } from './fetchHelper'
 import { NUSCENES_POINT_STRIDE } from '../types/nuscenes'
 import { parseNpzUint16 } from '../utils/npz'
 
@@ -56,10 +57,11 @@ export interface NuScenesLidarWorkerInit extends WorkerInitBase {
    */
   frameBatches: NuScenesFrameDescriptor[][]
   /**
-   * File access: Map serialized as [filename, File][] entries.
-   * The worker resolves filenames against this map.
+   * File access: Map serialized as [filename, File | URL string][] entries.
+   * File for local drag-and-drop, string for remote URL loading.
+   * The worker resolves filenames against this map via resolveFileEntry().
    */
-  fileEntries: [string, File][]
+  fileEntries: [string, File | string][]
   /**
    * LiDAR sensor→ego extrinsic (row-major 4×4, 16 floats).
    * Applied to every point to transform from sensor frame to ego (vehicle) frame.
@@ -80,7 +82,7 @@ export type NuScenesLidarWorkerRequest = NuScenesLidarWorkerInit | LidarBatchReq
 // ---------------------------------------------------------------------------
 
 let frameBatches: NuScenesFrameDescriptor[][] = []
-let fileMap = new Map<string, File>()
+let fileMap = new Map<string, File | string>()
 let wMem = createWorkerMemoryLogger('worker-nuscenes-lidar-?')
 /** LiDAR sensor→ego extrinsic (row-major 4×4). null = identity (no transform). */
 let lidarExtrinsic: number[] | null = null
@@ -271,20 +273,20 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
         const sensorClouds: SensorCloudResult[] = []
 
         // 1. Parse keyframe LiDAR .pcd.bin
-        const lidarFile = fileMap.get(frameDesc.filename)
-        if (!lidarFile) {
+        const lidarEntry = fileMap.get(frameDesc.filename)
+        if (!lidarEntry) {
           console.warn(`[nuScenes LiDAR] File not found: ${frameDesc.filename}`)
           continue
         }
-        const lidarBuffer = await lidarFile.arrayBuffer()
+        const lidarBuffer = await resolveFileEntry(lidarEntry)
         const { positions: lidarPos, pointCount: lidarPts } = parsePcdBin(lidarBuffer)
 
         // 1b. Load lidarseg labels if available (uint8 per keyframe point)
         let segLabels: Uint8Array | undefined
         if (frameDesc.lidarsegFile) {
-          const segFile = fileMap.get(frameDesc.lidarsegFile)
-          if (segFile) {
-            const segBuffer = await segFile.arrayBuffer()
+          const segEntry = fileMap.get(frameDesc.lidarsegFile)
+          if (segEntry) {
+            const segBuffer = await resolveFileEntry(segEntry)
             segLabels = new Uint8Array(segBuffer)
           }
         }
@@ -292,10 +294,10 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
         // 1c. Load panoptic labels if available (uint16 per point, encoded as category*1000+instance)
         let panopticLabels: Uint16Array | undefined
         if (frameDesc.panopticFile) {
-          const panFile = fileMap.get(frameDesc.panopticFile)
-          if (panFile) {
+          const panEntry = fileMap.get(frameDesc.panopticFile)
+          if (panEntry) {
             try {
-              const panBuffer = await panFile.arrayBuffer()
+              const panBuffer = await resolveFileEntry(panEntry)
               panopticLabels = await parseNpzUint16(panBuffer)
               // If we have panoptic but no lidarseg, derive semantic labels from panoptic
               if (!segLabels && panopticLabels) {
@@ -318,9 +320,9 @@ async function handleMessage(msg: NuScenesLidarWorkerRequest) {
         // 2. Parse radar .pcd files (if present)
         if (frameDesc.radarFiles) {
           for (const rf of frameDesc.radarFiles) {
-            const radarFile = fileMap.get(rf.filename)
-            if (!radarFile) continue
-            const radarBuffer = await radarFile.arrayBuffer()
+            const radarEntry = fileMap.get(rf.filename)
+            if (!radarEntry) continue
+            const radarBuffer = await resolveFileEntry(radarEntry)
             const ext = radarExtrinsics.get(rf.sensorId) ?? null
             const { positions: radarPos, pointCount: radarPts } = parseRadarPcd(radarBuffer, ext)
             if (radarPts > 0) {

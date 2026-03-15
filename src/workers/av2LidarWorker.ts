@@ -23,6 +23,7 @@ import type {
   LidarWorkerResponse,
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
+import { resolveFileEntry } from './fetchHelper'
 
 // ---------------------------------------------------------------------------
 // Init message
@@ -38,8 +39,8 @@ export interface AV2LidarFrameDescriptor {
 export interface AV2LidarWorkerInit extends WorkerInitBase {
   /** Frames grouped into batches */
   frameBatches: AV2LidarFrameDescriptor[][]
-  /** File access: serialized as [filename, File][] */
-  fileEntries: [string, File][]
+  /** File access: [filename, File | URL string][] — File for local, string for remote */
+  fileEntries: [string, File | string][]
 }
 
 export type AV2LidarWorkerRequest = AV2LidarWorkerInit | LidarBatchRequest
@@ -55,7 +56,7 @@ setCompressionCodec(0, {
 })
 
 let frameBatches: AV2LidarFrameDescriptor[][] = []
-let fileMap = new Map<string, File>()
+let fileMap = new Map<string, File | string>()
 let wMem = createWorkerMemoryLogger('worker-av2-lidar-?')
 
 const LIDAR_COMBINED_ID = 1
@@ -160,13 +161,13 @@ async function handleMessage(msg: AV2LidarWorkerRequest) {
       const transferBuffers: ArrayBuffer[] = []
 
       for (const frameDesc of batch) {
-        const file = fileMap.get(frameDesc.filename)
-        if (!file) {
+        const entry = fileMap.get(frameDesc.filename)
+        if (!entry) {
           console.warn(`[AV2 LiDAR] File not found: ${frameDesc.filename}`)
           continue
         }
 
-        const buffer = await file.arrayBuffer()
+        const buffer = await resolveFileEntry(entry)
         const { positions, pointCount } = parseFeatherPointCloud(buffer)
 
         const sensorClouds: SensorCloudResult[] = [{

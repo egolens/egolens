@@ -74,19 +74,25 @@ export interface NuScenesDatabase {
 // ---------------------------------------------------------------------------
 
 /**
- * Read a JSON file from a FileSystemDirectoryHandle or fetch from URL.
- * `root` is a Map of filename → File (from drag-and-drop) or a base URL string.
+ * Read a JSON file from a Map of filename → source.
+ *
+ * Supports two source types:
+ * - File  (local drag-and-drop) → calls file.text()
+ * - string (pre-fetched JSON text from URL mode) → uses directly
+ *
+ * This dual-source design enables URL loading without changing any call sites
+ * that pass Map<string, File> — TypeScript accepts it as Map<string, File | string>.
  */
 export async function readJsonFile<T>(
-  jsonFiles: Map<string, File>,
+  jsonFiles: Map<string, File | string>,
   filename: string,
 ): Promise<T[]> {
-  const file = jsonFiles.get(filename)
-  if (!file) {
+  const entry = jsonFiles.get(filename)
+  if (!entry) {
     console.warn(`[nuScenes] JSON file not found: ${filename}`)
     return []
   }
-  const text = await file.text()
+  const text = typeof entry === 'string' ? entry : await entry.text()
   return JSON.parse(text) as T[]
 }
 
@@ -99,7 +105,7 @@ export async function readJsonFile<T>(
  * Called once when the dataset root is first opened.
  */
 export async function buildNuScenesDatabase(
-  jsonFiles: Map<string, File>,
+  jsonFiles: Map<string, File | string>,
 ): Promise<NuScenesDatabase> {
   // Parse all JSON tables in parallel
   const [

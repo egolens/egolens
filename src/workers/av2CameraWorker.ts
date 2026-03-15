@@ -16,6 +16,7 @@ import type {
   CameraWorkerResponse,
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
+import { resolveFileEntry } from './fetchHelper'
 
 // ---------------------------------------------------------------------------
 // Init message
@@ -38,8 +39,8 @@ export interface AV2CameraFrameDescriptor {
 export interface AV2CameraWorkerInit extends WorkerInitBase {
   /** Frames grouped into batches */
   frameBatches: AV2CameraFrameDescriptor[][]
-  /** File access: serialized as [filename, File][] */
-  fileEntries: [string, File][]
+  /** File access: [filename, File | URL string][] — File for local, string for remote */
+  fileEntries: [string, File | string][]
 }
 
 export type AV2CameraWorkerRequest = AV2CameraWorkerInit | CameraBatchRequest
@@ -49,7 +50,7 @@ export type AV2CameraWorkerRequest = AV2CameraWorkerInit | CameraBatchRequest
 // ---------------------------------------------------------------------------
 
 let frameBatches: AV2CameraFrameDescriptor[][] = []
-let fileMap = new Map<string, File>()
+let fileMap = new Map<string, File | string>()
 let wMem = createWorkerMemoryLogger('worker-av2-cam-?')
 
 // ---------------------------------------------------------------------------
@@ -110,13 +111,13 @@ async function handleMessage(msg: AV2CameraWorkerRequest) {
         const images: CameraImageResult[] = []
 
         for (const imgDesc of frameDesc.images) {
-          const file = fileMap.get(imgDesc.filename)
-          if (!file) {
+          const entry = fileMap.get(imgDesc.filename)
+          if (!entry) {
             console.warn(`[AV2 Camera] File not found: ${imgDesc.filename}`)
             continue
           }
 
-          const jpeg = await file.arrayBuffer()
+          const jpeg = await resolveFileEntry(entry)
           images.push({ cameraName: imgDesc.cameraId, jpeg })
           transferBuffers.push(jpeg)
         }

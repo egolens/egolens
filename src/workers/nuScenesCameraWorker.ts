@@ -19,6 +19,7 @@ import type {
   CameraWorkerResponse,
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
+import { resolveFileEntry } from './fetchHelper'
 
 // ---------------------------------------------------------------------------
 // Init message
@@ -41,8 +42,8 @@ export interface NuScenesCameraFrameDescriptor {
 export interface NuScenesCameraWorkerInit extends WorkerInitBase {
   /** Frames grouped into batches */
   frameBatches: NuScenesCameraFrameDescriptor[][]
-  /** File access: serialized as [filename, File][] */
-  fileEntries: [string, File][]
+  /** File access: [filename, File | URL string][] — File for local, string for remote */
+  fileEntries: [string, File | string][]
 }
 
 export type NuScenesCameraWorkerRequest = NuScenesCameraWorkerInit | CameraBatchRequest
@@ -52,7 +53,7 @@ export type NuScenesCameraWorkerRequest = NuScenesCameraWorkerInit | CameraBatch
 // ---------------------------------------------------------------------------
 
 let frameBatches: NuScenesCameraFrameDescriptor[][] = []
-let fileMap = new Map<string, File>()
+let fileMap = new Map<string, File | string>()
 let wMem = createWorkerMemoryLogger('worker-nuscenes-cam-?')
 
 // ---------------------------------------------------------------------------
@@ -113,13 +114,13 @@ async function handleMessage(msg: NuScenesCameraWorkerRequest) {
         const images: CameraImageResult[] = []
 
         for (const imgDesc of frameDesc.images) {
-          const file = fileMap.get(imgDesc.filename)
-          if (!file) {
+          const entry = fileMap.get(imgDesc.filename)
+          if (!entry) {
             console.warn(`[nuScenes Camera] File not found: ${imgDesc.filename}`)
             continue
           }
 
-          const jpeg = await file.arrayBuffer()
+          const jpeg = await resolveFileEntry(entry)
           images.push({ cameraName: imgDesc.cameraId, jpeg })
           transferBuffers.push(jpeg)
         }
