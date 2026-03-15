@@ -92,7 +92,7 @@ export function decodePanopticToRGBA(
       ab = rawData
     } else if (ArrayBuffer.isView(rawData)) {
       const view = rawData as Uint8Array
-      ab = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+      ab = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer
     } else {
       console.warn('[CameraSegOverlay] Unexpected data type from UPNG.decode()')
       return null
@@ -173,7 +173,7 @@ export default function CameraSegOverlay({ cameraName }: CameraSegOverlayProps) 
     if (!decoded) return
 
     // Create ImageData and draw it scaled to fit
-    const imgData = new ImageData(decoded.rgba, decoded.width, decoded.height)
+    const imgData = new ImageData(new Uint8ClampedArray(decoded.rgba.buffer as ArrayBuffer), decoded.width, decoded.height)
 
     // Use an offscreen canvas to hold the decoded image, then draw scaled
     const offscreen = new OffscreenCanvas(decoded.width, decoded.height)

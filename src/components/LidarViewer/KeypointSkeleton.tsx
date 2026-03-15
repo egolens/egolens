@@ -128,7 +128,7 @@ function getKeypointRowsForTimestamp(timestamp: bigint): ParquetRow[] | undefine
 
 export default function KeypointSkeleton() {
   const currentFrame = useSceneStore((s) => s.currentFrame)
-  const showKeypoints3D = useSceneStore((s) => s.showKeypoints3D3D)
+  const showKeypoints3D = useSceneStore((s) => s.showKeypoints3D)
   const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
 
   const meshRef = useRef<THREE.InstancedMesh>(null)

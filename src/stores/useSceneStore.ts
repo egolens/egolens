@@ -581,69 +581,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           note: `${WORKER_CONCURRENCY} lidar + 2 camera workers`,
         })
 
-        // 4. Load first 2 row groups: LiDAR + Camera in parallel
-        //    Loading 2 RGs prevents a stall at the RG boundary when autoplay starts.
-        set({ loadStep: 'first-frame' as LoadStep })
-        const rgT0 = performance.now()
-        const firstFramePromises: Promise<void>[] = []
-        if (internal.workerPool?.isReady()) {
-          firstFramePromises.push(loadAndCacheRowGroup(0, set))
-          if (internal.numBatches > 1) {
-            firstFramePromises.push(loadAndCacheRowGroup(1, set))
-          }
-        } else {
+        // 4. Load first frames, display, and prefetch remaining
+        await runPostWorkerPipeline(set, get, 'waymo', async () => {
+          // Main-thread fallback for test env / no Worker
           const lidarPf = internal.parquetFiles.get('lidar')
           if (lidarPf) {
-            firstFramePromises.push(
-              buildHeavyFileFrameIndex(lidarPf).then(async (idx) => {
-                internal.lidarFrameIndex = idx
-                await loadFrameMainThread(0, set, get)
-              })
-            )
+            internal.lidarFrameIndex = await buildHeavyFileFrameIndex(lidarPf)
+            await loadFrameMainThread(0, set, get)
           }
-        }
-        if (internal.cameraPool?.isReady()) {
-          firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
-          if (internal.cameraNumBatches > 1) {
-            firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
-          }
-        }
-        await Promise.all(firstFramePromises)
-        const rgMs = performance.now() - rgT0
-        memLog.snap('phase4:first-rgs-loaded', {
-          note: `2 lidar + 2 camera RGs in ${rgMs.toFixed(0)}ms`,
         })
-
-        // Show first frame with camera images ready
-        const firstFrame = internal.frameCache.get(0)
-        if (firstFrame) {
-          const camData = internal.cameraImageCache.get(0)
-          set({
-            currentFrameIndex: 0,
-            currentFrame: {
-              ...firstFrame,
-              cameraImages: camData ? new Map(camData) : new Map(),
-            },
-            lastFrameLoadMs: rgMs,
-            lastConvertMs: internal.lastConvertMs,
-          })
-        }
-
-        set({ status: 'ready', loadProgress: 1 })
-        memLog.snap('phase5:first-frame-rendered', {
-          note: `${internal.frameCache.size} frames cached`,
-        })
-        get().actions.play()
-
-        // 5. Prefetch remaining row groups in background (LiDAR + Camera)
-        if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
-          internal.prefetchStarted = true
-          prefetchAllRowGroups(set, get)
-        }
-        if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
-          internal.cameraPrefetchStarted = true
-          prefetchAllCameraRowGroups(set)
-        }
       } catch (e) {
         console.error('[loadDataset] Error:', e)
         set({
@@ -1283,56 +1229,8 @@ async function loadNuScenesScene(
     set({ loadProgress: 0.5 })
     memLog.snap('nuscenes:workers-initialized')
 
-    // 6. Load first batches (LiDAR + Camera in parallel)
-    set({ loadStep: 'first-frame' as LoadStep })
-    const rgT0 = performance.now()
-    const firstFramePromises: Promise<void>[] = []
-    if (internal.workerPool?.isReady()) {
-      firstFramePromises.push(loadAndCacheRowGroup(0, set))
-      if (internal.numBatches > 1) {
-        firstFramePromises.push(loadAndCacheRowGroup(1, set))
-      }
-    }
-    if (internal.cameraPool?.isReady()) {
-      firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
-      if (internal.cameraNumBatches > 1) {
-        firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
-      }
-    }
-    await Promise.all(firstFramePromises)
-    const rgMs = performance.now() - rgT0
-    memLog.snap('nuscenes:first-batches-loaded', {
-      note: `${rgMs.toFixed(0)}ms`,
-    })
-
-    // 7. Show first frame
-    const firstFrame = internal.frameCache.get(0)
-    if (firstFrame) {
-      const camData = internal.cameraImageCache.get(0)
-      set({
-        currentFrameIndex: 0,
-        currentFrame: {
-          ...firstFrame,
-          cameraImages: camData ? new Map(camData) : new Map(),
-        },
-        lastFrameLoadMs: rgMs,
-        lastConvertMs: internal.lastConvertMs,
-      })
-    }
-
-    set({ status: 'ready', loadProgress: 1 })
-    memLog.snap('nuscenes:first-frame-rendered')
-    get().actions.play()
-
-    // 8. Prefetch remaining batches
-    if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
-      internal.prefetchStarted = true
-      prefetchAllRowGroups(set, get)
-    }
-    if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
-      internal.cameraPrefetchStarted = true
-      prefetchAllCameraRowGroups(set)
-    }
+    // 6. Load first frames, display, and prefetch remaining
+    await runPostWorkerPipeline(set, get, 'nuscenes')
   } catch (e) {
     console.error('[loadNuScenesScene] Error:', e)
     set({
@@ -1547,56 +1445,8 @@ async function loadAV2Scene(
     set({ loadProgress: 0.5 })
     memLog.snap('av2:workers-initialized')
 
-    // 5. Load first batches (LiDAR + Camera in parallel)
-    set({ loadStep: 'first-frame' as LoadStep })
-    const rgT0 = performance.now()
-    const firstFramePromises: Promise<void>[] = []
-    if (internal.workerPool?.isReady()) {
-      firstFramePromises.push(loadAndCacheRowGroup(0, set))
-      if (internal.numBatches > 1) {
-        firstFramePromises.push(loadAndCacheRowGroup(1, set))
-      }
-    }
-    if (internal.cameraPool?.isReady()) {
-      firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
-      if (internal.cameraNumBatches > 1) {
-        firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
-      }
-    }
-    await Promise.all(firstFramePromises)
-    const rgMs = performance.now() - rgT0
-    memLog.snap('av2:first-batches-loaded', {
-      note: `${rgMs.toFixed(0)}ms`,
-    })
-
-    // 6. Show first frame
-    const firstFrame = internal.frameCache.get(0)
-    if (firstFrame) {
-      const camData = internal.cameraImageCache.get(0)
-      set({
-        currentFrameIndex: 0,
-        currentFrame: {
-          ...firstFrame,
-          cameraImages: camData ? new Map(camData) : new Map(),
-        },
-        lastFrameLoadMs: rgMs,
-        lastConvertMs: internal.lastConvertMs,
-      })
-    }
-
-    set({ status: 'ready', loadProgress: 1 })
-    memLog.snap('av2:first-frame-rendered')
-    get().actions.play()
-
-    // 7. Prefetch remaining batches
-    if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
-      internal.prefetchStarted = true
-      prefetchAllRowGroups(set, get)
-    }
-    if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
-      internal.cameraPrefetchStarted = true
-      prefetchAllCameraRowGroups(set)
-    }
+    // 5. Load first frames, display, and prefetch remaining
+    await runPostWorkerPipeline(set, get, 'av2')
   } catch (e) {
     console.error('[loadAV2Scene] Error:', e)
     set({
@@ -1824,6 +1674,85 @@ async function prefetchAllRowGroups(
     dataSize: totalLidarBytes,
     note: `${internal.frameCache.size} frames fully cached`,
   })
+}
+
+// ---------------------------------------------------------------------------
+// Shared post-worker pipeline (first frame + prefetch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Common tail logic shared by all three dataset loaders.
+ * Called after workers are initialized. Loads first frame, displays it,
+ * and kicks off background prefetch.
+ *
+ * @param set - Zustand set function
+ * @param get - Zustand get function
+ * @param logLabel - Label prefix for memLog (e.g. 'waymo', 'nuscenes', 'av2')
+ * @param mainThreadFallback - Optional: called when workerPool isn't ready (Waymo-only)
+ */
+async function runPostWorkerPipeline(
+  set: (partial: Partial<SceneState>) => void,
+  get: () => SceneState,
+  logLabel: string,
+  mainThreadFallback?: () => Promise<void>,
+): Promise<void> {
+  // 1. Load first 2 batches: LiDAR + Camera in parallel
+  set({ loadStep: 'first-frame' as LoadStep })
+  const rgT0 = performance.now()
+  const firstFramePromises: Promise<void>[] = []
+
+  if (internal.workerPool?.isReady()) {
+    firstFramePromises.push(loadAndCacheRowGroup(0, set))
+    if (internal.numBatches > 1) {
+      firstFramePromises.push(loadAndCacheRowGroup(1, set))
+    }
+  } else if (mainThreadFallback) {
+    firstFramePromises.push(mainThreadFallback())
+  }
+
+  if (internal.cameraPool?.isReady()) {
+    firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
+    if (internal.cameraNumBatches > 1) {
+      firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
+    }
+  }
+
+  await Promise.all(firstFramePromises)
+  const rgMs = performance.now() - rgT0
+  memLog.snap(`${logLabel}:first-batches-loaded`, {
+    note: `${rgMs.toFixed(0)}ms`,
+  })
+
+  // 2. Show first frame
+  const firstFrame = internal.frameCache.get(0)
+  if (firstFrame) {
+    const camData = internal.cameraImageCache.get(0)
+    set({
+      currentFrameIndex: 0,
+      currentFrame: {
+        ...firstFrame,
+        cameraImages: camData ? new Map(camData) : new Map(),
+      },
+      lastFrameLoadMs: rgMs,
+      lastConvertMs: internal.lastConvertMs,
+    })
+  }
+
+  set({ status: 'ready', loadProgress: 1 })
+  memLog.snap(`${logLabel}:first-frame-rendered`, {
+    note: `${internal.frameCache.size} frames cached`,
+  })
+  get().actions.play()
+
+  // 3. Prefetch remaining batches in background
+  if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
+    internal.prefetchStarted = true
+    prefetchAllRowGroups(set, get)
+  }
+  if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
+    internal.cameraPrefetchStarted = true
+    prefetchAllCameraRowGroups(set)
+  }
 }
 
 // ---------------------------------------------------------------------------

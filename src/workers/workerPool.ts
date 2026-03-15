@@ -60,9 +60,20 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
   readonly concurrency: number
   private workerFactory: () => Worker
 
-  constructor(concurrency: number, workerFactory: () => Worker) {
+  /**
+   * Optional limit on total in-flight batch dispatches across all workers.
+   * Useful for URL mode where concurrent network requests should be throttled
+   * to avoid overwhelming the server. Default: unlimited (local/File mode).
+   */
+  readonly maxConcurrentFetches: number
+
+  /** Current count of in-flight dispatched batches (across all workers). */
+  private inFlightCount = 0
+
+  constructor(concurrency: number, workerFactory: () => Worker, maxConcurrentFetches?: number) {
     this.concurrency = concurrency
     this.workerFactory = workerFactory
+    this.maxConcurrentFetches = maxConcurrentFetches ?? Infinity
   }
 
   /**
@@ -182,18 +193,19 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
 
   /**
    * Request a batch to be loaded. Dispatches to an idle worker,
-   * or queues the request if all workers are busy.
+   * or queues the request if all workers are busy or the in-flight
+   * fetch limit has been reached.
    */
   requestBatch(batchIndex: number): Promise<TResult> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
 
-      // Find an idle worker
+      // Find an idle worker, but also respect maxConcurrentFetches
       const idle = this.workers.find((w) => w.ready && !w.busy)
-      if (idle) {
+      if (idle && this.inFlightCount < this.maxConcurrentFetches) {
         this.dispatchToWorker(idle, requestId, batchIndex, resolve, reject)
       } else {
-        // All busy — queue it
+        // All busy or fetch limit reached — queue it
         this.waitQueue.push({ requestId, batchIndex, resolve, reject })
       }
     })
@@ -223,6 +235,7 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
       reject(new Error(reason))
     }
     this.pendingRequests.clear()
+    this.inFlightCount = 0
 
     for (const { reject } of this.waitQueue) {
       reject(new Error(reason))
@@ -238,6 +251,7 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
     reject: (err: Error) => void,
   ): void {
     pw.busy = true
+    this.inFlightCount++
     this.pendingRequests.set(requestId, { resolve, reject })
     pw.worker.postMessage({
       type: 'loadBatch',
@@ -272,14 +286,17 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
         }
       }
 
-      // Worker is now idle — dispatch next queued request if any
+      // Worker is now idle — decrement in-flight counter and dispatch next
       pw.busy = false
+      this.inFlightCount--
       this.drainQueue()
     }
   }
 
   private drainQueue(): void {
     while (this.waitQueue.length > 0) {
+      // Respect both worker availability and in-flight fetch limit
+      if (this.inFlightCount >= this.maxConcurrentFetches) break
       const idle = this.workers.find((w) => w.ready && !w.busy)
       if (!idle) break
 

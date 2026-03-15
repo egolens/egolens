@@ -24,11 +24,12 @@ setCompressionCodec(0, {
 export { setCompressionCodec }
 
 /**
- * Read a .feather file from a File object and return rows as plain JS objects.
+ * Read a .feather file and return rows as plain JS objects.
+ * Accepts a File (reads via .arrayBuffer()) or a pre-fetched ArrayBuffer.
  * OK for small files (calibration). For large files use readFeatherColumns.
  */
-export async function readFeatherFile(file: File): Promise<Record<string, unknown>[]> {
-  const buffer = await file.arrayBuffer()
+export async function readFeatherFile(input: File | ArrayBuffer): Promise<Record<string, unknown>[]> {
+  const buffer = input instanceof ArrayBuffer ? input : await input.arrayBuffer()
   return readFeatherBuffer(buffer)
 }
 
@@ -60,11 +61,12 @@ export function readFeatherBuffer(buffer: ArrayBuffer): Record<string, unknown>[
 
 /**
  * Read a .feather file and return named columns as flat arrays.
+ * Accepts a File (reads via .arrayBuffer()) or a pre-fetched ArrayBuffer.
  * Much faster than readFeatherFile for large tables —
  * avoids creating per-row objects entirely.
  */
-export async function readFeatherColumns(file: File): Promise<{ columns: Record<string, unknown[]>; numRows: number }> {
-  const buffer = await file.arrayBuffer()
+export async function readFeatherColumns(input: File | ArrayBuffer): Promise<{ columns: Record<string, unknown[]>; numRows: number }> {
+  const buffer = input instanceof ArrayBuffer ? input : await input.arrayBuffer()
   const table = tableFromIPC(buffer, { useProxy: false, useBigInt: true })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const columns: Record<string, any> = {}
