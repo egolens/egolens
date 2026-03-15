@@ -93,12 +93,19 @@ void main() {
 const fragmentShader = /* glsl */ `
 uniform sampler2D uCameraTex[${MAX_CAMERAS}];
 uniform float uOpacity;
+uniform float uCircle;
 
 varying vec2 vBestUV;
 varying float vBestCamIndex;
 varying float vHasColor;
 
 void main() {
+  // Circle point shape: discard fragments outside unit circle
+  if (uCircle > 0.5) {
+    vec2 cxy = 2.0 * gl_PointCoord - 1.0;
+    if (dot(cxy, cxy) > 1.0) discard;
+  }
+
   if (vHasColor < 0.5) {
     // No camera coverage → dark gray
     gl_FragColor = vec4(0.12, 0.12, 0.12, uOpacity);
@@ -158,6 +165,7 @@ export function createCameraColorMaterial(): THREE.ShaderMaterial {
       uCameraTex: { value: textures },
       uPointSize: { value: 2.0 },
       uOpacity: { value: 1.0 },
+      uCircle: { value: 1.0 },
     },
     transparent: true,
     depthWrite: false,

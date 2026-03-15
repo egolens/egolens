@@ -73,6 +73,18 @@ import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverl
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
 export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment' | 'panoptic' | 'camera'
+export type PointShape = 'square' | 'circle'
+
+/** Background color presets for 3D viewport */
+export const BG_PRESETS = [
+  { id: 'black',     label: 'Black',     color: '#000000' },
+  { id: 'dark',      label: 'Dark',      color: '#0C0F1A' },
+  { id: 'charcoal',  label: 'Charcoal',  color: '#1a1a1a' },
+  { id: 'midgray',   label: 'Mid Gray',  color: '#4d4d4d' },
+  { id: 'navy',      label: 'Navy',      color: '#0d1117' },
+  { id: 'white',     label: 'White',     color: '#ffffff' },
+] as const
+export type BgPresetId = typeof BG_PRESETS[number]['id']
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -113,6 +125,10 @@ interface SceneActions {
   toggleKeypoints3D: () => void
   toggleKeypoints2D: () => void
   toggleCameraSeg: () => void
+  // Display settings
+  setBgPreset: (id: BgPresetId) => void
+  setPointShape: (shape: PointShape) => void
+  setPointSize: (size: number) => void
   reset: () => void
 }
 
@@ -200,6 +216,15 @@ export interface SceneState {
   cameraKeypointFrames: Set<number>
   /** Frame indices with camera segmentation data (for Timeline markers) */
   cameraSegFrames: Set<number>
+
+  // -- Display settings (rendering style, not perception data) ----------------
+  /** Background color preset for 3D viewport */
+  bgPreset: BgPresetId
+  /** Point rendering shape: square (GL default) or circle (discard outside radius) */
+  pointShape: PointShape
+  /** Point world-space size (default 0.08) */
+  pointSize: number
+
   /** All discovered segment IDs */
   availableSegments: string[]
   /** Segment metadata from stats component (segmentId → SegmentMeta) */
@@ -497,6 +522,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   keypointFrames: new Set<number>(),
   cameraKeypointFrames: new Set<number>(),
   cameraSegFrames: new Set<number>(),
+  // Display settings
+  bgPreset: 'dark' as BgPresetId,
+  pointShape: 'circle' as PointShape,
+  pointSize: 0.08,
   availableSegments: [],
   segmentMetas: new Map(),
   currentSegment: null,
@@ -842,6 +871,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set((s) => ({ showCameraSeg: !s.showCameraSeg }))
     },
 
+    // Display settings
+    setBgPreset: (id: BgPresetId) => set({ bgPreset: id }),
+    setPointShape: (shape: PointShape) => set({ pointShape: shape }),
+    setPointSize: (size: number) => set({ pointSize: size }),
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Check for nuScenes sentinel key (produced by folder scanner)
       if (segments.has('__nuscenes__')) {

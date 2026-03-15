@@ -20,9 +20,9 @@ import KeypointSkeleton from './KeypointSkeleton'
 import CameraFrustums from './CameraFrustums'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
-import { useSceneStore } from '../../stores/useSceneStore'
-import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
+import { useSceneStore, BG_PRESETS } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
+import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
 import { colors, fonts, radius } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 
@@ -452,6 +452,20 @@ function ResetViewController({
 }
 
 // ---------------------------------------------------------------------------
+// BgColorSync — updates Canvas clear color when bgPreset changes
+// ---------------------------------------------------------------------------
+
+function BgColorSync() {
+  const { gl } = useThree()
+  const bgPreset = useSceneStore((s) => s.bgPreset)
+  useEffect(() => {
+    const hex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? '#0C0F1A'
+    gl.setClearColor(hex)
+  }, [gl, bgPreset])
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -485,6 +499,13 @@ export default function LidarViewer() {
   const setActiveCam = useSceneStore((s) => s.actions.setActiveCam)
   const worldMode = useSceneStore((s) => s.worldMode)
   const toggleWorldMode = useSceneStore((s) => s.actions.toggleWorldMode)
+  // Display settings
+  const bgPreset = useSceneStore((s) => s.bgPreset)
+  const setBgPreset = useSceneStore((s) => s.actions.setBgPreset)
+  const pointShape = useSceneStore((s) => s.pointShape)
+  const setPointShape = useSceneStore((s) => s.actions.setPointShape)
+  const pointSize = useSceneStore((s) => s.pointSize)
+  const setPointSize = useSceneStore((s) => s.actions.setPointSize)
   const orbitRef = useRef<any>(null)
   const sceneGroupRef = useRef<THREE.Group>(null)
   const returningRef = useRef(false)
@@ -524,9 +545,10 @@ export default function LidarViewer() {
         raycaster={{ params: { Line: { threshold: 0.15 } } as never }}
         style={{ width: '100%', height: '100%' }}
         onCreated={({ gl }) => {
-          gl.setClearColor(colors.bgDeep)
+          gl.setClearColor(BG_PRESETS.find(p => p.id === bgPreset)?.color ?? colors.bgDeep)
         }}
       >
+        <BgColorSync />
         <ambientLight intensity={0.3} />
         <directionalLight position={[50, -30, 80]} intensity={1.0} />
         <directionalLight position={[-30, 40, 20]} intensity={0.4} />
@@ -1224,6 +1246,87 @@ export default function LidarViewer() {
 
             </>)}
           </>}
+
+          {/* ── DISPLAY section (rendering style) ── */}
+          <div style={{ height: '1px', backgroundColor: colors.border, margin: '4px 4px' }} />
+          <div style={{
+            fontSize: '9px', fontFamily: fonts.sans, fontWeight: 600,
+            color: colors.textDim, letterSpacing: '1.2px', textTransform: 'uppercase',
+            padding: '2px 4px 2px',
+          }}>
+            Display
+          </div>
+
+          {/* Background color swatches */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px' }}>
+            <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+              BG
+            </span>
+            <div style={{ display: 'flex', gap: '3px' }}>
+              {BG_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  title={p.label}
+                  onClick={() => setBgPreset(p.id)}
+                  style={{
+                    width: 14, height: 14, borderRadius: '3px', padding: 0,
+                    border: bgPreset === p.id
+                      ? `2px solid ${colors.accentBlue}`
+                      : `1px solid ${p.color === '#ffffff' ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)'}`,
+                    backgroundColor: p.color,
+                    cursor: 'pointer',
+                    transition: 'border-color 0.15s',
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Point shape toggle */}
+          <div style={{
+            display: 'flex', borderRadius: radius.sm, overflow: 'hidden',
+            backgroundColor: 'rgba(255,255,255,0.04)',
+          }}>
+            {([['square', 'Square'], ['circle', 'Circle']] as const).map(([shape, label]) => {
+              const active = pointShape === shape
+              return (
+                <button
+                  key={shape}
+                  onClick={() => setPointShape(shape)}
+                  style={{
+                    flex: 1, padding: '4px 0', fontSize: '10px',
+                    fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
+                    border: 'none', cursor: 'pointer',
+                    backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
+                    color: active ? colors.accentBlue : colors.textDim,
+                    transition: 'all 0.15s', letterSpacing: '0.3px',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Point size slider */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
+            <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+              Size
+            </span>
+            <input
+              type="range" min={2} max={30}
+              value={Math.round(pointSize * 100)}
+              onChange={(e) => setPointSize(Number(e.target.value) / 100)}
+              style={{ width: 52, height: 2, accentColor: colors.accentBlue }}
+            />
+            <span style={{
+              fontSize: '10px', fontFamily: fonts.mono, color: colors.textPrimary,
+              minWidth: 24, textAlign: 'right',
+            }}>
+              {pointSize.toFixed(2)}
+            </span>
+          </div>
+
         </>}
       </div>
 

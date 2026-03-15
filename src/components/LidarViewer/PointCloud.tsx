@@ -82,13 +82,31 @@ export default function PointCloud() {
   }, [])
 
   // Materials — created once, swapped imperatively in useFrame
-  const normalMat = useMemo(() => new THREE.PointsMaterial({
-    size: 0.08,
-    sizeAttenuation: true,
-    vertexColors: true,
-    transparent: true,
-    depthWrite: false,
-  }), [])
+  const normalMat = useMemo(() => {
+    const mat = new THREE.PointsMaterial({
+      size: 0.08,
+      sizeAttenuation: true,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+    })
+    // Inject circle discard into built-in points fragment shader
+    mat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+        if (uCircle > 0.5) {
+          vec2 cxy = 2.0 * gl_PointCoord - 1.0;
+          if (dot(cxy, cxy) > 1.0) discard;
+        }`,
+      )
+      shader.fragmentShader = 'uniform float uCircle;\n' + shader.fragmentShader
+      shader.uniforms.uCircle = { value: 1.0 }
+      // Store ref for runtime toggling
+      ;(mat as unknown as Record<string, unknown>)._circleUniform = shader.uniforms.uCircle
+    }
+    return mat
+  }, [])
   const cameraMat = useMemo(() => createCameraColorMaterial(), [])
 
   // Dirty flag — set synchronously by Zustand subscribe (no React timing dependency)
@@ -178,19 +196,28 @@ export default function PointCloud() {
       cmap: s0.colormapMode,
       world: s0.worldMode,
       cam: s0.activeCam,
+      opacity: s0.pointOpacity,
+      shape: s0.pointShape,
+      size: s0.pointSize,
     }
     return useSceneStore.subscribe((state) => {
       if (state.currentFrame !== prev.frame ||
           state.visibleSensors !== prev.sensors ||
           state.colormapMode !== prev.cmap ||
           state.worldMode !== prev.world ||
-          state.activeCam !== prev.cam) {
+          state.activeCam !== prev.cam ||
+          state.pointOpacity !== prev.opacity ||
+          state.pointShape !== prev.shape ||
+          state.pointSize !== prev.size) {
         dirtyRef.current = true
         prev.frame = state.currentFrame
         prev.sensors = state.visibleSensors
         prev.cmap = state.colormapMode
         prev.world = state.worldMode
         prev.cam = state.activeCam
+        prev.opacity = state.pointOpacity
+        prev.shape = state.pointShape
+        prev.size = state.pointSize
       }
     })
   }, [])
@@ -211,7 +238,8 @@ export default function PointCloud() {
 
     // Always read latest state from store (no stale closure)
     const { currentFrame: curFrame, visibleSensors: visSensors,
-            colormapMode: cmap, worldMode: wmode, pointOpacity } =
+            colormapMode: cmap, worldMode: wmode, pointOpacity,
+            pointShape, pointSize } =
       useSceneStore.getState()
 
     const geom = geometryRef.current
@@ -233,18 +261,24 @@ export default function PointCloud() {
     const isCameraMode = cmap === 'camera'
 
     // ---------------------------------------------------------------------------
-    // Material swap + opacity
+    // Material swap + opacity + point shape/size
     // ---------------------------------------------------------------------------
+    const isCircle = pointShape === 'circle'
     if (pts) {
       if (isCameraMode) {
         if (pts.material !== cameraMat) pts.material = cameraMat
         cameraMat.uniforms.uOpacity.value = pointOpacity
+        cameraMat.uniforms.uCircle.value = isCircle ? 1.0 : 0.0
         // Size attenuation: compute scale from canvas height
         const canvasH = gl.domElement.height || 1080
-        cameraMat.uniforms.uPointSize.value = 0.08 * canvasH * 0.5
+        cameraMat.uniforms.uPointSize.value = pointSize * canvasH * 0.5
       } else {
         if (pts.material !== normalMat) pts.material = normalMat
         normalMat.opacity = pointOpacity
+        normalMat.size = pointSize
+        // Update circle uniform if shader has been compiled
+        const circleU = (normalMat as unknown as Record<string, unknown>)._circleUniform as { value: number } | undefined
+        if (circleU) circleU.value = isCircle ? 1.0 : 0.0
       }
     }
 

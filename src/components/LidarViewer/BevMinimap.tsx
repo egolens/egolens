@@ -13,7 +13,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
-import { useSceneStore } from '../../stores/useSceneStore'
+import { useSceneStore, BG_PRESETS } from '../../stores/useSceneStore'
 import { colors } from '../../theme'
 
 /** CSS size of the minimap (matches the overlay div) */
@@ -78,7 +78,10 @@ export function BevMinimapRenderer({
       const cam = camRef.current
       if (!gl || !cam) return
 
-      const { worldMode, currentFrame } = useSceneStore.getState()
+      const { worldMode, currentFrame, bgPreset } = useSceneStore.getState()
+      // Sync background color with 3D viewport
+      const bgHex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? '#0C0F1A'
+      gl.setClearColor(bgHex)
       const pose = currentFrame?.vehiclePose ?? null
       const radius = BEV_ZOOM_LEVELS[zoomRef.current] ?? BEV_ZOOM_LEVELS[0]
 
@@ -124,7 +127,10 @@ export function BevMinimapRenderer({
         state.boxMode !== prev.boxMode ||
         state.colormapMode !== prev.colormapMode ||
         state.pointOpacity !== prev.pointOpacity ||
-        state.trailLength !== prev.trailLength
+        state.trailLength !== prev.trailLength ||
+        state.bgPreset !== prev.bgPreset ||
+        state.pointShape !== prev.pointShape ||
+        state.pointSize !== prev.pointSize
       ) {
         scheduleRender()
       }
