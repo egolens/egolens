@@ -18,7 +18,8 @@ src/
 ├── components/
 │   ├── LidarViewer/    # 3D point cloud + bounding boxes + camera frustums + trajectory trails
 │   │   ├── LidarViewer.tsx    # Canvas, OrbitControls, sensor/box toggles, trail slider
-│   │   ├── PointCloud.tsx     # Point cloud renderer (turbo colormap, per-sensor coloring)
+│   │   ├── PointCloud.tsx     # Point cloud renderer (turbo colormap, per-sensor coloring, GPU camera mode)
+│   │   ├── CameraColorMaterial.ts  # Custom ShaderMaterial for GPU camera colormap
 │   │   ├── BoundingBoxes.tsx  # 3D boxes (wireframe or GLB models) with tracking colors
 │   │   └── CameraFrustums.tsx # Camera FOV frustums with hover highlight
 │   │   └── KeypointSkeleton.tsx  # 3D human keypoint skeleton (14 joints, per-joint colors)
@@ -55,7 +56,8 @@ npm test        # Vitest (415+ tests)
 
 ## Key Features (Implemented)
 - Multi-segment support with dropdown selector (auto-discovers segments from waymo_data/)
-- LiDAR point cloud: 5 sensors, ~168K points/frame, 4 colormap modes (intensity/height/range/elongation)
+- LiDAR point cloud: 5 sensors, ~168K points/frame, 6 colormap modes (intensity/height/range/elongation/segment/panoptic)
+- **Camera colormap (GPU)**: custom ShaderMaterial projects LiDAR→camera in vertex shader, samples texture in fragment — zero CPU overhead per frame
 - LiDAR segmentation: 23-class semantic coloring (TOP sensor, ~5-frame interval)
 - 3D bounding boxes: wireframe or GLB models (car/pedestrian/cyclist), class-colored
 - 2D camera bounding boxes: Canvas overlay on camera panels, synced with boxMode toggle
@@ -73,6 +75,13 @@ npm test        # Vitest (415+ tests)
 - Independent toggles: Keypoints 3D, Keypoints 2D, Cam Seg (preserved across segment switches)
 - Parallel worker pools: 4 lidar workers + 2 camera workers for fast row group decompression
 
+## Performance Optimizations
+- **GPU camera colormap** (`CameraColorMaterial.ts`): vertex shader projects 168K points to all cameras (up to 7), picks shallowest depth per point, passes UV+camera index to fragment shader for texture sampling. Eliminates ~80ms/frame CPU projection+decode overhead. OffscreenCanvas texture pipeline ensures cross-platform Y-orientation. Anti-flicker: previous frame textures carry over during async decode.
+- **Fused CPU fallback** (`cameraRgbSampler.ts`): single-pass projection+RGB sampling per camera with pre-allocated `bestDepth` Float32Array. Eliminates ~840K `ProjectedPoint` object allocations per frame (168K points × 5 cameras).
+- **Ego-frame projection**: camera calibration (intrinsics + extrinsics) operates in ego/vehicle frame. Shader uses raw `position` for projection, not `modelMatrix * position` (which includes WorldPoseSync ego→world transform).
+- **Material swap**: `PointsMaterial` (CPU colormaps) and `CameraColorMaterial` (GPU camera mode) swapped imperatively in `useFrame` — no React re-renders.
+- **Point opacity**: read from Zustand store inside `useFrame` (not React subscription) to prevent R3F material re-attachment.
+
 ## Data Components Used
 13 total: `vehicle_pose`, `lidar_calibration`, `camera_calibration`, `lidar_box`, `camera_box`, `camera_to_lidar_box_association`, `lidar`, `camera_image`, `stats`, `lidar_segmentation`, `lidar_hkp`, `camera_hkp`, `camera_segmentation`
 
@@ -80,4 +89,4 @@ npm test        # Vitest (415+ tests)
 Supports two modes: **index-based** (pick specific segments by 0-based index) or **count-based** (first N segments). Set `INDICES="23 114 172 ..."` for specific segments, or comment it out and set `N=15` for sequential download.
 
 ## Current Phase
-Phase 3 — Full perception pipeline complete (LiDAR seg, 3D/2D keypoints, camera panoptic seg). Next: 3DGS BEV integration.
+Phase 3 complete — Full perception pipeline with GPU-optimized camera colormap. Next: 3DGS BEV integration.
