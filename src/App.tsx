@@ -981,7 +981,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           Supports S3-hosted data (public listing or <span style={{ fontFamily: fonts.mono }}>manifest.json</span>).{' '}
           <button
             onClick={() => {
-              setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/01bb304d-7bd8-35f8-bbef-7086b688e35e/')
+              setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/00a6ffc1-6ce9-3bc3-a060-6006e9893a1a/')
               setUrlDataset('argoverse2')
               setUrlError(null)
             }}
