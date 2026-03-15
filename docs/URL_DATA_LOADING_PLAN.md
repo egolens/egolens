@@ -1,6 +1,6 @@
 # URL-Based Data Loading — Implementation Plan
 
-**Status**: Draft (rev 5 — Phase 0 implemented: feather overloads, DataLoadError, WorkerPool limiter, pipeline extraction)
+**Status**: Draft (rev 6 — Phase 0 complete. Strategy change: manifest.json primary, ListObjectsV2 fallback. Worker import PoC verified. Store reset memory audit passed.)
 **Date**: 2026-03-14
 **Prereq for**: Embed System (EMBED_SYSTEM_DESIGN.md)
 
@@ -157,16 +157,19 @@ This means `loadFromUrl` does the `fetch()` → `ArrayBuffer` conversion at the 
 ### 3.3 Workers: `File | string` with Self-Resolve
 
 ```typescript
-// src/workers/fetchHelper.ts (new, 15 lines)
+// src/workers/fetchHelper.ts (new, ~20 lines)
 const MAX_RETRIES = 3
 const BACKOFF_BASE_MS = 1000
+const FETCH_TIMEOUT_MS = 30_000  // 30s per attempt — prevents hung connections
 
 export async function resolveFileEntry(entry: File | string): Promise<ArrayBuffer> {
   if (typeof entry !== 'string') return entry.arrayBuffer()
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const res = await fetch(entry)
+      const res = await fetch(entry, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${entry}`)
       return res.arrayBuffer()
     } catch (err) {
@@ -178,7 +181,7 @@ export async function resolveFileEntry(entry: File | string): Promise<ArrayBuffe
 }
 ```
 
-Workers call `resolveFileEntry(entry)` instead of `entry.arrayBuffer()`. The retry logic (3 retries, exponential backoff 1s/2s/4s) is embedded here — **workers handle their own retries**, no coordination with main thread needed.
+Workers call `resolveFileEntry(entry)` instead of `entry.arrayBuffer()`. The retry logic (3 retries, exponential backoff 1s/2s/4s) is embedded here — **workers handle their own retries**, no coordination with main thread needed. The per-attempt `AbortSignal.timeout(30s)` prevents indefinite hangs when a server stops responding mid-transfer (e.g., S3 throttling, network partition). Without this, a stalled fetch would block the worker forever since there's no global timeout on `fetch()`.
 
 ### 3.4 Why Not `DataSource` Class
 
@@ -188,6 +191,52 @@ The `DataSource` interface (`arrayBuffer()` + `text()` + `name`) is isomorphic t
 3. **Forces wrapping** — every `File` must be wrapped in `FileDataSource` at call sites
 
 The `File | ArrayBuffer` + `File | string` approach requires zero wrapping, zero new types, and zero changes to existing call sites that pass `File` objects.
+
+### 3.5 URL Validation Utility (Phase 1f)
+
+Both `loadFromUrl` (Phase 2) and the landing page UI (Phase 3) need URL normalization and validation. This should land early in Phase 1 to avoid ad-hoc URL handling in later phases.
+
+```typescript
+// src/utils/urlValidation.ts (new, ~25 lines)
+import { DataLoadError } from './errors'
+
+/**
+ * Normalize and validate a base URL for dataset loading.
+ * Enforces HTTPS, adds trailing slash, rejects obviously invalid inputs.
+ */
+export function normalizeBaseUrl(input: string): string {
+  const trimmed = input.trim()
+
+  if (!trimmed) {
+    throw new DataLoadError('URL is required.', 'UNKNOWN')
+  }
+
+  // Allow http://localhost for local development
+  if (trimmed.startsWith('http://localhost')) {
+    return trimmed.endsWith('/') ? trimmed : trimmed + '/'
+  }
+
+  if (!trimmed.startsWith('https://')) {
+    throw new DataLoadError(
+      'URL must start with https://. Insecure HTTP is not supported for remote data.',
+      'UNKNOWN', trimmed,
+    )
+  }
+
+  try {
+    const url = new URL(trimmed)
+    const normalized = url.origin + url.pathname
+    return normalized.endsWith('/') ? normalized : normalized + '/'
+  } catch {
+    throw new DataLoadError('Invalid URL format.', 'UNKNOWN', trimmed)
+  }
+}
+```
+
+This utility is used by:
+- `loadFromUrl()` (Phase 2) — first line normalizes `baseUrl`
+- Landing page "Load" button (Phase 3) — validates before initiating load
+- URL param parser (Phase 3) — validates `?data=` param on mount
 
 ## 4. AV2 Frame Discovery (URL Mode)
 
@@ -468,7 +517,9 @@ Option B — New `buildAV2LogDatabaseFromUrl(baseUrl: string)`:
 // src/workers/fetchHelper.ts
 export async function resolveFileEntry(entry: File | string): Promise<ArrayBuffer> {
   if (typeof entry === 'string') {
-    const res = await fetch(entry)
+    const res = await fetch(entry, {
+      signal: AbortSignal.timeout(30_000),  // 30s timeout — prevents hung connections
+    })
     if (!res.ok) throw new Error(`Worker fetch failed: ${entry}`)
     return res.arrayBuffer()
   }
@@ -491,7 +542,7 @@ Lower priority — Waymo/nuScenes data can't be publicly hosted, so URL loading 
 | Dataset | Complexity | Notes |
 |---------|-----------|-------|
 | Waymo | Low | `openParquetFile` already accepts URL. Just need to construct component URLs from base URL + segment ID. Workers already use AsyncBuffer. |
-| nuScenes | Medium | JSON files need URL fetch. Binary files (.bin, .jpg) need URL construction from sample_data paths. |
+| nuScenes | Medium | See **Addendum A.13** for detailed design. Key insight: 12 JSON tables (~33MB) must be fetched in full, then `buildNuScenesDatabase()` runs identically to local mode. Workers receive URL strings via `resolveFileEntry()`. Multi-scene support preserved in URL mode. |
 
 ## 8. AV2 Frame Loading Strategy (URL mode)
 
@@ -538,19 +589,24 @@ This is fine — the buffer bar shows progress, and frame-on-demand means the us
 ### Dependency Graph
 
 ```
-Phase 0 (Prerequisites)
+Phase 0 (Prerequisites) ✅ DONE
    │
-   ├──► Phase 1 (Core Abstraction)
+   ├──► Phase 1 (Core Abstraction + URL Validation)
+   │       │    Note: 1a already done (feather overloads).
+   │       │    Real work: 1b (JSON), 1c (fetchHelper), 1d (nuScenes/AV2 workers), 1f (URL validation)
    │       │
    │       ├──► Phase 2 (AV2 Remote Loading)
-   │       │       │
+   │       │       │         ┌──────────────────────────────────┐
+   │       │       ├─ ─ ─ ─ ─│ Phase 4a (SW shell) can start   │
+   │       │       │         │ in parallel with Phase 2         │
+   │       │       │         └──────────────────────────────────┘
    │       │       └──► Phase 3 (Landing Page + URL Params)
    │       │               │
-   │       │               ├──► Phase 4 (Service Worker Cache)
+   │       │               ├──► Phase 4b–f (SW cache strategies, LRU, verification)
    │       │               │
-   │       │               └──► Phase 5 (Embed Mode)
+   │       │               └──► Phase 5 (Embed Mode) ⚠ See security notes
    │       │
-   │       └──► Phase 6 (Waymo + nuScenes Remote) [stretch]
+   │       └──► Phase 6 (Waymo + nuScenes Remote) — see A.13 for nuScenes detail
 ```
 
 ---
@@ -580,20 +636,36 @@ Phase 0 (Prerequisites)
 
 **Goal**: All file-reading utilities accept `File | ArrayBuffer`, all workers accept `File | string`. No new types or classes.
 
+> **⚠ Phase 0/Phase 1 Overlap Note**: Task 1a is **already complete** — `readFeatherFile` and `readFeatherColumns` in `feather.ts` already accept `File | ArrayBuffer` (done in Phase 0a). The real new work in Phase 1 is 1b, 1c, 1d, and 1f.
+
+> **⚠ Worker Type Status**: Not all workers start from the same baseline. Waymo workers (`waymoLidarWorker`, `waymoCameraWorker`) **already accept `string | File`** via `lidarUrl: string | File` / `cameraUrl: string | File`. Task 1d's actual scope is limited to **nuScenes and AV2 workers only**:
+>
+> | Worker | Current type | Needs change? |
+> |--------|-------------|---------------|
+> | `waymoLidarWorker.ts` | `lidarUrl: string \| File` | **No** — already URL-ready |
+> | `waymoCameraWorker.ts` | `cameraUrl: string \| File` | **No** — already URL-ready |
+> | `nuScenesLidarWorker.ts` | `fileEntries: [string, File][]` | **Yes** — `File` → `File \| string` |
+> | `nuScenesCameraWorker.ts` | `fileEntries: [string, File][]` | **Yes** — `File` → `File \| string` |
+> | `av2LidarWorker.ts` | `fileEntries: [string, File][]` | **Yes** — `File` → `File \| string` |
+> | `av2CameraWorker.ts` | `fileEntries: [string, File][]` | **Yes** — `File` → `File \| string` |
+
 | # | Task | Files | Depends on |
 |---|------|-------|------------|
-| 1a | `readFeatherFile` / `readFeatherColumns` accept `File \| ArrayBuffer` | `src/utils/feather.ts` | Phase 0a |
-| 1b | `readJsonFile` accepts `File \| string` (pre-fetched text) | `src/adapters/nuscenes/metadata.ts` | — |
-| 1c | Worker `resolveFileEntry()` helper (with retry) | `src/workers/fetchHelper.ts` (new, ~15 lines) | Phase 0b |
-| 1d | Update all worker init message types to `File \| string` | `src/workers/*.ts` | 1c |
-| 1e | Unit tests: feather overloads, resolveFileEntry retry | tests | 1a–1d |
+| ~~1a~~ | ~~`readFeatherFile` / `readFeatherColumns` accept `File \| ArrayBuffer`~~ | ~~`src/utils/feather.ts`~~ | ~~Phase 0a~~ | **DONE in Phase 0a** |
+| 1b | `readJsonFile` accepts `Map<string, File \| string>` + `buildNuScenesDatabase` type widening (see **A.13.4**) | `src/adapters/nuscenes/metadata.ts` | — |
+| 1c | Worker `resolveFileEntry()` helper (with retry + **timeout**) | `src/workers/fetchHelper.ts` (new, ~20 lines) | Phase 0b |
+| 1d | Update **nuScenes + AV2** worker init message types to `File \| string` | `src/workers/nuScenes*.ts`, `src/workers/av2*.ts` | 1c |
+| 1e | Unit tests: resolveFileEntry retry + timeout, worker type changes | tests | 1b–1d |
+| 1f | **URL validation utility** (`normalizeBaseUrl`, HTTPS enforcement) | `src/utils/urlValidation.ts` (new) | — |
 
 **Acceptance Criteria**:
-- [ ] `readFeatherFile(arrayBuffer)` returns identical rows to `readFeatherFile(file)` (byte-for-byte)
+- [ ] ~~`readFeatherFile(arrayBuffer)` returns identical rows to `readFeatherFile(file)`~~ (already passing from Phase 0a)
 - [ ] `readJsonFile(textString)` returns identical result to `readJsonFile(file)`
 - [ ] Existing drag-and-drop path: all callers still pass `File` — zero code changes at call sites
 - [ ] Workers accept both `File` and URL string entries — `resolveFileEntry` returns identical `ArrayBuffer` for both
 - [ ] `resolveFileEntry` retries 3 times with exponential backoff on network failure (unit test with mock fetch)
+- [ ] `resolveFileEntry` times out after 30s per attempt via `AbortSignal.timeout` (unit test)
+- [ ] `normalizeBaseUrl` enforces HTTPS, adds trailing slash, throws `DataLoadError` on invalid input
 - [ ] Zero runtime regressions: `npm test` green
 
 ---
@@ -608,7 +680,7 @@ Phase 0 (Prerequisites)
 | 2b | AV2 URL loader: fetch metadata buffers + parse with existing functions | `src/adapters/argoverse2/remote.ts` (new) | Phase 1a |
 | 2c | AV2 URL frame discovery from `manifest.json` | `src/adapters/argoverse2/remote.ts` | 2a, 2b |
 | 2d | AV2 LiDAR + camera workers accept URL strings | `src/workers/av2LidarWorker.ts`, `av2CameraWorker.ts` | Phase 1d, 1e |
-| 2e | Store: `loadFromUrl` action (AV2 path), calls `loadDatasetCore` | `src/stores/useSceneStore.ts` | Phase 0d, 2b, 2c, 2d |
+| 2e | Store: `loadFromUrl` action (AV2 path) with `AbortController` cancellation (Section 16) | `src/stores/useSceneStore.ts` | Phase 0d, 2b, 2c, 2d |
 | 2f | `manifest.json` generator script | `scripts/generate_av2_manifest.py` | 2a |
 | 2g | Integration tests with MSW mock server | `src/__tests__/av2Remote.test.ts` | 2a–2e |
 
@@ -633,7 +705,7 @@ Phase 0 (Prerequisites)
 | 3b | URL validation + CORS probe + user-facing error messages | `src/utils/urlValidation.ts` (new) | Phase 0b |
 | 3c | Quick-load example button (AV2 public S3) | `src/App.tsx` | 3a |
 | 3d | URL param parser: `?dataset=&data=` auto-load on mount | `src/App.tsx` (top-level) | Phase 2e |
-| 3e | `singleSceneMode` state: hide segment dropdown in URL mode | `src/stores/useSceneStore.ts`, `src/App.tsx` | Phase 2e |
+| 3e | `singleSceneMode` + URL lifecycle state (see **Section 16**): hide segment dropdown, abort-aware reset, "Back to Home" navigation, "Try Again" from error | `src/stores/useSceneStore.ts`, `src/App.tsx` | Phase 2e |
 | 3f | E2E manual test on GitHub Pages deployment | — | 3a–3e |
 
 **Acceptance Criteria**:
@@ -706,26 +778,57 @@ Phase 0 (Prerequisites)
 - [ ] No console errors when embedded cross-origin
 - [ ] Embed snippet in docs: copy-pasteable HTML with clear placeholder for data URL
 
+> **⚠ Embed Security Considerations** (must address in implementation):
+>
+> 1. **`postMessage` origin validation**: The `postMessage` API in `embedApi.ts` must **never use `'*'` as `targetOrigin` in production**. The viewer should accept an `&origin=` URL param (or derive it from `document.referrer`) and validate `event.origin` against it in the message handler. Without this, any page embedding the iframe could send malicious commands (e.g., `setFrame` with XSS payloads in callback data).
+>
+> 2. **`allow-same-origin` + Service Worker tension**: The `sandbox="allow-scripts allow-same-origin"` attribute is required for the Service Worker (Phase 4) to function inside the iframe. However, `allow-same-origin` also means the iframe can access `localStorage`, `IndexedDB`, and `CacheStorage` of the host origin if served from the same domain. For cross-origin embeds this is fine (browser enforces origin isolation). For **same-origin embeds** (e.g., embedding on the same domain), consider serving the embed from a separate subdomain (e.g., `embed.studio.example.com`) to provide origin isolation.
+>
+> 3. **CSP headers**: `vite.config.ts` should set `Content-Security-Policy` headers for the embed route:
+>    - `frame-ancestors 'self' https:` — allow embedding from any HTTPS origin
+>    - `script-src 'self'` — prevent injected scripts
+>    - Document the CSP requirements in `EMBEDDING.md` for self-hosted deployments
+>
+> 4. **Acceptance criteria to add**:
+>    - [ ] `postMessage` handler validates `event.origin` — rejects messages from unexpected origins
+>    - [ ] CSP `frame-ancestors` header set — embed only works from HTTPS origins
+>    - [ ] Same-origin embed test: verify no unintended storage access between host and iframe
+
 ---
 
-### Phase 6: Waymo + nuScenes Remote (stretch)
+### Phase 6: Waymo + nuScenes Remote
 
 **Goal**: URL loading works for all three datasets, not just AV2.
 
+> **nuScenes detailed design**: See **Addendum A.13** for the full nuScenes URL loading design — data layout analysis, `readJsonFile` refactoring path, worker changes, multi-scene URL support, memory budget, and CORS requirements. The task breakdown below is derived from A.13.13.
+
+**6A — Waymo URL** (simpler, workers already URL-ready):
+
 | # | Task | Files | Depends on |
 |---|------|-------|------------|
-| 6a | Waymo: construct component Parquet URLs from base URL | `src/adapters/waymo/remote.ts` (new) | Phase 1a |
-| 6b | Waymo: worker init with URL strings (already near-ready) | `src/workers/waymoLidarWorker.ts`, `waymoCameraWorker.ts` | Phase 1e |
-| 6c | nuScenes: JSON fetch from URL + binary URL construction | `src/adapters/nuscenes/remote.ts` (new) | Phase 1a, 1c |
-| 6d | nuScenes: workers accept URL strings | `src/workers/nuScenes*.ts` | Phase 1e |
-| 6e | Store: wire Waymo + nuScenes paths in `loadFromUrl` | `src/stores/useSceneStore.ts` | 6a–6d |
-| 6f | Integration tests for both datasets | tests | 6a–6e |
+| 6a-w1 | Waymo: construct component Parquet URLs from base URL | `src/adapters/waymo/remote.ts` (new) | Phase 1a |
+| 6a-w2 | Waymo: worker init with URL strings (already near-ready) | `src/workers/waymoLidarWorker.ts`, `waymoCameraWorker.ts` | Phase 1e |
+| 6a-w3 | Store: wire Waymo path in `loadFromUrl` | `src/stores/useSceneStore.ts` | 6a-w1, 6a-w2 |
+
+**6B — nuScenes URL** (see A.13 for detailed design):
+
+| # | Task | Files | Depends on |
+|---|------|-------|------------|
+| 6b-n1 | `readJsonFile` overload: `Map<string, File \| string>` | `src/adapters/nuscenes/metadata.ts` | **Phase 1b** |
+| 6b-n2 | `buildNuScenesDatabase` accept `Map<string, File \| string>` | Same file | 6b-n1 |
+| 6b-n3 | `buildNuScenesDatabaseFromUrl()` — fetch JSON tables in parallel | `src/adapters/nuscenes/remote.ts` (new) | 6b-n1, 6b-n2 |
+| 6b-n4 | URL file entry builder + `loadNuScenesFromUrl()` | `src/stores/useSceneStore.ts` | 6b-n3, Phase 1d |
+| 6b-n5 | Multi-scene URL support (`singleSceneMode` exception) | `src/stores/useSceneStore.ts`, `src/App.tsx` | 6b-n4, Section 16 |
+| 6b-n6 | nuScenes manifest.json generation script | `scripts/generate_nuscenes_manifest.py` | — |
+| 6b-n7 | Integration tests with MSW mock | `src/__tests__/nuScenesRemote.test.ts` | 6b-n1–6b-n5 |
 
 **Acceptance Criteria**:
 - [ ] `loadFromUrl('waymo', 'https://.../segment_id/')` → full Waymo scene renders (points, boxes, cameras)
-- [ ] `loadFromUrl('nuscenes', 'https://.../v1.0-mini/')` → nuScenes scene renders
+- [ ] `loadFromUrl('nuscenes', 'https://.../nuscenes/')` → nuScenes scene renders with scene dropdown
+- [ ] nuScenes scene switching in URL mode reuses cached `NuScenesDatabase` (no JSON re-fetch)
 - [ ] Both datasets work with Service Worker caching (Phase 4)
 - [ ] Landing page dataset selector correctly routes to each dataset's URL loading path
+- [ ] nuScenes CORS requirements documented (self-hosted only)
 
 ---
 
@@ -764,7 +867,9 @@ Autonomous driving datasets are **immutable after release** — files never chan
 - Embedded viewers on a blog/paper page are revisited by readers
 - Demo links shared in Slack/Twitter get clicked repeatedly
 
-**Decision**: Service Worker caching is a **Week 1 deliverable**, not a stretch goal.
+**Decision**: Service Worker caching is a **high-priority deliverable**, not a stretch goal. However, per the dependency graph (Phase 4 depends on Phase 3), realistic timeline is **Phase 2 parallel track or immediately after Phase 3** — not Week 1 of the overall project. Phase 0→1→2→3 alone requires 2–3 weeks. SW development (Phase 4) can start in parallel with Phase 2 since it has no code-level dependency on the remote loader — only conceptual dependency on having URL-fetched data to cache.
+
+> **⚠ Timeline correction**: The original "Week 1" target assumed Phase 4 could start independently. In practice, Phase 4a (SW shell + registration) CAN start early in parallel with Phase 2, but Phase 4b–4f (cache strategies, LRU, verification) require Phase 2's URL fetch paths to be functional for meaningful testing. **Recommended: start Phase 4a during Phase 2, complete Phase 4b–4f after Phase 3.**
 
 ### 11.2 Caching Strategy
 
@@ -875,7 +980,7 @@ Multi-scene browsing (listing available logs, switching between them) is the **h
 | URL standalone | **Hidden** (single scene) | Full | Shown in header |
 | URL embed (`?embed=true`) | **Hidden** | Minimal or hidden (`?controls=false`) | Hidden |
 
-When `loadFromUrl()` completes, the store sets `singleSceneMode: true`, which hides the segment selector and disables segment-switching keyboard shortcuts.
+When `loadFromUrl()` completes, the store sets `singleSceneMode: true`, which hides the segment selector and disables segment-switching keyboard shortcuts. See **Section 16** for the full URL mode state lifecycle (abort handling, "Back to Home" navigation, and error retry flow).
 
 ### 12.3 Embed URL Parameters (Matterport-style)
 
@@ -1299,7 +1404,412 @@ memLog.snap('url:batch-decoded', { note: `batch ${i}, worker cache: ${workerCach
 
 The existing `memLog` already tracks memory at pipeline phases. URL mode adds fetch-phase snapshots. No new tooling needed — same debug panel shows memory timeline.
 
-## 16. Open Questions
+## 16. URL Mode State Lifecycle
+
+> Added post-review: addresses the gap in state reset, in-flight fetch cancellation, and URL→landing page navigation.
+
+### 16.1 Problem Statement
+
+The existing `reset()` action and `resetInternal()` function were designed for **local segment switching**: terminate workers, clear caches, reset UI state. URL mode introduces three new scenarios that the current lifecycle doesn't handle:
+
+| Scenario | Current behavior | Gap |
+|----------|-----------------|-----|
+| **User clicks "Back to Home" during URL scene** | `reset()` terminates workers, clears caches | Workers may have in-flight `fetch()` calls that continue running after `terminate()`. Responses arrive but nobody reads them — wasted bandwidth + potential console errors. `singleSceneMode` not cleared. |
+| **User clicks "Back to Home" while URL is still loading** | `reset()` during metadata fetch | `loadFromUrl()` async pipeline continues executing after reset. Metadata fetch completes → tries to `set()` on stale state → race condition. |
+| **User pastes a new URL while a scene is already loaded from URL** | No explicit handling | Must fully tear down current scene (including SW prefetch state) before starting new URL load. Old URL's prefetch promises may resolve during new scene's setup. |
+
+### 16.2 Design: AbortController-Based Cancellation
+
+Introduce a **per-load `AbortController`** that propagates cancellation from main thread through to worker fetches.
+
+```typescript
+// In internal state:
+const internal = {
+  // ... existing ...
+  /** AbortController for the current load — signals cancel on reset/reload */
+  loadAbortController: null as AbortController | null,
+}
+```
+
+**Lifecycle**:
+
+```
+loadFromUrl() called
+  │
+  ├─ 1. Abort previous load (if any)
+  │     internal.loadAbortController?.abort()
+  │
+  ├─ 2. Create new AbortController
+  │     internal.loadAbortController = new AbortController()
+  │     const signal = internal.loadAbortController.signal
+  │
+  ├─ 3. Metadata fetch phase (main thread)
+  │     All fetch() calls use { signal }
+  │     If aborted → AbortError → caught → silent return (no error toast)
+  │
+  ├─ 4. Worker init phase
+  │     Workers receive no AbortSignal directly (can't cross postMessage)
+  │     Instead: WorkerPool.terminate() kills workers → pending promises reject
+  │
+  ├─ 5. Prefetch phase (background)
+  │     prefetchAllRowGroups() checks signal.aborted before each batch
+  │     If aborted → stops dispatching new batches, lets in-flight finish
+  │
+  └─ 6. On reset/new load: abort() + terminate()
+        Signal propagates instantly to main-thread fetches
+        Worker terminate() kills in-flight worker fetches
+```
+
+### 16.3 Updated `resetInternal()`
+
+```typescript
+function resetInternal() {
+  // --- NEW: Cancel any in-flight URL loads ---
+  if (internal.loadAbortController) {
+    internal.loadAbortController.abort()
+    internal.loadAbortController = null
+  }
+
+  // --- Existing cleanup (unchanged) ---
+  internal.parquetFiles.clear()
+  internal.timestamps = []
+  internal.timestampToFrame.clear()
+  internal.lidarBoxByFrame.clear()
+  internal.cameraBoxByFrame.clear()
+  internal.vehiclePoseByFrame.clear()
+  internal.frameCache.clear()
+  internal.cameraImageCache.clear()
+  clearCameraRgbCache()
+  internal.objectTrajectories.clear()
+  internal.assocCamToLaser.clear()
+  internal.assocLaserToCams.clear()
+  internal.poseByFrameIndex.clear()
+  internal.worldOriginInverse = null
+  internal.loadedRowGroups.clear()
+  internal.prefetchStarted = false
+
+  if (internal.playIntervalId !== null) {
+    clearInterval(internal.playIntervalId)
+    internal.playIntervalId = null
+  }
+  if (internal.workerPool) {
+    internal.workerPool.terminate()
+    internal.workerPool = null
+  }
+  internal.numBatches = 0
+  if (internal.cameraPool) {
+    internal.cameraPool.terminate()
+    internal.cameraPool = null
+  }
+  internal.cameraNumBatches = 0
+  internal.cameraLoadedRowGroups.clear()
+  internal.cameraPrefetchStarted = false
+  for (const url of internal.blobUrls) {
+    URL.revokeObjectURL(url)
+  }
+  internal.blobUrls = []
+  internal.keypointsByFrame.clear()
+  internal.cameraKeypointsByFrame.clear()
+  internal.cameraSeg.clear()
+}
+```
+
+### 16.4 Updated `reset()` Action — URL-Aware Fields
+
+```typescript
+reset: () => {
+  const prev = get()
+  prev.actions.pause()
+  resetInternal()
+  set({
+    // --- Existing reset fields (unchanged) ---
+    status: 'idle',
+    error: null,
+    errorCode: null,              // new (Section 14)
+    warnings: [],                 // new (Section 14)
+    failedFrames: new Set(),      // new (Section 14)
+    availableComponents: [],
+    loadProgress: 0,
+    loadStep: 'opening',
+    totalFrames: 0,
+    currentFrameIndex: 0,
+    isPlaying: false,
+    playbackSpeed: 1,
+    currentFrame: null,
+    lidarCalibrations: new Map(),
+    cameraCalibrations: [],
+    lastFrameLoadMs: 0,
+    lastConvertMs: 0,
+    cachedFrames: [],
+    cameraLoadedCount: 0,
+    cameraTotalCount: 0,
+    hasBoxData: false,
+    hasSegmentation: false,
+    hasKeypoints: false,
+    hasCameraSegmentation: false,
+    segLabelFrames: new Set(),
+    keypointFrames: new Set(),
+    cameraKeypointFrames: new Set(),
+    cameraSegFrames: new Set(),
+    activeCam: null,
+    hoveredCam: null,
+    hoveredBoxId: null,
+    highlightedCameraBoxIds: new Set(),
+    highlightedLaserBoxId: null,
+
+    // --- NEW: URL mode fields ---
+    singleSceneMode: false,       // re-enable segment dropdown
+    sourceUrl: null,              // clear URL provenance
+    sourceDataset: null,          // clear dataset type
+
+    // --- Preserved across reset (user preferences) ---
+    visibleSensors: prev.visibleSensors,
+    boxMode: prev.boxMode,
+    showLidarOverlay: prev.showLidarOverlay,
+    trailLength: prev.trailLength,
+    pointOpacity: prev.pointOpacity,
+    colormapMode: prev.colormapMode,
+    showKeypoints3D: prev.showKeypoints3D,
+    showKeypoints2D: prev.showKeypoints2D,
+    showCameraSeg: prev.showCameraSeg,
+  })
+},
+```
+
+### 16.5 New State Fields
+
+```typescript
+interface SceneState {
+  // ... existing ...
+
+  /** URL mode: single scene, no segment dropdown */
+  singleSceneMode: boolean
+  /** The base URL used for loadFromUrl (null for local mode) */
+  sourceUrl: string | null
+  /** The dataset type used for loadFromUrl (null for local mode) */
+  sourceDataset: DatasetId | null
+}
+```
+
+These fields serve three purposes:
+1. **`singleSceneMode`** — drives UI (hide segment dropdown, show URL badge in header)
+2. **`sourceUrl`** — enables "Copy URL" button and browser address bar sync
+3. **`sourceDataset`** — needed for retry-on-error ("Try Again" re-calls `loadFromUrl(sourceDataset, sourceUrl)`)
+
+### 16.6 `loadFromUrl()` — Cancellation-Aware Implementation
+
+```typescript
+loadFromUrl: async (datasetId: DatasetId, baseUrl: string) => {
+  // 1. Normalize URL (Phase 1f utility)
+  const base = normalizeBaseUrl(baseUrl)
+
+  // 2. Full reset (cancels previous load if any)
+  get().actions.reset()
+
+  // 3. Create new abort controller for this load
+  internal.loadAbortController = new AbortController()
+  const signal = internal.loadAbortController.signal
+
+  // 4. Set URL-mode state
+  set({
+    status: 'loading',
+    loadStep: 'opening',
+    loadProgress: 0,
+    singleSceneMode: true,
+    sourceUrl: base,
+    sourceDataset: datasetId,
+  })
+
+  // 5. Set manifest for dataset type
+  const manifest = {
+    waymo: waymoManifest,
+    nuscenes: nuScenesManifest,
+    argoverse2: argoverse2Manifest,
+  }[datasetId]
+  setManifest(manifest)
+  internal.datasetId = datasetId
+
+  try {
+    if (datasetId === 'argoverse2') {
+      await loadAV2FromUrl(base, signal, set, get)
+    } else if (datasetId === 'waymo') {
+      await loadWaymoFromUrl(base, signal, set, get)
+    } else if (datasetId === 'nuscenes') {
+      await loadNuScenesFromUrl(base, signal, set, get)
+    }
+  } catch (e) {
+    // AbortError = user cancelled (e.g. Back to Home during load)
+    // → silent return, no error toast
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    if (signal.aborted) return  // double-check
+
+    const error = e instanceof DataLoadError ? e
+      : classifyFetchError(e, base)
+    set({
+      status: 'error',
+      error: error.message,
+      errorCode: error.code,
+    })
+  }
+},
+```
+
+### 16.7 Abort-Aware Prefetch
+
+The background prefetch loop must check the abort signal to avoid dispatching new batches after a reset:
+
+```typescript
+async function prefetchAllRowGroups(
+  set: (partial: Partial<SceneState>) => void,
+  _get: () => SceneState,
+) {
+  const signal = internal.loadAbortController?.signal
+
+  const promises: Promise<void>[] = []
+  for (let rg = 0; rg < internal.numBatches; rg++) {
+    // NEW: Stop dispatching if load was cancelled
+    if (signal?.aborted) break
+    if (internal.loadedRowGroups.has(rg)) continue
+
+    promises.push(
+      loadAndCacheRowGroup(rg, set).catch(() => {
+        // Non-critical: prefetch failure doesn't block user interaction
+      }),
+    )
+  }
+
+  await Promise.all(promises)
+
+  // Don't log if aborted (scene already torn down)
+  if (signal?.aborted) return
+
+  // ... existing memLog snapshot ...
+}
+```
+
+### 16.8 Worker Fetch Cancellation
+
+Workers run in separate threads and cannot share the main thread's `AbortController`. Instead, cancellation happens via two mechanisms:
+
+**1. `WorkerPool.terminate()`** — already implemented. Calling `terminate()`:
+- Calls `rejectAllPending('Worker pool terminated')` → rejects queued promises
+- Calls `worker.terminate()` on each worker → kills the thread
+- Any in-flight `fetch()` inside the worker is implicitly aborted when the thread dies
+
+**2. `resolveFileEntry()` per-attempt timeout** — already designed (30s `AbortSignal.timeout`). If the worker thread is killed mid-fetch, the fetch is aborted. If the thread survives but the server is slow, the timeout prevents indefinite hangs.
+
+**No additional worker-side abort mechanism needed.** The existing `terminate()` + per-attempt timeout combination covers all cancellation scenarios:
+
+| Scenario | What aborts the fetch |
+|----------|----------------------|
+| User clicks "Back to Home" | `resetInternal()` → `workerPool.terminate()` → thread killed |
+| User loads new URL | `reset()` → same as above |
+| Server hangs mid-transfer | `AbortSignal.timeout(30_000)` in `resolveFileEntry()` |
+| Network drops | `fetch()` rejects with `TypeError` → retry → eventual failure |
+
+### 16.9 Navigation Flow: URL Scene → Landing Page
+
+```
+User clicks "Back to Home" (or browser back button)
+  │
+  ├─ 1. App calls store.actions.reset()
+  │     ├─ pause() — stop playback interval
+  │     ├─ resetInternal()
+  │     │   ├─ loadAbortController.abort() — cancels in-flight metadata fetches
+  │     │   ├─ workerPool.terminate() — kills worker threads + in-flight fetches
+  │     │   ├─ cameraPool.terminate() — same for camera workers
+  │     │   ├─ frameCache.clear() — release decoded Float32Arrays
+  │     │   ├─ cameraImageCache.clear() — release JPEG ArrayBuffers
+  │     │   └─ blobUrls.forEach(revoke) — free blob memory
+  │     └─ set({ status: 'idle', singleSceneMode: false, sourceUrl: null, ... })
+  │
+  ├─ 2. App.tsx detects status === 'idle' && !availableSegments
+  │     └─ Renders DropZone (landing page)
+  │
+  ├─ 3. Browser history updated
+  │     └─ history.pushState({}, '', '/') — removes ?dataset=&data= params
+  │
+  └─ 4. (Optional) GC hint
+        └─ If performance.memory available, log heap before/after for debugging
+```
+
+**Memory release timing**: JavaScript GC is non-deterministic, but clearing all Map/Set references in `resetInternal()` makes the data eligible for collection. The critical guarantee is that **no references leak** — `internal.frameCache.clear()` + `internal.cameraImageCache.clear()` removes all strong references to the large `Float32Array` and `ArrayBuffer` objects.
+
+### 16.10 State Transition Diagram
+
+```
+                    ┌──────────┐
+                    │          │
+          ┌────────►│   IDLE   │◄────────────────────┐
+          │         │          │                      │
+          │         └────┬─────┘                      │
+          │              │                            │
+          │   loadFromUrl() / loadFromFiles()         │
+          │              │                            │
+          │              ▼                            │
+          │         ┌──────────┐    abort/error  ┌────┴─────┐
+          │         │          ├────────────────►│          │
+          │         │ LOADING  │                 │  ERROR   │
+          │         │          │◄──── retry ─────│          │
+          │         └────┬─────┘                 └────┬─────┘
+          │              │                            │
+          │         first frame                  "Back to Home"
+          │         rendered                          │
+          │              │                            │
+          │              ▼                            │
+          │         ┌──────────┐                      │
+          │         │          │                      │
+          │         │  READY   ├──────────────────────┘
+          │         │          │   reset()
+          │         └────┬─────┘
+          │              │
+          │    loadFromUrl(new URL)
+          │    or "Back to Home"
+          │              │
+          └──────────────┘
+              reset()
+
+Transitions that trigger abort:
+  • LOADING → IDLE  (Back to Home: abort + terminate)
+  • LOADING → LOADING  (new loadFromUrl: abort previous + start new)
+  • READY → IDLE  (Back to Home: terminate only, no in-flight fetches)
+  • READY → LOADING  (new loadFromUrl: terminate + start new)
+  • ERROR → IDLE  (Back to Home: no cleanup needed, already failed)
+  • ERROR → LOADING  (retry: re-calls loadFromUrl with same sourceUrl)
+```
+
+### 16.11 "Try Again" from Error State
+
+When `status === 'error'`, the error overlay shows `sourceUrl` and `sourceDataset` (preserved in state). "Try Again" simply re-calls `loadFromUrl()`:
+
+```typescript
+// In error overlay component:
+const handleRetry = () => {
+  const { sourceDataset, sourceUrl } = useSceneStore.getState()
+  if (sourceDataset && sourceUrl) {
+    useSceneStore.getState().actions.loadFromUrl(sourceDataset, sourceUrl)
+  }
+}
+```
+
+This works because `loadFromUrl()` starts with `reset()`, which cleans up everything from the failed attempt before retrying.
+
+### 16.12 Implementation Priority
+
+| Task | Phase | Risk | Notes |
+|------|-------|------|-------|
+| Add `loadAbortController` to internal state | Phase 2e | Low | Single field addition |
+| Pass `signal` to metadata fetches in `loadFromUrl` | Phase 2e | Low | Standard fetch option |
+| AbortError catch in `loadFromUrl` (silent return) | Phase 2e | Low | 2-line check |
+| Abort check in `prefetchAllRowGroups` | Phase 2e | Low | 1-line `signal.aborted` check |
+| `singleSceneMode` / `sourceUrl` / `sourceDataset` fields | Phase 3e | Low | State additions |
+| Updated `reset()` with URL-aware field clearing | Phase 3e | Low | Additive changes |
+| "Back to Home" button + history management | Phase 3 | Medium | Browser history API integration |
+| "Try Again" from error state | Phase 3 | Low | Re-calls `loadFromUrl()` |
+
+**Key insight**: Most cancellation logic is a natural byproduct of the existing `resetInternal()` + `WorkerPool.terminate()` pattern. The only net-new mechanism is the `AbortController` for main-thread metadata fetches — approximately 10 lines of code spread across `loadFromUrl()` and `prefetchAllRowGroups()`.
+
+## 17. Open Questions
 
 1. **Offline-first potential** — With Service Worker caching, a previously-viewed scene could work fully offline. Worth advertising this capability? Could be valuable for conference demos with unreliable WiFi.
 
@@ -1350,7 +1860,7 @@ The bucket has **no CORS configuration** (OPTIONS fails), yet almost everything 
 | Simple GET (full Feather/JPEG) | **Yes** | All AV2 sensor data fetchable |
 | Range GET (partial read) | **Yes** | hyparquet could work on AV2 Parquet if needed (not currently used) |
 | Body read (arrayBuffer) | **Yes** | flechette parser, JPEG decode all work |
-| S3 ListObjectsV2 | **Yes** | **Frame discovery without manifest.json** — see A.10 |
+| S3 ListObjectsV2 | **Yes** | **Optional optimization** for S3-hosted data — see A.10 |
 | Response headers | **No** | Can't read Content-Length. Use frame count for progress instead |
 
 #### Frame Discovery: Two Options Now Available
@@ -1359,10 +1869,17 @@ With ListObjectsV2 working, we have two viable paths for frame discovery:
 
 | Approach | Latency | Robustness | Maintenance |
 |----------|---------|-----------|-------------|
-| **manifest.json** (original plan) | 1 request, ~50KB | High — explicit frame list + camera timestamps | Requires generation script per log |
-| **S3 ListObjectsV2** (new option) | 2–3 requests (~150 LiDAR + 7×~300 camera files need pagination) | Medium — depends on S3 API availability | Zero maintenance — reads live bucket |
+| **manifest.json** (original plan) | 1 request, ~50KB | **High** — explicit frame list + camera timestamps, hosting-agnostic | Requires generation script per log (one-time) |
+| **S3 ListObjectsV2** (new option) | 2–3 requests (~150 LiDAR + 7×~300 camera files need pagination) | **Medium** — S3-only, bucket policy can disable listing at any time | Zero maintenance — reads live bucket |
 
-**Recommended: Dual strategy** — try ListObjectsV2 first (zero setup), fall back to manifest.json if listing fails (e.g., non-S3 hosting without directory listing). See **A.10** for detailed design.
+**Recommended: manifest.json as primary, ListObjectsV2 as optional optimization.** Rationale (rev 6 — strategy reversed from rev 5):
+
+1. **Hosting-agnostic**: manifest.json works on S3, CloudFront, nginx, GitHub Pages, any static file server. ListObjectsV2 only works on S3 public buckets.
+2. **Stability**: S3 bucket owners can disable ListObjectsV2 at any time (one IAM policy change). manifest.json is a static file under the data host's control — it can't be silently disabled.
+3. **Simplicity**: One code path (fetch manifest.json → parse → done) vs. two code paths with XML parsing and pagination logic.
+4. **Low cost**: The generation script (`generate_av2_manifest.py`) is a one-time step that produces a ~50KB file. This is a trivial ask for anyone hosting data for URL loading.
+
+See **A.10** for ListObjectsV2 as an optional zero-setup path for S3.
 
 #### Revised Risk Assessment
 
@@ -1371,24 +1888,26 @@ With ListObjectsV2 working, we have two viable paths for frame discovery:
 | "CORS blocks all browser fetches" | **Everything works on public S3** | No CORS config needed. Simple GET, Range, ListObjects all succeed |
 | "Need CloudFront proxy fallback" | **Not needed for AV2** | Direct S3 access works for all operations |
 | "CORS is critical blocker" | **Non-issue for AV2** | Only affects servers that actively reject cross-origin (rare for public data) |
-| "manifest.json required" | **Optional for S3-hosted data** | ListObjectsV2 enables manifest-free frame discovery |
+| "manifest.json required" | **Required (primary strategy)** | ListObjectsV2 is optional optimization for S3 only — manifest.json is hosting-agnostic and stable |
 
 #### Response Header Opacity Workaround
 
 Since `Content-Length` etc. are unreadable:
-- **Progress tracking**: Use frame count from ListObjectsV2 or manifest.json. Show "Frame 12/150" instead of "45 MB / 450 MB".
-- **File existence check**: ListObjectsV2 confirms files exist before fetching. No need for HEAD requests.
+- **Progress tracking**: Use frame count from manifest.json (or ListObjectsV2 fallback). Show "Frame 12/150" instead of "45 MB / 450 MB".
+- **File existence check**: manifest.json provides the authoritative frame list. No need for HEAD requests.
 
 #### `resolveFileEntry` — Worker Fetch Helper
 
-Simple GET is all we need. No special handling required:
+Simple GET is all we need. No special handling required. **Per-attempt timeout (30s)** prevents hung connections:
 
 ```typescript
 export async function resolveFileEntry(entry: File | string): Promise<ArrayBuffer> {
   if (typeof entry !== 'string') return entry.arrayBuffer()
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const res = await fetch(entry)  // Simple GET — works on public S3 without CORS
+      const res = await fetch(entry, {
+        signal: AbortSignal.timeout(30_000),  // 30s timeout per attempt
+      })  // Simple GET — works on public S3 without CORS
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${entry}`)
       return res.arrayBuffer()
     } catch (err) {
@@ -1779,7 +2298,7 @@ interface WaymoManifest {
 
 Waymo is simpler — component filenames are fixed per segment. The manifest just lists which components are available. `manifest.json` size: ~200 bytes.
 
-**nuScenes manifest.json schema** (for Phase 6):
+**nuScenes manifest.json schema** (for Phase 6) — see **A.13.6** for full design + generation script:
 
 ```typescript
 interface NuScenesManifest {
@@ -1791,6 +2310,8 @@ interface NuScenesManifest {
   scenes: string[]
   /** JSON table files available at {base}/{version}/{filename} */
   json_tables: string[]   // e.g. ['scene.json', 'sample.json', ...]
+  /** Total size of all JSON tables in bytes (for progress estimation) */
+  json_total_bytes?: number
 }
 ```
 
@@ -1855,12 +2376,32 @@ export async function buildAV2LogDatabaseFromUrl(
 
 **Decision: Option A** — the internal parsing logic (`readFeatherBuffer`, quaternion conversion, annotation grouping) is identical. Only the data source differs. Use `instanceof` checks + `options?.manifest` for frame discovery.
 
+> **⚠ Refactoring Recommendation**: Rather than adding `options?.manifest` branching inside `buildAV2LogDatabase` (which would make the function complex with two divergent code paths for frame discovery), consider **extracting frame discovery into a separate function**:
+>
+> ```typescript
+> // Frame discovery — two implementations, one interface
+> interface AV2FrameDiscovery {
+>   lidarTimestamps: bigint[]
+>   cameraFilesByCam: Map<string, Map<bigint, string>>  // cam → ts → filename
+> }
+>
+> // Local mode: scan Map<string, File> keys (existing logic, lines 176-201)
+> function discoverAV2FramesFromFiles(logFiles: Map<string, File>): AV2FrameDiscovery
+>
+> // URL mode: from manifest.json or S3 ListObjectsV2
+> function discoverAV2FramesFromManifest(manifest: AV2Manifest): AV2FrameDiscovery
+> ```
+>
+> Then `buildAV2LogDatabase` receives a pre-built `AV2FrameDiscovery` instead of doing discovery internally. This keeps the function focused on **metadata parsing** (calibration, poses, annotations) and delegates discovery to the caller. Both local and URL code paths remain clean without `if/else` branching inside the database builder.
+>
+> **Risk**: Low — frame discovery (lines 176-201) is already a self-contained block with no dependencies on the parsing logic above it. Extraction is mechanical.
+
 ### A.8 Updated Risk Matrix
 
 | Risk | Original Assessment | Final Assessment (post-testing) | Change |
 |------|--------------------|--------------------|--------|
 | AV2 S3 CORS | "User confirmed CORS works" | **RESOLVED ✓** — All operations work: simple GET, Range 206, ListObjectsV2. No CORS config needed for public S3 | ⬇ Eliminated |
-| AV2 frame discovery | "Requires manifest.json" | **Simplified** — S3 ListObjectsV2 works, manifest.json only needed as fallback for non-S3 hosting | ⬇ |
+| AV2 frame discovery | "Requires manifest.json" | **manifest.json is primary** (hosting-agnostic, stable). S3 ListObjectsV2 is optional fallback for zero-setup S3 convenience | Same |
 | Phase 0d extraction | "Medium risk" | **Medium risk — confirmed feasible** but must handle ordering difference (batch building BEFORE applyMetadataBundle for nuScenes/AV2) | Same |
 | Feather overloads | "Low risk" | **No risk — trivial** | ⬇ |
 | CORS probe method | Not assessed | **Merged with manifest/ListObjects fetch** — first real request acts as probe | Resolved |
@@ -1877,7 +2418,7 @@ export async function buildAV2LogDatabaseFromUrl(
 | 0c | Worker fetch concurrency limiter | **DONE ✓** | `WorkerPool` constructor takes optional 3rd arg `maxConcurrentFetches` (default `Infinity`). Tracks `inFlightCount`, gates `requestBatch()` and `drainQueue()`. Reset in `rejectAllPending()`. 5 unit tests with mock Workers. |
 | 0d | Extract `runPostWorkerPipeline()` | **DONE ✓** | Shared function in `useSceneStore.ts` replaces ~50 duplicate lines in each of 3 loaders. Takes `logLabel` param for memLog + optional `mainThreadFallback` callback (Waymo-only). Batch-building ordering preserved (nuScenes/AV2 call before `applyMetadataBundle`). |
 | ~~0e~~ | ~~AV2 S3 CORS verification~~ | **DONE ✓** | All operations work on public S3 without CORS. See A.1 |
-| 0f | `manifest.json` schema + generation script | **Ready** | Python script from A.6. Optional if using ListObjectsV2 (A.10) — but still needed as fallback for non-S3 hosting |
+| 0f | `manifest.json` schema + generation script | **Ready** | Python script from A.6. **Required** — primary frame discovery strategy (rev 6). ListObjectsV2 is optional S3-only fallback |
 | 0g | Unit tests for 0a–0d | **DONE ✓** | 24 new tests across 3 files: `errors.test.ts` (12), `featherOverloads.test.ts` (7), `workerPoolConcurrency.test.ts` (5). Total suite: 439 tests pass. |
 
 ### A.10 S3 ListObjectsV2 — Manifest-Free Frame Discovery (New Option)
@@ -2019,45 +2560,645 @@ async function listS3Keys(bucketOrigin: string, prefix: string): Promise<string[
 
 All requests are parallel (except pagination). Total latency: ~200–400ms on a decent connection.
 
-#### Dual Strategy: ListObjects → manifest.json Fallback
+#### Dual Strategy: manifest.json Primary → ListObjects Optional
+
+> **Strategy reversed in rev 6**: manifest.json is now primary, ListObjectsV2 is optional.
+> Rationale: ListObjectsV2 only works on S3, can be disabled by bucket policy changes,
+> and adds XML parsing complexity. manifest.json is hosting-agnostic and stable.
 
 ```typescript
 async function discoverAV2Frames(
   baseUrl: string,
 ): Promise<AV2FrameDiscovery> {
-  // Try S3 ListObjectsV2 first (zero setup for S3-hosted data)
+  // Primary: fetch manifest.json (works on any static file server)
+  const manifestUrl = baseUrl.replace(/\/$/, '') + '/manifest.json'
+  try {
+    const res = await fetch(manifestUrl, {
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (res.ok) {
+      const manifest: AV2Manifest = await res.json()
+      return parseManifestToDiscovery(manifest)
+    }
+  } catch {
+    // manifest.json not available — try S3 ListObjectsV2 as fallback
+  }
+
+  // Fallback: S3 ListObjectsV2 (only works on S3 public buckets)
   try {
     return await discoverAV2FramesFromS3(baseUrl)
   } catch {
-    // Fall back to manifest.json (for non-S3 hosting: nginx, CloudFront, etc.)
-    const manifestUrl = baseUrl.replace(/\/$/, '') + '/manifest.json'
-    const res = await fetch(manifestUrl)
-    if (!res.ok) {
-      throw new DataLoadError(
-        'Could not discover frames. Either host on S3 (ListObjectsV2) or provide manifest.json.\n' +
-        'Generate with: python scripts/generate_av2_manifest.py /path/to/log',
-        'MANIFEST', manifestUrl,
-      )
-    }
-    const manifest: AV2Manifest = await res.json()
-    return parseManifestToDiscovery(manifest)
+    throw new DataLoadError(
+      'Could not discover frames. Provide manifest.json at the base URL.\n' +
+      'Generate with: python scripts/generate_av2_manifest.py /path/to/log',
+      'MANIFEST', manifestUrl,
+    )
   }
 }
 ```
 
 **This is the best of both worlds**:
-- **S3 hosting** (public bucket): zero setup, zero maintenance. Just upload the log directory.
-- **Non-S3 hosting** (nginx, CloudFront, GitHub Pages): generate `manifest.json` once with the Python script.
+- **Any hosting** (nginx, CloudFront, GitHub Pages, S3): generate `manifest.json` once with the Python script. Works everywhere.
+- **S3 hosting** (public bucket, optional): if manifest.json is absent, falls back to ListObjectsV2 for zero-setup convenience. But this is a convenience, not the primary path.
 
 #### Impact on Phase 2 (AV2 Remote Loading)
 
-Phase 2 task 2a (`manifest.json` schema + parser) becomes **optional** for S3 hosting. The critical path simplifies to:
+Phase 2 task 2a (`manifest.json` schema + parser) is **required** and on the critical path. The standard flow is:
 
 ```
-discoverAV2FramesFromS3(baseUrl)
-  → lidarTimestamps + cameraTimestampsByCam
+fetch manifest.json
+  → parse → lidarTimestamps + cameraTimestampsByCam
   → construct URLs: ${baseUrl}sensors/lidar/${ts}.feather
   → pass to workers as fileEntries: [filename, urlString][]
 ```
 
-No manifest generation, no manifest hosting, no manifest parsing. Just point at the S3 log directory and go.
+ListObjectsV2 (`discoverAV2FramesFromS3`) is an **optional fallback** for S3-hosted data where no manifest.json exists. It can be deferred to Phase 2 stretch or Phase 6.
+
+### A.11 Worker Shared Module Import — Verified (2026-03-14)
+
+> Added 2026-03-14. Pre-implementation verification that `fetchHelper.ts` can be imported from worker files.
+
+#### Concern
+
+Phase 1c introduces `src/workers/fetchHelper.ts` as a shared helper imported by nuScenes and AV2 workers. If Vite's worker bundling doesn't support cross-module imports from worker entry points, the entire `resolveFileEntry()` strategy breaks.
+
+#### Verification Method
+
+1. Created `src/workers/fetchHelper.ts` with the full `resolveFileEntry()` implementation (~30 lines)
+2. Ran `tsc --noEmit` — **passed** (no type errors)
+3. Ran `vite build` — **766 modules transformed, build succeeded** in 4.27s
+4. Ran `vitest run` — **439 tests passed, 0 failures**
+5. Cleaned up the PoC file after verification
+
+#### Why It Works
+
+Workers are created with `{ type: 'module' }` (ES module workers), and Vite bundles each worker entry point as an independent chunk with its own dependency tree. Shared imports are inlined into the worker bundle automatically.
+
+**Existing precedent in codebase**: workers already import shared modules:
+- `av2LidarWorker.ts` → `import { createWorkerMemoryLogger } from '../utils/memoryLogger'`
+- `nuScenesLidarWorker.ts` → `import { parseNpzUint16 } from '../utils/npz'`
+- `nuScenesLidarWorker.ts` → `import { NUSCENES_POINT_STRIDE } from '../types/nuscenes'`
+
+All of these cross `../utils/` and `../types/` boundaries — same pattern as `import { resolveFileEntry } from './fetchHelper'`.
+
+#### Result
+
+**No risk. No prerequisite work needed.** Phase 1c can create `fetchHelper.ts` and Phase 1d can import it from workers directly.
+
+### A.12 Store Reset & Memory Cleanup — Verified (2026-03-14)
+
+> Added 2026-03-14. Verification that scene switching (URL mode → URL mode, or URL mode → local) properly cleans up workers and caches.
+
+#### Concern
+
+URL mode introduces fetched `ArrayBuffer` caches inside workers. When a user loads Scene A via URL, then navigates back to the landing page and loads Scene B, the previous scene's workers and caches must be fully released to avoid memory leaks.
+
+#### Audit Result: `resetInternal()` (lines 311–357) Is Comprehensive
+
+| Resource | Cleanup method | Status |
+|----------|---------------|--------|
+| `workerPool` | `workerPool.terminate()` → calls `worker.terminate()` on each Web Worker | ✅ Workers killed, internal heap GC'd |
+| `cameraPool` | `cameraPool.terminate()` → same pattern | ✅ |
+| `frameCache` | `.clear()` — releases all decoded `FrameData` (Float32Arrays, box objects) | ✅ |
+| `cameraImageCache` | `.clear()` — releases decoded camera data | ✅ |
+| Camera RGB cache | `clearCameraRgbCache()` — releases CPU-decoded RGB arrays | ✅ |
+| Blob URLs | `URL.revokeObjectURL()` for each URL | ✅ |
+| Object trajectories | `.clear()` | ✅ |
+| Association caches | `.clear()` × 2 | ✅ |
+| Pose cache | `.clear()` | ✅ |
+| Segmentation caches | `.clear()` × 3 (keypoints, camera keypoints, camera seg) | ✅ |
+| Play interval | `clearInterval()` | ✅ |
+| Parquet file handles | `.clear()` | ✅ |
+
+`WorkerPool.terminate()` (line 220) implementation:
+```typescript
+terminate(): void {
+  this.rejectAllPending('Worker pool terminated')  // reject in-flight promises
+  for (const pw of this.workers) {
+    pw.worker.terminate()  // kill Web Worker thread
+  }
+  this.workers = []  // release references
+}
+```
+
+#### Key Finding: Worker Internal Cache Is Safe
+
+Workers in URL mode will hold fetched `ArrayBuffer`s in an internal `Map` (the worker-side cache from Section 8.2). When `worker.terminate()` is called, the entire worker thread is killed and its heap (including the internal cache Map) is garbage-collected by the browser. **No explicit cache-clear message is needed** as long as the terminate→recreate pattern is used (which it is).
+
+#### One Caveat for Future Work
+
+If the worker pool is ever changed to **reuse workers** across scene switches (e.g., `pool.reinit()` instead of `terminate() + new WorkerPool()`), a `{ type: 'clearCache' }` message must be added to the worker protocol to explicitly release the internal `ArrayBuffer` cache. The current design uses terminate→recreate, so this is not needed now.
+
+#### Result
+
+**No risk. No prerequisite work needed.** `resetInternal()` properly releases all resources. URL mode's worker-side fetch caches are implicitly cleaned up by `worker.terminate()`. See **Section 16** for the complete URL mode state lifecycle design, including `AbortController`-based cancellation of in-flight metadata fetches.
+
+### A.13 nuScenes URL Loading — Detailed Design
+
+> Added post-review: addresses the gap in nuScenes URL path specificity.
+> Based on analysis of v1.0-mini dataset structure and current adapter code.
+
+#### A.13.1 nuScenes Data Layout (from v1.0-mini)
+
+```
+v1.0-mini/
+├── v1.0-mini/                    # JSON metadata tables (~33MB total)
+│   ├── scene.json                # 3.5KB — 10 scenes, linked-list structure
+│   ├── sample.json               # 88KB  — 404 keyframe samples
+│   ├── sample_data.json          # 16MB  — 31,206 entries (keyframes + sweeps)
+│   ├── ego_pose.json             # 7.7MB — one per sample_data entry
+│   ├── sample_annotation.json    # 9.3MB — 3D boxes per keyframe
+│   ├── calibrated_sensor.json    # 38KB  — sensor→ego extrinsics
+│   ├── sensor.json               # 1.2KB — sensor channel definitions
+│   ├── instance.json             # 227KB — object instances (cross-frame tracking)
+│   ├── category.json             # 8KB   — object categories
+│   ├── log.json                  # 1.4KB — log metadata (location, vehicle)
+│   ├── lidarseg.json             # 82KB  — sample_data_token → lidarseg file mapping
+│   └── panoptic.json             # 82KB  — sample_data_token → panoptic file mapping
+├── samples/                      # Keyframe sensor data (~404 per sensor)
+│   ├── LIDAR_TOP/                # .pcd.bin files (~695KB each, 34K points)
+│   ├── CAM_FRONT/                # .jpg files (~142KB each, 1600×900)
+│   ├── CAM_FRONT_LEFT/           # ... 5 more cameras
+│   ├── CAM_FRONT_RIGHT/
+│   ├── CAM_BACK/
+│   ├── CAM_BACK_LEFT/
+│   ├── CAM_BACK_RIGHT/
+│   ├── RADAR_FRONT/              # .pcd files (PCD v0.7 binary, ~2-5KB)
+│   ├── RADAR_FRONT_LEFT/         # ... 4 more radars
+│   └── ...
+├── sweeps/                       # Inter-keyframe data (10× denser, ~3531 LIDAR files)
+│   ├── LIDAR_TOP/
+│   ├── CAM_*/
+│   └── RADAR_*/
+├── lidarseg/v1.0-mini/           # Per-point semantic labels (uint8 .bin, ~34KB each)
+└── panoptic/v1.0-mini/           # Per-point panoptic labels (uint16 .npz, ~50KB each)
+```
+
+**File naming convention**: `{log_name}__{sensor_channel}__{timestamp_us}.{ext}`
+Example: `n008-2018-08-01-15-16-36-0400__LIDAR_TOP__1533151603547590.pcd.bin`
+
+**Key architectural difference from AV2**: nuScenes uses a **relational database model** — JSON tables with token-based foreign keys linking scenes → samples → sample_data → ego_poses, calibrated_sensors, annotations. All cross-references are by UUID token, not by filename convention.
+
+#### A.13.2 Why nuScenes URL Loading Is Architecturally Different
+
+| Aspect | AV2 URL | nuScenes URL |
+|--------|---------|-------------|
+| **Metadata format** | Feather binary files (fixed filenames) | JSON tables (12 files, relational) |
+| **Metadata size** | ~2MB total (calibration + poses + annotations) | **~33MB total** (sample_data.json alone is 16MB) |
+| **Frame discovery** | manifest.json OR pose timestamps | JSON linked-list traversal (scene→sample→sample_data) |
+| **File naming** | Predictable: `sensors/lidar/{timestamp}.feather` | **UUID-based**: filename embedded in sample_data.json entries |
+| **Multi-scene** | One log per URL | **Multiple scenes per dataset** — JSON tables span ALL scenes |
+| **Scene switching** | N/A (single scene) | Must work without re-fetching JSON tables |
+
+The critical implication: **nuScenes cannot use a per-scene manifest.json for frame discovery.** The filenames are UUID-based and embedded in the relational JSON tables. The JSON tables ARE the manifest.
+
+#### A.13.3 Design: Two-Phase URL Loading
+
+**Phase A — Database Construction (one-time, on first load)**
+
+Fetch all 12 JSON tables, build `NuScenesDatabase` in memory. This is identical to the local `buildNuScenesDatabase()` path — the only change is how JSON text is obtained.
+
+```typescript
+// src/adapters/nuscenes/remote.ts (new)
+
+const NUSCENES_JSON_TABLES = [
+  'scene.json', 'sample.json', 'sample_data.json', 'ego_pose.json',
+  'sample_annotation.json', 'calibrated_sensor.json', 'sensor.json',
+  'instance.json', 'category.json', 'log.json', 'lidarseg.json', 'panoptic.json',
+]
+
+/**
+ * Fetch all nuScenes JSON tables and build the database.
+ *
+ * @param baseUrl - e.g. "https://bucket.s3.../nuscenes/"
+ * @param version - e.g. "v1.0-mini" (subdirectory containing JSON tables)
+ * @param signal  - AbortSignal for cancellation
+ */
+export async function buildNuScenesDatabaseFromUrl(
+  baseUrl: string,
+  version: string,
+  signal: AbortSignal,
+): Promise<NuScenesDatabase> {
+  // Fetch all JSON tables in parallel (~33MB total, ~2-4s on fast connection)
+  const jsonTexts = await Promise.all(
+    NUSCENES_JSON_TABLES.map(async (filename) => {
+      const url = `${baseUrl}${version}/${filename}`
+      const res = await fetch(url, { signal })
+      if (!res.ok) {
+        if (res.status === 404) {
+          // Optional tables (lidarseg, panoptic) may not exist
+          if (filename === 'lidarseg.json' || filename === 'panoptic.json') {
+            return '[]'
+          }
+          throw classifyHttpError(res.status, url)
+        }
+        throw classifyHttpError(res.status, url)
+      }
+      return res.text()
+    }),
+  )
+
+  // Build a Map<string, string> where key = filename, value = JSON text
+  // This is the "pre-fetched text" that readJsonFile(File | string) accepts
+  const jsonTextMap = new Map<string, string>()
+  for (let i = 0; i < NUSCENES_JSON_TABLES.length; i++) {
+    jsonTextMap.set(NUSCENES_JSON_TABLES[i], jsonTexts[i])
+  }
+
+  return buildNuScenesDatabase(jsonTextMap)
+}
+```
+
+**Phase B — Scene Loading (per scene switch, no re-fetch)**
+
+Once the database is built, scene selection works identically to local mode:
+`loadNuScenesSceneMetadata(db, sceneToken)` → `MetadataBundle` → workers → frames.
+
+The only difference: workers receive URL strings instead of `File` objects.
+
+#### A.13.4 `readJsonFile` Refactoring — The Missing Design
+
+The current `readJsonFile` signature is:
+
+```typescript
+export async function readJsonFile<T>(
+  jsonFiles: Map<string, File>,
+  filename: string,
+): Promise<T[]>
+```
+
+This needs to accept pre-fetched text for URL mode. **Two options**:
+
+**Option A — Overload the Map value type** (recommended):
+
+```typescript
+export async function readJsonFile<T>(
+  jsonFiles: Map<string, File | string>,  // File (local) or JSON text string (URL)
+  filename: string,
+): Promise<T[]> {
+  const entry = jsonFiles.get(filename)
+  if (!entry) {
+    console.warn(`[nuScenes] JSON file not found: ${filename}`)
+    return []
+  }
+  // string = pre-fetched JSON text (from URL fetch)
+  // File   = local file (from drag-and-drop)
+  const text = typeof entry === 'string' ? entry : await entry.text()
+  return JSON.parse(text) as T[]
+}
+```
+
+**Option B — Separate function**: `readJsonText<T>(jsonTexts: Map<string, string>, filename: string)`. Cleaner separation but duplicates the null-check and parse logic.
+
+**Decision: Option A.** Rationale:
+1. `buildNuScenesDatabase()` calls `readJsonFile` 12 times — changing its parameter type once propagates to all call sites automatically
+2. `buildNuScenesDatabase(jsonFiles: Map<string, File | string>)` — the signature change is backward-compatible (local callers still pass `Map<string, File>`)
+3. Zero duplication of parsing logic
+
+**Impact on call chain**:
+```
+Local mode:
+  loadFromFiles → separate jsonFiles Map<string, File> → buildNuScenesDatabase(jsonFiles)
+                                                          → readJsonFile(jsonFiles, 'scene.json')  // File.text()
+
+URL mode:
+  loadFromUrl → fetchAllJsonTexts → Map<string, string> → buildNuScenesDatabase(jsonTextMap)
+                                                           → readJsonFile(jsonTextMap, 'scene.json')  // already string
+```
+
+#### A.13.5 Worker File Access — URL String Mapping
+
+nuScenes workers currently receive `fileEntries: [string, File][]` — a flat list of `(filename, File)` pairs. For URL mode, the File is replaced by a URL string:
+
+```typescript
+// Local mode:
+fileEntries: [
+  ['samples/LIDAR_TOP/n008-...__1533151603547590.pcd.bin', File],
+  ['samples/CAM_FRONT/n008-...__1533151603512404.jpg', File],
+  ['lidarseg/v1.0-mini/9d9bf11f..._lidarseg.bin', File],
+]
+
+// URL mode:
+fileEntries: [
+  ['samples/LIDAR_TOP/n008-...__1533151603547590.pcd.bin',
+   'https://bucket.s3.../nuscenes/samples/LIDAR_TOP/n008-...__1533151603547590.pcd.bin'],
+  ['samples/CAM_FRONT/n008-...__1533151603512404.jpg',
+   'https://bucket.s3.../nuscenes/samples/CAM_FRONT/n008-...__1533151603512404.jpg'],
+  ['lidarseg/v1.0-mini/9d9bf11f..._lidarseg.bin',
+   'https://bucket.s3.../nuscenes/lidarseg/v1.0-mini/9d9bf11f..._lidarseg.bin'],
+]
+```
+
+Worker-side change (both `nuScenesLidarWorker.ts` and `nuScenesCameraWorker.ts`):
+
+```typescript
+// Before:
+let fileMap = new Map<string, File>()
+// ...
+fileMap = new Map(msg.fileEntries)
+// ...
+const lidarFile = fileMap.get(frameDesc.filename)
+const lidarBuffer = await lidarFile.arrayBuffer()
+
+// After:
+let fileMap = new Map<string, File | string>()
+// ...
+fileMap = new Map(msg.fileEntries)
+// ...
+const entry = fileMap.get(frameDesc.filename)
+const lidarBuffer = await resolveFileEntry(entry)  // File.arrayBuffer() or fetch()
+```
+
+This is the same pattern as Phase 1d (worker `File | string` support). The `resolveFileEntry()` helper from `fetchHelper.ts` handles retry + timeout.
+
+#### A.13.6 nuScenes `manifest.json` — What Goes In It
+
+Unlike AV2 (where manifest.json provides frame timestamps for URL construction), nuScenes manifest.json is **minimal** — the JSON tables already contain all frame/file information. The manifest only needs:
+
+```typescript
+interface NuScenesManifest {
+  version: 1
+  dataset: 'nuscenes'
+  /** nuScenes version string (subdirectory name for JSON tables) */
+  nuscenes_version: string      // e.g. "v1.0-mini"
+  /** Available scene names (for UI display without parsing all JSON) */
+  scenes: string[]              // e.g. ["scene-0061", "scene-0103", ...]
+  /** JSON table files to fetch (relative to base URL + nuscenes_version/) */
+  json_tables: string[]         // e.g. ["scene.json", "sample.json", ...]
+  /** Total size of all JSON tables in bytes (for progress estimation) */
+  json_total_bytes?: number     // e.g. 33462751
+}
+```
+
+**Why include `scenes`?** Without parsing `scene.json` (~3.5KB), the landing page can show a scene selector dropdown immediately. This is a UX optimization — the user picks a scene before the full ~33MB JSON download starts.
+
+**Alternative considered: download only the scene's JSON subset.** This would require server-side filtering (not possible on static hosting). The full JSON must be fetched regardless because `sample_data.json` and `ego_pose.json` span all scenes and there's no per-scene partitioning in the nuScenes format.
+
+#### A.13.7 Generation Script
+
+```python
+#!/usr/bin/env python3
+"""
+Generate manifest.json for a nuScenes dataset directory.
+
+Usage:
+    python scripts/generate_nuscenes_manifest.py /path/to/v1.0-mini
+
+Output:
+    {nuscenes_dir}/manifest.json
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+JSON_TABLES = [
+    'scene.json', 'sample.json', 'sample_data.json', 'ego_pose.json',
+    'sample_annotation.json', 'calibrated_sensor.json', 'sensor.json',
+    'instance.json', 'category.json', 'log.json', 'lidarseg.json', 'panoptic.json',
+]
+
+def generate_manifest(nuscenes_root: Path, version: str) -> dict:
+    json_dir = nuscenes_root / version
+    if not json_dir.exists():
+        print(f'Error: {json_dir} not found', file=sys.stderr)
+        sys.exit(1)
+
+    # Read scene names
+    with open(json_dir / 'scene.json') as f:
+        scenes = json.load(f)
+    scene_names = sorted(s['name'] for s in scenes)
+
+    # Check which JSON tables exist and compute total size
+    available_tables = []
+    total_bytes = 0
+    for table in JSON_TABLES:
+        table_path = json_dir / table
+        if table_path.exists():
+            available_tables.append(table)
+            total_bytes += table_path.stat().st_size
+
+    return {
+        'version': 1,
+        'dataset': 'nuscenes',
+        'nuscenes_version': version,
+        'scenes': scene_names,
+        'json_tables': available_tables,
+        'json_total_bytes': total_bytes,
+    }
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(f'Usage: {sys.argv[0]} /path/to/nuscenes/root', file=sys.stderr)
+        sys.exit(1)
+
+    root = Path(sys.argv[1])
+
+    # Auto-detect version from directory structure
+    # Look for subdirectories matching v1.0-* pattern
+    version = None
+    for child in root.iterdir():
+        if child.is_dir() and child.name.startswith('v1.0'):
+            if (child / 'scene.json').exists():
+                version = child.name
+                break
+
+    if not version:
+        # Maybe the user pointed directly to the version dir
+        if (root / 'scene.json').exists():
+            version = root.name
+            root = root.parent
+        else:
+            print('Error: could not find nuScenes JSON tables (scene.json)', file=sys.stderr)
+            sys.exit(1)
+
+    manifest = generate_manifest(root, version)
+    out_path = root / 'manifest.json'
+    with open(out_path, 'w') as f:
+        json.dump(manifest, f, indent=2)
+
+    print(f'Wrote {out_path}')
+    print(f'  version: {version}')
+    print(f'  scenes: {len(manifest["scenes"])}')
+    print(f'  json_tables: {len(manifest["json_tables"])}')
+    print(f'  json_total_bytes: {manifest["json_total_bytes"]:,}')
+
+
+if __name__ == '__main__':
+    main()
+```
+
+#### A.13.8 URL Loading Flow — Complete
+
+```
+User enters: https://bucket.s3.../nuscenes/
+Dataset selector: nuScenes
+
+                        ┌─────────────────────────────────────┐
+                        │  1. Fetch manifest.json              │
+                        │     → nuscenes_version, scene list   │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  2. Show scene selector (10 scenes)  │
+                        │     User picks "scene-0061"          │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  3. Fetch ALL 12 JSON tables         │
+                        │     (~33MB, parallel, ~2-4s)         │
+                        │     Progress: "Downloading metadata" │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  4. buildNuScenesDatabase()          │
+                        │     (identical to local mode)        │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  5. loadNuScenesSceneMetadata()      │
+                        │     → MetadataBundle (39 frames)     │
+                        │     → buildNuScenesFrameBatches()    │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  6. Build URL file entries            │
+                        │     filename → base+filename URL     │
+                        │     ~39 LiDAR + 39×6 cam + 39 radar │
+                        │     + lidarseg + panoptic            │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  7. Init workers with URL entries    │
+                        │     → runPostWorkerPipeline()        │
+                        └─────────┬───────────────────────────┘
+                                  │
+                        ┌─────────▼───────────────────────────┐
+                        │  8. Scene switch (no re-fetch)       │
+                        │     Same DB, different scene token   │
+                        │     → new MetadataBundle             │
+                        │     → new worker URL entries          │
+                        │     → new runPostWorkerPipeline()    │
+                        └─────────────────────────────────────┘
+```
+
+#### A.13.9 Multi-Scene Support in URL Mode
+
+Unlike AV2 (single scene per URL), nuScenes supports **multiple scenes per dataset URL**. This creates a UI exception to the `singleSceneMode` design (Section 12):
+
+| Mode | nuScenes behavior |
+|------|-------------------|
+| Local (drag & drop) | Scene dropdown shown (10 scenes in v1.0-mini) |
+| **URL standalone** | **Scene dropdown shown** — user can switch scenes within the same URL |
+| URL embed | Scene specified by `?scene=scene-0061` param, no dropdown |
+
+**Implementation**: `singleSceneMode` should be set based on dataset type, not URL mode:
+
+```typescript
+// In loadFromUrl():
+set({
+  singleSceneMode: datasetId !== 'nuscenes',  // nuScenes has multi-scene
+  sourceUrl: base,
+  sourceDataset: datasetId,
+})
+```
+
+For nuScenes URL mode, scene switching reuses the cached `NuScenesDatabase` (no re-fetch of JSON tables). Only the per-scene worker initialization is repeated. This is identical to local-mode scene switching.
+
+**Scene switch flow (URL mode)**:
+```
+selectSegment("scene-0103")
+  → resetInternal()          // teardown previous scene's workers
+  → loadNuScenesSceneMetadata(cachedDb, scene0103token)
+  → buildNuScenesFrameBatches()
+  → buildUrlFileEntries(baseUrl, batches)   // NEW: construct URLs
+  → initNuScenesLidarWorker(batches, urlEntries)
+  → initNuScenesCameraWorker(batches, urlEntries)
+  → runPostWorkerPipeline()
+```
+
+#### A.13.10 Memory Budget — 33MB JSON Impact
+
+The ~33MB of JSON tables is parsed into JS objects. Estimated heap after `buildNuScenesDatabase()`:
+
+| Table | Raw JSON | Parsed heap (estimate) | Notes |
+|-------|----------|----------------------|-------|
+| `sample_data.json` | 16MB | ~25MB | 31K objects with string tokens |
+| `ego_pose.json` | 7.7MB | ~12MB | 31K objects with float arrays |
+| `sample_annotation.json` | 9.3MB | ~15MB | Variable count per scene |
+| Other 9 tables | ~1MB | ~2MB | Small tables |
+| **Total** | **~33MB** | **~54MB** | After Map indexing |
+
+This is a **fixed one-time cost** (not per-frame). For context, a single AV2 frame's decoded point cloud is ~5MB, so the nuScenes JSON overhead is equivalent to ~10 frames of AV2 LiDAR data. Acceptable.
+
+**For full nuScenes (v1.0-trainval)**: `sample_data.json` is ~600MB, `ego_pose.json` is ~290MB. This would require **streaming JSON parsing** (not `JSON.parse()`) or a different approach (server-side scene filtering, or nuScenes v2 Parquet format). This is out of scope for the current plan — URL mode targets mini/small splits.
+
+#### A.13.11 Per-Frame Network Budget
+
+| Component | Size | Count per frame | Total per scene (39 frames) |
+|-----------|------|-----------------|---------------------------|
+| LiDAR `.pcd.bin` | ~695KB | 1 | ~27MB |
+| Camera `.jpg` × 6 | ~142KB each | 6 | ~33MB |
+| Radar `.pcd` × 5 | ~3KB each | 5 | ~0.6MB |
+| Lidarseg `.bin` | ~34KB | 1 | ~1.3MB |
+| Panoptic `.npz` | ~50KB | 1 | ~2MB |
+| **Total** | **~1.6MB/frame** | | **~64MB** |
+
+At 50 Mbps: ~10 seconds to prefetch a complete v1.0-mini scene. Much lighter than AV2 or Waymo.
+
+#### A.13.12 nuScenes-Specific CORS Considerations
+
+nuScenes data is not publicly hosted on a known S3 bucket (unlike AV2). Users must self-host. The hosting documentation should include:
+
+```nginx
+# Required nginx config for nuScenes URL loading
+location ~* \.(json|bin|jpg|pcd|npz)$ {
+    add_header Access-Control-Allow-Origin *;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+}
+```
+
+For S3 self-hosting, a CORS configuration is required (unlike AV2 public bucket):
+
+```json
+[
+  {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 86400
+  }
+]
+```
+
+#### A.13.13 Updated Phase 6 Task Breakdown
+
+The original plan placed nuScenes URL loading in "Phase 6 (stretch)". With this design, the task list is:
+
+| # | Task | Files | Depends on | Effort |
+|---|------|-------|------------|--------|
+| 6a | `readJsonFile` overload: `Map<string, File \| string>` | `src/adapters/nuscenes/metadata.ts` | **Phase 1b** | Low — 3-line change |
+| 6b | `buildNuScenesDatabase` accept `Map<string, File \| string>` | Same file, signature only | 6a | Low — type widening |
+| 6c | `buildNuScenesDatabaseFromUrl()` — fetch JSON tables + call 6b | `src/adapters/nuscenes/remote.ts` (new) | 6a, 6b | Medium — parallel fetch + error handling |
+| 6d | URL file entry builder: `buildNuScenesUrlFileEntries(baseUrl, batches)` | Same file or `useSceneStore.ts` | 6c | Low — string concatenation |
+| 6e | `loadNuScenesFromUrl(baseUrl, signal, set, get)` | `src/stores/useSceneStore.ts` | 6b, 6c, 6d, Phase 1d | Medium — integrate into store |
+| 6f | Scene switching in URL mode (reuse cached DB, new URL entries) | `src/stores/useSceneStore.ts` | 6e | Low — mirror local path |
+| 6g | nuScenes manifest.json generation script | `scripts/generate_nuscenes_manifest.py` | — | Low |
+| 6h | `singleSceneMode` exception for nuScenes (multi-scene URL) | `src/stores/useSceneStore.ts`, `src/App.tsx` | Section 16 | Low |
+| 6i | Integration tests with MSW mock | `src/__tests__/nuScenesRemote.test.ts` | 6a–6f | Medium |
+
+**Total estimated effort**: 3-4 days (reduced from "stretch" because Phase 1b/1d prerequisite work is already planned).
+
+**Critical path**: Phase 1b (`readJsonFile` overload) → 6a → 6b → 6c → 6e. The `readJsonFile` change in Phase 1b must be designed with nuScenes URL mode in mind — **not** as a narrow fix for one function, but as the enabling change for the entire nuScenes URL pipeline.
+
+#### A.13.14 Risk Assessment
+
+| Risk | Level | Mitigation |
+|------|-------|-----------|
+| 33MB JSON parse time (v1.0-mini) | **Low** | ~200ms on modern devices. `JSON.parse` is highly optimized. |
+| Full nuScenes (v1.0-trainval) JSON size | **High** | Out of scope. Document as "mini/small splits only" or future work: streaming JSON / Parquet conversion. |
+| Scene switch latency in URL mode | **Low** | DB is cached. Only worker init + first-frame fetch (~2-3s). |
+| Worker file entry count (~300 per scene × 12 sensors) | **Low** | URL strings are small (~200 bytes). `postMessage` handles thousands of entries fine. |
+| nuScenes server CORS requirement | **Medium** | Self-hosted only. Document CORS config. Cannot offer zero-config like AV2 public S3. |
