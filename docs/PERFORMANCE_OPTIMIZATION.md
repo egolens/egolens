@@ -540,6 +540,95 @@ See `data-pipeline-slice-fix-report.html` for the interactive visualization of t
 
 ---
 
+## OPT-007: GPU-accelerated camera colormap mode
+
+**Date:** 2026-03-14
+**Status:** Implemented
+**Files:** `src/components/LidarViewer/CameraColorMaterial.ts` (new), `src/components/LidarViewer/PointCloud.tsx`, `src/utils/cameraRgbSampler.ts`
+
+### Problem
+
+Camera colormap mode colored each LiDAR point by the camera pixel it projects to. The original CPU pipeline had three bottlenecks:
+
+1. **Object allocation pressure**: `projectPointsToCamera()` created a `ProjectedPoint` object per valid projection. 168K points × 5 cameras = up to ~840K short-lived objects per frame, causing GC spikes.
+2. **Two-pass structure**: first pass projected all points (allocating intermediate arrays), second pass sampled RGB from decoded ImageData. Double iteration over 168K points.
+3. **Main-thread JPEG decode**: `createImageBitmap` + `getImageData` copied ~50 MB of pixel data per frame (5 cameras × 1920×1280×4 RGBA).
+
+Combined, the CPU pipeline added **~80 ms/frame** of main-thread work in camera mode.
+
+### Alternatives considered
+
+| Approach | Tradeoff |
+|---|---|
+| A) Fuse CPU projection+sampling into single pass | Eliminates object allocation. Still ~80ms CPU per frame. |
+| **B) GPU shader: project in vertex, sample in fragment** | Zero CPU per-frame cost. Requires custom ShaderMaterial + texture management. |
+| C) Compute shader (WebGPU) | Best throughput but requires WebGPU (not universally available). |
+| D) Web Worker offload | Moves work off main thread but still ~80ms latency per frame. Doesn't help with smooth scrubbing. |
+
+### Decision
+
+Both A and B — fused CPU path as fallback (`cameraRgbSampler.ts`), GPU shader as primary path (`CameraColorMaterial.ts`).
+
+### Implementation
+
+**GPU shader (`CameraColorMaterial.ts`):**
+- Custom `ShaderMaterial` with `MAX_CAMERAS = 7` uniform slots
+- Vertex shader: transforms each point from ego frame to all camera frames via `uInvExtrinsic[i]` mat4 uniforms, applies pinhole projection (`uIntrinsics[i]` vec4: f_u, f_v, c_u, c_v), picks camera with shallowest depth, passes UV + camera index to fragment via varyings
+- Fragment shader: samples the winning camera's texture via static branching (`if (idx == 0) ... else if (idx == 1) ...`)
+- `isOpticalFrame` uniform per camera: Waymo sensors use X-forward/Y-left/Z-up convention requiring sensor→optical rotation; AV2/nuScenes cameras are already in optical frame
+- Texture source: `OffscreenCanvas` (not `ImageBitmap`) for cross-platform Y-orientation consistency
+- Texture pool: reuses `THREE.Texture` objects across frames to avoid GPU allocation churn
+
+**Anti-flicker strategy:**
+- Positions update immediately on every frame change
+- Camera textures decode asynchronously (~5–15 ms for 5 JPEG→OffscreenCanvas)
+- Previous frame's textures remain bound until new decode completes
+- Adjacent frames have nearly identical camera views, so stale textures look natural during the ~10ms decode gap
+
+**Material swap in `PointCloud.tsx`:**
+- Two materials created once: `normalMat` (PointsMaterial for CPU colormaps) and `cameraMat` (CameraColorMaterial)
+- Swapped imperatively in `useFrame` callback (`pts.material = isCameraMode ? cameraMat : normalMat`) — no React re-renders or R3F material reconciliation
+- `pointOpacity` read from Zustand store inside `useFrame` (not as React subscription) to prevent material re-attachment
+
+**Ego-frame projection fix:**
+- `PointCloud` sits inside a `<group>` with `WorldPoseSync` that applies ego→world vehicle pose as `modelMatrix`
+- Camera calibration operates in ego/vehicle frame — `invExtrinsic = inv(sensor→ego) = ego→sensor`
+- Shader uses raw `position` attribute (ego frame) for camera projection
+- `modelMatrix * position` used only for `gl_Position` (world-space rendering)
+
+**Fused CPU fallback (`cameraRgbSampler.ts`):**
+- `fusedProjectAndSample()` inlines matrix multiply + pinhole projection + depth test + RGB sampling in one loop per camera
+- Pre-allocated `bestDepth` Float32Array reused across frames (no per-frame allocation)
+- Eliminates all `ProjectedPoint` object creation
+
+### Measurements
+
+**Per-frame CPU overhead (camera colormap mode):**
+
+| Metric | Before (CPU 2-pass) | After (GPU shader) | Improvement |
+|---|---|---|---|
+| Main-thread projection+sampling | ~80 ms | 0 ms | **-100%** |
+| Texture decode (async) | — | ~5–15 ms | Off main thread feel* |
+| Object allocations/frame | ~840K | 0 | **-100%** |
+
+*Texture decode runs on main thread but is non-blocking — positions render immediately, textures apply when ready.
+
+**CPU fallback (fused single-pass):**
+
+| Metric | Before (2-pass) | After (fused) | Improvement |
+|---|---|---|---|
+| Object allocations/frame | ~840K | 0 | **-100%** |
+| GC pause pressure | High | Negligible | Eliminated |
+
+### Issues encountered and fixed
+
+1. **Vertical flip (Waymo)**: Initial shader had `flipY=true` + `uv.y = 1.0 - v/h`. Fixed to `flipY=false` + `uv.y = v/h`.
+2. **AV2 vertical flip**: `ImageBitmap` has platform-dependent Y-orientation. Fixed by switching to `OffscreenCanvas` as texture source for deterministic behavior.
+3. **Flicker during scrubbing**: Positions updated but textures were async → gray flash. Fixed with carry-over strategy (keep previous frame's textures until new decode completes).
+4. **Non-Waymo datasets broken**: Shader used `modelMatrix * position` for camera projection, but `modelMatrix` includes ego→world transform from `WorldPoseSync`. Camera calibration is in ego frame. Fixed by using raw `position` for projection.
+
+---
+
 ## Rejected / Deferred
 
 ### computeBoundingSphere optimization
