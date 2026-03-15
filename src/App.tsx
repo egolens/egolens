@@ -7,6 +7,7 @@ import { colors, fonts, radius, gradients } from './theme'
 import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
+import { normalizeBaseUrl } from './utils/urlValidation'
 import MemoryOverlay from './components/MemoryOverlay'
 
 
@@ -43,11 +44,49 @@ function useSegmentDiscovery() {
 }
 
 // ---------------------------------------------------------------------------
+// URL parameter auto-load: ?dataset=argoverse2&data=https://...
+// ---------------------------------------------------------------------------
+
+const SUPPORTED_URL_DATASETS = ['argoverse2'] as const
+type UrlDataset = typeof SUPPORTED_URL_DATASETS[number]
+
+/** Guard against double-invocation from React StrictMode */
+let urlAutoLoadStarted = false
+
+function useUrlAutoLoad() {
+  const status = useSceneStore((s) => s.status)
+  const loadFromUrl = useSceneStore((s) => s.actions.loadFromUrl)
+
+  useEffect(() => {
+    if (urlAutoLoadStarted) return
+    if (status !== 'idle') return
+
+    const params = new URLSearchParams(window.location.search)
+    const dataset = params.get('dataset')
+    const dataUrl = params.get('data')
+
+    if (!dataset || !dataUrl) return
+    if (!SUPPORTED_URL_DATASETS.includes(dataset as UrlDataset)) return
+
+    urlAutoLoadStarted = true
+
+    try {
+      const baseUrl = normalizeBaseUrl(dataUrl)
+      loadFromUrl(dataset, baseUrl)
+    } catch {
+      // Invalid URL — silently ignore, user will see the landing page
+      urlAutoLoadStarted = false
+    }
+  }, [status, loadFromUrl])
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
 function App() {
   useSegmentDiscovery()
+  useUrlAutoLoad()
   const status = useSceneStore((s) => s.status)
   const availableSegments = useSceneStore((s) => s.availableSegments)
   const togglePlayback = useSceneStore((s) => s.actions.togglePlayback)
@@ -215,6 +254,10 @@ function Header() {
   const segmentMetas = useSceneStore((s) => s.segmentMetas)
   const actions = useSceneStore((s) => s.actions)
 
+  // Detect URL-loaded mode (single scene, loaded via query params)
+  const isUrlMode = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('data')
+
   let statusText: string
   if (status === 'idle') {
     statusText = availableSegments.length > 1 ? 'Select a segment' : 'No segment loaded'
@@ -223,7 +266,8 @@ function Header() {
   } else if (status === 'error') {
     statusText = `Error: ${storeError ?? 'Unknown'}`
   } else {
-    statusText = ''
+    // In URL mode, show the log/segment ID
+    statusText = isUrlMode && currentSegment ? currentSegment.slice(0, 16) : ''
   }
 
   return (
@@ -338,6 +382,37 @@ function Header() {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* URL mode: "New Session" link to return to landing page */}
+        {isUrlMode && status === 'ready' && (
+          <button
+            onClick={() => {
+              window.location.href = window.location.pathname
+            }}
+            style={{
+              padding: '4px 10px',
+              fontSize: '11px',
+              fontFamily: fonts.sans,
+              color: colors.textDim,
+              backgroundColor: 'transparent',
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.sm,
+              cursor: 'pointer',
+              transition: 'color 0.15s, border-color 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = colors.textSecondary
+              e.currentTarget.style.borderColor = colors.textDim
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = colors.textDim
+              e.currentTarget.style.borderColor = colors.border
+            }}
+            title="Return to landing page"
+          >
+            ← New Session
+          </button>
+        )}
         <div style={{
           fontSize: '12px',
           fontFamily: fonts.mono,
@@ -485,6 +560,13 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const dragCounter = useRef(0)
+
+  // URL loading state
+  const [urlDataset, setUrlDataset] = useState<string>('argoverse2')
+  const [urlInput, setUrlInput] = useState('')
+  const [urlLoading, setUrlLoading] = useState(false)
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const loadFromUrl = useSceneStore((s) => s.actions.loadFromUrl)
 
   const handleFiles = useCallback(async (segments: Map<string, Map<string, File>>) => {
     if (segments.size === 0) {
@@ -766,8 +848,176 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 
       {/* Data download guide — collapsible */}
       <DownloadGuide />
+
+      {/* ── or divider ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        maxWidth: '520px',
+        width: '100%',
+        margin: '4px 0',
+      }}>
+        <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
+        <span style={{ fontSize: '11px', fontFamily: fonts.sans, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          or load from URL
+        </span>
+        <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
+      </div>
+
+      {/* URL input section */}
+      <div style={{
+        width: '100%',
+        maxWidth: '520px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      }}>
+        {/* Dataset selector */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <label style={{ fontSize: '12px', fontFamily: fonts.sans, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+            Dataset
+          </label>
+          <select
+            value={urlDataset}
+            onChange={(e) => { setUrlDataset(e.target.value); setUrlError(null) }}
+            disabled={urlLoading}
+            style={{
+              flex: 1,
+              padding: '7px 10px',
+              fontSize: '12px',
+              fontFamily: fonts.sans,
+              backgroundColor: colors.bgOverlay,
+              color: colors.textPrimary,
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.sm,
+              outline: 'none',
+              cursor: urlLoading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <option value="argoverse2">Argoverse 2</option>
+            <option value="waymo" disabled>Waymo (coming soon)</option>
+            <option value="nuscenes" disabled>nuScenes (coming soon)</option>
+          </select>
+        </div>
+
+        {/* URL input + Load button */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="url"
+            value={urlInput}
+            onChange={(e) => { setUrlInput(e.target.value); setUrlError(null) }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && urlInput.trim() && !urlLoading) {
+                handleUrlLoad()
+              }
+            }}
+            disabled={urlLoading}
+            placeholder="https://s3.amazonaws.com/bucket/log_id/"
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              fontSize: '12px',
+              fontFamily: fonts.mono,
+              backgroundColor: colors.bgOverlay,
+              color: colors.textPrimary,
+              border: `1px solid ${urlError ? '#FF6B6B' : colors.border}`,
+              borderRadius: radius.sm,
+              outline: 'none',
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={(e) => {
+              if (!urlError) e.currentTarget.style.borderColor = colors.accent
+            }}
+            onBlur={(e) => {
+              if (!urlError) e.currentTarget.style.borderColor = colors.border
+            }}
+          />
+          <button
+            onClick={handleUrlLoad}
+            disabled={!urlInput.trim() || urlLoading}
+            style={{
+              padding: '8px 20px',
+              fontSize: '12px',
+              fontFamily: fonts.sans,
+              fontWeight: 600,
+              backgroundColor: !urlInput.trim() || urlLoading ? colors.bgOverlay : colors.accent,
+              color: !urlInput.trim() || urlLoading ? colors.textDim : '#000',
+              border: 'none',
+              borderRadius: radius.sm,
+              cursor: !urlInput.trim() || urlLoading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s',
+              whiteSpace: 'nowrap',
+              minWidth: '72px',
+            }}
+          >
+            {urlLoading ? '…' : 'Load'}
+          </button>
+        </div>
+
+        {/* URL error */}
+        {urlError && (
+          <div style={{
+            fontSize: '11px',
+            fontFamily: fonts.sans,
+            color: '#FF6B6B',
+            padding: '6px 10px',
+            backgroundColor: 'rgba(255, 107, 107, 0.1)',
+            borderRadius: radius.sm,
+            lineHeight: 1.5,
+          }}>
+            {urlError}
+          </div>
+        )}
+
+        {/* Quick-load example */}
+        <div style={{
+          fontSize: '11px',
+          fontFamily: fonts.sans,
+          color: colors.textDim,
+          textAlign: 'center',
+        }}>
+          Requires a <span style={{ fontFamily: fonts.mono }}>manifest.json</span> at the URL root.{' '}
+          <button
+            onClick={() => {
+              setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/01bb304d-7bd8-35f8-bbef-7086b688e35e/')
+              setUrlDataset('argoverse2')
+              setUrlError(null)
+            }}
+            disabled={urlLoading}
+            style={{
+              padding: 0,
+              fontSize: '11px',
+              fontFamily: fonts.sans,
+              color: colors.accent,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              opacity: urlLoading ? 0.5 : 1,
+            }}
+          >
+            Try example URL
+          </button>
+        </div>
+      </div>
     </div>
   )
+
+  async function handleUrlLoad() {
+    if (!urlInput.trim() || urlLoading) return
+    setUrlLoading(true)
+    setUrlError(null)
+
+    try {
+      const baseUrl = normalizeBaseUrl(urlInput)
+      await loadFromUrl(urlDataset, baseUrl)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setUrlError(msg)
+      setUrlLoading(false)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
