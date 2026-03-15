@@ -54,6 +54,10 @@ import {
   loadAV2LogMetadata,
   type AV2LogDatabase,
 } from '../adapters/argoverse2/metadata'
+import {
+  fetchAV2Manifest,
+  loadAV2FromUrl,
+} from '../adapters/argoverse2/remote'
 import type { AV2LidarFrameDescriptor } from '../workers/av2LidarWorker'
 import type {
   AV2CameraFrameDescriptor,
@@ -120,6 +124,8 @@ interface SceneActions {
   setAvailableSegments: (segments: string[]) => void
   selectSegment: (segmentId: string) => Promise<void>
   loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
+  /** Load dataset from a remote URL (AV2 supported, Waymo/nuScenes planned) */
+  loadFromUrl: (dataset: string, baseUrl: string) => Promise<void>
   toggleWorldMode: () => void
   toggleLidarOverlay: () => void
   toggleKeypoints3D: () => void
@@ -304,8 +310,8 @@ const internal = {
   // -- Argoverse 2-specific state --
   /** Parsed AV2 log database */
   av2Db: null as AV2LogDatabase | null,
-  /** AV2 sensor data files keyed by relative path */
-  av2SampleFiles: null as Map<string, File> | null,
+  /** AV2 sensor data files keyed by relative path (File for local, string URL for remote) */
+  av2SampleFiles: null as Map<string, File | string> | null,
 }
 
 function resetInternal() {
@@ -905,6 +911,54 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (segmentIds.length > 0) {
         await get().actions.selectSegment(segmentIds[0])
       }
+    },
+
+    loadFromUrl: async (dataset: string, baseUrl: string) => {
+      if (dataset === 'argoverse2') {
+        // 1. Fetch manifest.json (also acts as CORS probe)
+        set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
+
+        try {
+          const manifest = await fetchAV2Manifest(baseUrl)
+          set({ loadProgress: 0.05 })
+
+          // 2. Fetch metadata + build database
+          const { db, fileEntries } = await loadAV2FromUrl(baseUrl, manifest, (p) => {
+            set({ loadProgress: 0.05 + p * 0.15 }) // 0.05 → 0.20
+          })
+
+          // 3. Build URL-based sample files map for workers
+          const sampleFiles = new Map<string, string>()
+          for (const [filename, url] of fileEntries) {
+            sampleFiles.set(filename, url)
+          }
+
+          // 4. Initialize AV2 state (same as local mode)
+          internal.datasetId = 'argoverse2'
+          internal.av2Db = db
+          internal.av2SampleFiles = sampleFiles
+          setManifest(argoverse2Manifest)
+
+          // AV2 has a single "scene" per log
+          set({ availableSegments: [db.logId], loadProgress: 0.2 })
+
+          // 5. Load scene (metadata → batches → workers → pipeline)
+          await get().actions.selectSegment(db.logId)
+        } catch (e) {
+          console.error('[loadFromUrl] AV2 error:', e)
+          set({
+            status: 'error',
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
+        return
+      }
+
+      // Waymo and nuScenes URL loading — not yet implemented
+      set({
+        status: 'error',
+        error: `URL loading for "${dataset}" is not yet supported. Currently only "argoverse2" is supported.`,
+      })
     },
 
     reset: () => {
@@ -1519,10 +1573,10 @@ async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
       neededFiles.add(frame.filename)
     }
   }
-  const fileEntries: [string, File][] = []
+  const fileEntries: [string, File | string][] = []
   for (const filename of neededFiles) {
-    const file = internal.av2SampleFiles.get(filename)
-    if (file) fileEntries.push([filename, file])
+    const entry = internal.av2SampleFiles.get(filename)
+    if (entry) fileEntries.push([filename, entry])
   }
 
   const pool = new WorkerPool<Record<string, unknown>, LidarBatchResult>(
@@ -1550,10 +1604,10 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
       }
     }
   }
-  const fileEntries: [string, File][] = []
+  const fileEntries: [string, File | string][] = []
   for (const filename of neededFiles) {
-    const file = internal.av2SampleFiles.get(filename)
-    if (file) fileEntries.push([filename, file])
+    const entry = internal.av2SampleFiles.get(filename)
+    if (entry) fileEntries.push([filename, entry])
   }
 
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(

@@ -34,6 +34,25 @@ import {
 } from './manifest'
 
 // ---------------------------------------------------------------------------
+// Manifest types (shared with remote.ts — defined here to avoid circular imports)
+// ---------------------------------------------------------------------------
+
+export interface AV2Manifest {
+  version: 1
+  dataset: 'argoverse2'
+  log_id: string
+  num_frames: number
+  frames: AV2ManifestFrame[]
+}
+
+export interface AV2ManifestFrame {
+  /** LiDAR timestamp in nanoseconds (string — JSON can't represent int64) */
+  timestamp_ns: string
+  /** Per-camera image timestamps (ns), keyed by camera name */
+  cameras: Record<string, string>
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -55,6 +74,51 @@ export interface AV2LogDatabase {
 }
 
 // ---------------------------------------------------------------------------
+// Frame discovery from manifest (URL mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build frame discovery maps from manifest.json.
+ * Replaces local file-key scanning for URL mode.
+ *
+ * Returns:
+ * - lidarTimestamps: sorted bigint array
+ * - cameraFilesByFrame: per-frame camera image descriptors (same shape as local mode)
+ */
+export function discoverAV2FramesFromManifest(
+  manifest: AV2Manifest,
+  sensorNameToId: Record<string, number>,
+  ringCameraNames: readonly string[],
+): {
+  lidarTimestamps: bigint[]
+  cameraFilesByFrame: Map<number, { cameraId: number; filename: string }[]>
+} {
+  const lidarTimestamps = manifest.frames.map(f => BigInt(f.timestamp_ns))
+  // manifest.frames are already sorted by generation script
+
+  const cameraFilesByFrame = new Map<number, { cameraId: number; filename: string }[]>()
+  for (let fi = 0; fi < manifest.frames.length; fi++) {
+    const frame = manifest.frames[fi]
+    const images: { cameraId: number; filename: string }[] = []
+
+    for (const camName of ringCameraNames) {
+      const camId = sensorNameToId[camName]
+      if (camId === undefined) continue
+      const camTs = frame.cameras[camName]
+      if (!camTs) continue
+      images.push({
+        cameraId: camId,
+        filename: `sensors/cameras/${camName}/${camTs}.jpg`,
+      })
+    }
+
+    cameraFilesByFrame.set(fi, images)
+  }
+
+  return { lidarTimestamps, cameraFilesByFrame }
+}
+
+// ---------------------------------------------------------------------------
 // Database construction
 // ---------------------------------------------------------------------------
 
@@ -62,12 +126,14 @@ export interface AV2LogDatabase {
  * Build a database from AV2 log files.
  * Called once when the log is opened.
  *
- * @param logFiles - Map of relative path → File for all files in the log
+ * @param logFiles - Map of relative path → File or ArrayBuffer (URL mode pre-fetches metadata as ArrayBuffers)
  * @param logId - log directory name
+ * @param manifest - Optional manifest.json for URL mode frame discovery (replaces file-key scanning)
  */
 export async function buildAV2LogDatabase(
-  logFiles: Map<string, File>,
+  logFiles: Map<string, File | ArrayBuffer>,
   logId: string,
+  manifest?: AV2Manifest,
 ): Promise<AV2LogDatabase> {
   console.time('[AV2] buildDatabase')
   // 1. Read calibration files (small — row objects OK)
@@ -171,60 +237,68 @@ export async function buildAV2LogDatabase(
     console.timeEnd('[AV2] annotations')
   }
 
-  // 4. Discover LiDAR timestamps from file list
-  const lidarTimestamps: bigint[] = []
-  for (const path of logFiles.keys()) {
-    const match = path.match(/^sensors\/lidar\/(\d+)\.feather$/)
-    if (match) {
-      lidarTimestamps.push(BigInt(match[1]))
-    }
-  }
-  lidarTimestamps.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  // 4-5. Frame discovery: from manifest.json (URL mode) or file-key scanning (local mode)
+  let lidarTimestamps: bigint[]
+  let cameraFilesByFrame: Map<number, { cameraId: number; filename: string }[]>
 
-  // 5. Discover camera images and match to nearest LiDAR timestamp
-  //    Camera timestamp is in the filename: sensors/cameras/{cam_name}/{timestamp_ns}.jpg
-  const cameraTimestampsByCam = new Map<string, bigint[]>()
-  const cameraFilenameByCamAndTs = new Map<string, string>() // "cam_name:ts" → relative path
-  for (const path of logFiles.keys()) {
-    const match = path.match(/^sensors\/cameras\/([^/]+)\/(\d+)\.jpg$/)
-    if (match) {
-      const camName = match[1]
-      const ts = BigInt(match[2])
-      let arr = cameraTimestampsByCam.get(camName)
-      if (!arr) {
-        arr = []
-        cameraTimestampsByCam.set(camName, arr)
+  if (manifest) {
+    // URL mode: use manifest.json for frame discovery (no file keys to scan)
+    const discovery = discoverAV2FramesFromManifest(manifest, AV2_SENSOR_NAME_TO_ID, AV2_RING_CAMERA_NAMES)
+    lidarTimestamps = discovery.lidarTimestamps
+    cameraFilesByFrame = discovery.cameraFilesByFrame
+  } else {
+    // Local mode: scan file keys (original logic)
+    lidarTimestamps = []
+    for (const path of logFiles.keys()) {
+      const match = path.match(/^sensors\/lidar\/(\d+)\.feather$/)
+      if (match) {
+        lidarTimestamps.push(BigInt(match[1]))
       }
-      arr.push(ts)
-      cameraFilenameByCamAndTs.set(`${camName}:${ts}`, path)
     }
-  }
+    lidarTimestamps.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
-  // Sort camera timestamps for binary search
-  for (const arr of cameraTimestampsByCam.values()) {
-    arr.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-  }
-
-  // Match each LiDAR frame to closest camera image per camera
-  const cameraFilesByFrame = new Map<number, { cameraId: number; filename: string }[]>()
-  for (let fi = 0; fi < lidarTimestamps.length; fi++) {
-    const lidarTs = lidarTimestamps[fi]
-    const images: { cameraId: number; filename: string }[] = []
-
-    for (const camName of AV2_RING_CAMERA_NAMES) {
-      const camId = AV2_SENSOR_NAME_TO_ID[camName]
-      if (camId === undefined) continue
-      const camTimestamps = cameraTimestampsByCam.get(camName)
-      if (!camTimestamps || camTimestamps.length === 0) continue
-
-      const closestTs = findClosestTimestamp(camTimestamps, lidarTs)
-      const filename = cameraFilenameByCamAndTs.get(`${camName}:${closestTs}`)
-      if (filename) {
-        images.push({ cameraId: camId, filename })
+    // Discover camera images and match to nearest LiDAR timestamp
+    const cameraTimestampsByCam = new Map<string, bigint[]>()
+    const cameraFilenameByCamAndTs = new Map<string, string>()
+    for (const path of logFiles.keys()) {
+      const match = path.match(/^sensors\/cameras\/([^/]+)\/(\d+)\.jpg$/)
+      if (match) {
+        const camName = match[1]
+        const ts = BigInt(match[2])
+        let arr = cameraTimestampsByCam.get(camName)
+        if (!arr) {
+          arr = []
+          cameraTimestampsByCam.set(camName, arr)
+        }
+        arr.push(ts)
+        cameraFilenameByCamAndTs.set(`${camName}:${ts}`, path)
       }
     }
 
-    cameraFilesByFrame.set(fi, images)
+    for (const arr of cameraTimestampsByCam.values()) {
+      arr.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    }
+
+    cameraFilesByFrame = new Map<number, { cameraId: number; filename: string }[]>()
+    for (let fi = 0; fi < lidarTimestamps.length; fi++) {
+      const lidarTs = lidarTimestamps[fi]
+      const images: { cameraId: number; filename: string }[] = []
+
+      for (const camName of AV2_RING_CAMERA_NAMES) {
+        const camId = AV2_SENSOR_NAME_TO_ID[camName]
+        if (camId === undefined) continue
+        const camTimestamps = cameraTimestampsByCam.get(camName)
+        if (!camTimestamps || camTimestamps.length === 0) continue
+
+        const closestTs = findClosestTimestamp(camTimestamps, lidarTs)
+        const filename = cameraFilenameByCamAndTs.get(`${camName}:${closestTs}`)
+        if (filename) {
+          images.push({ cameraId: camId, filename })
+        }
+      }
+
+      cameraFilesByFrame.set(fi, images)
+    }
   }
 
   console.timeEnd('[AV2] buildDatabase')
