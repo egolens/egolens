@@ -5,16 +5,16 @@
  * Always merges from per-sensor clouds in useFrame (no pre-merged buffer
  * is cached, saving ~772 MB for a 199-frame segment — see OPT-004).
  *
- * Colormap modes: intensity (default), range, elongation.
- * When sensors are filtered, per-sensor coloring overrides colormap.
+ * Colormap modes: intensity (default), range, elongation, segment, panoptic.
+ * Camera mode: GPU-accelerated — projects LiDAR→camera in vertex shader,
+ * samples camera textures in fragment shader. Zero CPU overhead per frame.
  */
 
-import { useRef, useEffect, useMemo, useCallback } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { getManifest } from '../../adapters/registry'
-import { buildCameraRgbForFrame } from '../../utils/cameraRgbSampler'
 import { buildCameraProjectors, type CameraProjector } from '../../utils/lidarProjection'
 import {
   COLORMAP_STOPS,
@@ -22,8 +22,14 @@ import {
   ATTR_RANGE,
   colormapColor,
   computePointColor,
-  srgbToLinear,
 } from '../../utils/colormaps'
+import {
+  createCameraColorMaterial,
+  decodeCameraTextures,
+  updateCameraUniforms,
+  disposeCameraTextures,
+  type ShaderCameraInfo,
+} from './CameraColorMaterial'
 
 // Re-export palette & labels for consumers that still import from this file
 export { LIDARSEG_PALETTE, LIDARSEG_LABELS, COLORMAP_STOPS, ATTR_OFFSET, ATTR_RANGE, colormapColor } from '../../utils/colormaps'
@@ -52,9 +58,10 @@ const VELOCITY_MAX = 15
 
 
 export default function PointCloud() {
-  const pointOpacity = useSceneStore((s) => s.pointOpacity)
+  const { gl } = useThree()
   const geometryRef = useRef<THREE.BufferGeometry>(null)
   const radarGeometryRef = useRef<THREE.BufferGeometry>(null)
+  const lidarPointsRef = useRef<THREE.Points>(null)
 
   // Pre-allocate position & color buffers once (LiDAR)
   const { posAttr, colorAttr } = useMemo(() => {
@@ -74,50 +81,92 @@ export default function PointCloud() {
     return { radarPosAttr: pos, radarColorAttr: col }
   }, [])
 
+  // Materials — created once, swapped imperatively in useFrame
+  const normalMat = useMemo(() => new THREE.PointsMaterial({
+    size: 0.08,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+  }), [])
+  const cameraMat = useMemo(() => createCameraColorMaterial(), [])
+
   // Dirty flag — set synchronously by Zustand subscribe (no React timing dependency)
   const dirtyRef = useRef(true)
 
-  // Camera RGB cache: per-sensor Uint8Array (3 bytes per point), keyed by frame timestamp
-  const cameraRgbRef = useRef<{ timestamp: bigint; data: Map<number, Uint8Array> } | null>(null)
-  const cameraRgbPendingRef = useRef<bigint | null>(null)
-  // Cached CameraProjector map (built once from calibration rows)
+  // ---------------------------------------------------------------------------
+  // Camera shader state (replaces old CPU camera RGB pipeline)
+  // ---------------------------------------------------------------------------
+
+  /** Cached decoded canvases for the current frame (for GPU texture upload) */
+  const bitmapCacheRef = useRef<{ timestamp: bigint; bitmaps: Map<number, OffscreenCanvas> } | null>(null)
+  /** Timestamp of in-flight bitmap decode (prevents duplicate work) */
+  const bitmapPendingRef = useRef<bigint | null>(null)
+  /** Camera calibration data formatted for shader uniforms (built once) */
+  const shaderCamerasRef = useRef<ShaderCameraInfo[] | null>(null)
+  /** CameraProjector map (for building ShaderCameraInfo) */
   const projectorsRef = useRef<Map<number, CameraProjector> | null>(null)
 
-  // Async camera RGB builder — projects LiDAR points mathematically to camera images
-  // using camera calibration (intrinsics + extrinsics), then samples RGB from decoded JPEGs
-  const triggerCameraRgbBuild = useCallback(async (
-    timestamp: bigint,
-    sensorClouds: Map<number, { positions: Float32Array; pointCount: number }>,
-    cameraImages: Map<number, ArrayBuffer>,
-  ) => {
-    // Already have this frame's RGB
-    if (cameraRgbRef.current?.timestamp === timestamp) return
-    // Already building
-    if (cameraRgbPendingRef.current === timestamp) return
-    if (cameraImages.size === 0) return
-
-    // Build projectors once from camera calibration data
+  /** Build ShaderCameraInfo[] from camera calibration (once per segment) */
+  function ensureShaderCameras(): ShaderCameraInfo[] | null {
+    if (shaderCamerasRef.current) return shaderCamerasRef.current
     if (!projectorsRef.current) {
       const calRows = useSceneStore.getState().cameraCalibrations
-      if (!calRows || calRows.length === 0) return
+      if (!calRows || calRows.length === 0) return null
       projectorsRef.current = buildCameraProjectors(calRows)
     }
     const projectors = projectorsRef.current
-    if (projectors.size === 0) return
+    if (projectors.size === 0) return null
 
-    cameraRgbPendingRef.current = timestamp
-    try {
-      const rgbMap = await buildCameraRgbForFrame(timestamp, sensorClouds, cameraImages, projectors)
-      // Only apply if still the current frame
+    const cameras: ShaderCameraInfo[] = []
+    for (const [, proj] of projectors) {
+      cameras.push({
+        cameraName: proj.cameraName,
+        invExtrinsic: proj.invExtrinsic,
+        f_u: proj.f_u,
+        f_v: proj.f_v,
+        c_u: proj.c_u,
+        c_v: proj.c_v,
+        width: proj.width,
+        height: proj.height,
+        isOpticalFrame: proj.isOpticalFrame,
+      })
+    }
+    shaderCamerasRef.current = cameras
+    return cameras
+  }
+
+  /** Trigger async bitmap decode for camera textures (non-blocking) */
+  function triggerBitmapDecode(timestamp: bigint, cameraImages: Map<number, ArrayBuffer>) {
+    if (bitmapCacheRef.current?.timestamp === timestamp) return  // already cached
+    if (bitmapPendingRef.current === timestamp) return            // already in flight
+    if (cameraImages.size === 0) return
+
+    bitmapPendingRef.current = timestamp
+    decodeCameraTextures(cameraImages).then(bitmaps => {
+      // Only apply if still the current frame (user may have scrubbed past)
       const curTs = useSceneStore.getState().currentFrame?.timestamp
       if (curTs === timestamp) {
-        cameraRgbRef.current = { timestamp, data: rgbMap }
-        dirtyRef.current = true // trigger re-render with RGB data
+        bitmapCacheRef.current = { timestamp, bitmaps }
+        dirtyRef.current = true
       }
-    } catch (e) {
-      console.warn('[PointCloud] Camera RGB build failed:', e)
-    }
-    cameraRgbPendingRef.current = null
+      bitmapPendingRef.current = null
+    }).catch(() => {
+      bitmapPendingRef.current = null
+    })
+  }
+
+  // Reset shader state on segment switch
+  useEffect(() => {
+    return useSceneStore.subscribe((state, prev) => {
+      if (state.currentSegment !== prev.currentSegment) {
+        shaderCamerasRef.current = null
+        projectorsRef.current = null
+        bitmapCacheRef.current = null
+        bitmapPendingRef.current = null
+        disposeCameraTextures()
+      }
+    })
   }, [])
 
   useEffect(() => {
@@ -146,6 +195,15 @@ export default function PointCloud() {
     })
   }, [])
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      normalMat.dispose()
+      cameraMat.dispose()
+      disposeCameraTextures()
+    }
+  }, [normalMat, cameraMat])
+
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
     if (!dirtyRef.current) return
@@ -153,11 +211,12 @@ export default function PointCloud() {
 
     // Always read latest state from store (no stale closure)
     const { currentFrame: curFrame, visibleSensors: visSensors,
-            colormapMode: cmap, worldMode: wmode } =
+            colormapMode: cmap, worldMode: wmode, pointOpacity } =
       useSceneStore.getState()
 
     const geom = geometryRef.current
     const radarGeom = radarGeometryRef.current
+    const pts = lidarPointsRef.current
     if (!curFrame) {
       if (geom) geom.setDrawRange(0, 0)
       if (radarGeom) radarGeom.setDrawRange(0, 0)
@@ -171,28 +230,60 @@ export default function PointCloud() {
       return
     }
 
-    // Camera colormap: trigger async JPEG decode if needed
     const isCameraMode = cmap === 'camera'
-    const camRgbData = cameraRgbRef.current?.timestamp === curFrame.timestamp
-      ? cameraRgbRef.current.data : null
-    if (isCameraMode && !camRgbData) {
-      // Kick off async build; will set dirtyRef when done
-      triggerCameraRgbBuild(curFrame.timestamp, sensorClouds, curFrame.cameraImages)
+
+    // ---------------------------------------------------------------------------
+    // Material swap + opacity
+    // ---------------------------------------------------------------------------
+    if (pts) {
+      if (isCameraMode) {
+        if (pts.material !== cameraMat) pts.material = cameraMat
+        cameraMat.uniforms.uOpacity.value = pointOpacity
+        // Size attenuation: compute scale from canvas height
+        const canvasH = gl.domElement.height || 1080
+        cameraMat.uniforms.uPointSize.value = 0.08 * canvasH * 0.5
+      } else {
+        if (pts.material !== normalMat) pts.material = normalMat
+        normalMat.opacity = pointOpacity
+      }
     }
 
+    // ---------------------------------------------------------------------------
+    // Camera shader: decode textures + update uniforms (async, non-blocking)
+    // Anti-flicker: positions update instantly; textures carry over from the
+    // previous frame until the new decode completes.  Adjacent frames have
+    // nearly identical camera images, so stale textures look natural.
+    // ---------------------------------------------------------------------------
+    if (isCameraMode) {
+      const cameras = ensureShaderCameras()
+      if (cameras && cameras.length > 0) {
+        // Always kick off decode for the current frame
+        triggerBitmapDecode(curFrame.timestamp, curFrame.cameraImages)
+
+        // Apply textures if ready (otherwise shader keeps previous frame's textures)
+        const cached = bitmapCacheRef.current
+        if (cached) {
+          updateCameraUniforms(cameraMat, cameras, cached.bitmaps)
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Position + color buffer update
+    // ---------------------------------------------------------------------------
     const posArr = posAttr.array as Float32Array
     const colArr = colorAttr.array as Float32Array
     const radarPosArr = radarPosAttr.array as Float32Array
     const radarColArr = radarColorAttr.array as Float32Array
+
+    // Non-camera colormap data
     const stops = COLORMAP_STOPS[cmap]
     const attrOff = ATTR_OFFSET[cmap]
     const manifest = getManifest()
-    // Intensity range differs per dataset (Waymo: 0–1, nuScenes: 0–255)
     const [attrMin, attrMax] = cmap === 'intensity' && manifest.intensityRange
       ? manifest.intensityRange
       : ATTR_RANGE[cmap]
     const attrSpan = attrMax - attrMin
-
     const stride = manifest.pointStride
     const semanticPalette = manifest.semanticPalette ?? null
 
@@ -206,8 +297,6 @@ export default function PointCloud() {
       if (isRadar) {
         // Radar: velocity-based colormap, stride=5 (x,y,z,speedComp,speedRaw)
         const RADAR_STRIDE = 5
-        // World mode → speedComp (offset 3): true object velocity
-        // Vehicle mode → speedRaw (offset 4): velocity relative to ego
         const speedOffset = wmode ? 3 : 4
         const count = Math.min(cloud.pointCount, MAX_RADAR_POINTS - radarTotal)
         for (let i = 0; i < count; i++) {
@@ -216,7 +305,6 @@ export default function PointCloud() {
           radarPosArr[dst] = positions[src]
           radarPosArr[dst + 1] = positions[src + 1]
           radarPosArr[dst + 2] = positions[src + 2]
-          // Color by speed: 0 m/s → blue (static), 15+ m/s → red (fast)
           const speed = positions[src + speedOffset]
           const t = Math.min(speed / VELOCITY_MAX, 1)
           const [r, g, b] = colormapColor(VELOCITY_STOPS, t)
@@ -226,57 +314,60 @@ export default function PointCloud() {
         }
         radarTotal += count
       } else {
-        // LiDAR: colormap-based
+        // LiDAR: positions always updated; colors only for non-camera modes
         const maxCount = Math.min(cloud.pointCount, MAX_POINTS - lidarTotal)
 
-        const segLabels = cloud.segLabels
-        const panopticLabels = cloud.panopticLabels
-        // Camera RGB: pre-sampled Uint8Array (3 bytes per point)
-        const camRgb = isCameraMode && camRgbData ? camRgbData.get(laserName) : null
-
-        let written = 0
-        for (let i = 0; i < maxCount; i++) {
-          const src = i * stride
-          const px = positions[src]
-          const py = positions[src + 1]
-          const pz = positions[src + 2]
-
-          const dst = (lidarTotal + written) * 3
-          posArr[dst] = px
-          posArr[dst + 1] = py
-          posArr[dst + 2] = pz
-
-          let r: number, g: number, b: number
-          if (isCameraMode && camRgb) {
-            // Camera coloring: use pre-sampled RGB from decoded camera images
-            // Convert sRGB → linear because Three.js vertex colors are in linear space
-            const ci = i * 3
-            r = srgbToLinear(camRgb[ci] / 255)
-            g = srgbToLinear(camRgb[ci + 1] / 255)
-            b = srgbToLinear(camRgb[ci + 2] / 255)
-          } else if ((cmap === 'segment' || cmap === 'panoptic') && !segLabels) {
-            // Non-TOP sensors have no seg labels → dim gray to indicate missing data
-            r = 0.15; g = 0.15; b = 0.15
-          } else {
-            ;[r, g, b] = computePointColor(
-              cmap, i, positions, stride,
-              stops, attrOff, attrMin, attrSpan,
-              segLabels, panopticLabels, semanticPalette,
-            )
+        if (isCameraMode) {
+          // Camera mode: only copy positions (shader handles coloring on GPU)
+          for (let i = 0; i < maxCount; i++) {
+            const src = i * stride
+            const dst = (lidarTotal + i) * 3
+            posArr[dst] = positions[src]
+            posArr[dst + 1] = positions[src + 1]
+            posArr[dst + 2] = positions[src + 2]
           }
+          lidarTotal += maxCount
+        } else {
+          // Non-camera: copy positions + compute CPU vertex colors
+          const segLabels = cloud.segLabels
+          const panopticLabels = cloud.panopticLabels
 
-          colArr[dst] = r
-          colArr[dst + 1] = g
-          colArr[dst + 2] = b
-          written++
+          let written = 0
+          for (let i = 0; i < maxCount; i++) {
+            const src = i * stride
+            const px = positions[src]
+            const py = positions[src + 1]
+            const pz = positions[src + 2]
+
+            const dst = (lidarTotal + written) * 3
+            posArr[dst] = px
+            posArr[dst + 1] = py
+            posArr[dst + 2] = pz
+
+            let r: number, g: number, b: number
+            if ((cmap === 'segment' || cmap === 'panoptic') && !segLabels) {
+              r = 0.15; g = 0.15; b = 0.15
+            } else {
+              ;[r, g, b] = computePointColor(
+                cmap, i, positions, stride,
+                stops, attrOff, attrMin, attrSpan,
+                segLabels, panopticLabels, semanticPalette,
+              )
+            }
+
+            colArr[dst] = r
+            colArr[dst + 1] = g
+            colArr[dst + 2] = b
+            written++
+          }
+          lidarTotal += written
         }
-        lidarTotal += written
       }
     }
 
     if (geom) {
       posAttr.needsUpdate = true
-      colorAttr.needsUpdate = true
+      if (!isCameraMode) colorAttr.needsUpdate = true
       geom.setDrawRange(0, lidarTotal)
       geom.computeBoundingSphere()
     }
@@ -291,19 +382,12 @@ export default function PointCloud() {
   return (
     <>
       {/* LiDAR points — small, dense */}
-      <points frustumCulled={false}>
+      <points ref={lidarPointsRef} frustumCulled={false}>
         <bufferGeometry ref={geometryRef}>
           <primitive object={posAttr} attach="attributes-position" />
           <primitive object={colorAttr} attach="attributes-color" />
         </bufferGeometry>
-        <pointsMaterial
-          size={0.08}
-          sizeAttenuation
-          vertexColors
-          transparent
-          opacity={pointOpacity}
-          depthWrite={false}
-        />
+        <primitive object={normalMat} attach="material" />
       </points>
       {/* Radar points — larger, sparse, sensor-colored */}
       <points frustumCulled={false}>
@@ -316,7 +400,7 @@ export default function PointCloud() {
           sizeAttenuation
           vertexColors
           transparent
-          opacity={pointOpacity}
+          opacity={normalMat.opacity}
           depthWrite={false}
         />
       </points>
