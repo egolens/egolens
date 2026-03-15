@@ -90,5 +90,12 @@ export default defineConfig({
         '**/sweeps/**',
       ],
     },
+    headers: {
+      // Allow embedding from any HTTPS origin (for iframe embed mode)
+      'X-Frame-Options': 'ALLOWALL',
+    },
   },
+  // CSP headers for production (static hosting should also set these):
+  // Content-Security-Policy: frame-ancestors 'self' https:;
+  // This allows the page to be embedded in any HTTPS iframe while blocking HTTP.
 })

@@ -469,7 +469,7 @@ function BgColorSync() {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function LidarViewer() {
+export default function LidarViewer({ hideControls = false }: { hideControls?: boolean } = {}) {
   const visibleSensors = useSceneStore((s) => s.visibleSensors)
   const toggleSensor = useSceneStore((s) => s.actions.toggleSensor)
   const sensorClouds = useSceneStore((s) => s.currentFrame?.sensorClouds)
@@ -609,14 +609,16 @@ export default function LidarViewer() {
       </Canvas>
 
       {/* BEV minimap overlay (circular canvas + radar decorations) */}
-      <BevOverlay
-        canvasRef={bevCanvasRef}
-        zoomIndex={bevZoom}
-        onToggleZoom={() => setBevZoom((z) => (z + 1) % BEV_ZOOM_LEVELS.length)}
-      />
+      {!hideControls && (
+        <BevOverlay
+          canvasRef={bevCanvasRef}
+          zoomIndex={bevZoom}
+          onToggleZoom={() => setBevZoom((z) => (z + 1) % BEV_ZOOM_LEVELS.length)}
+        />
+      )}
 
-      {/* Camera controls — hidden during POV */}
-      {activeCam === null && (
+      {/* Camera controls — hidden during POV or embed hideControls */}
+      {!hideControls && activeCam === null && (
         <div style={{
           position: 'absolute',
           bottom: 12,
@@ -706,8 +708,8 @@ export default function LidarViewer() {
         </div>
       )}
 
-      {/* Layer control overlay */}
-      <div style={{
+      {/* Layer control overlay — hidden in embed hideControls mode */}
+      {!hideControls && <div style={{
         position: 'absolute',
         top: 12,
         left: 12,
@@ -1328,7 +1330,7 @@ export default function LidarViewer() {
           </div>
 
         </>}
-      </div>
+      </div>}
 
       {/* POV mode indicator + exit button */}
       {activeCam !== null && (

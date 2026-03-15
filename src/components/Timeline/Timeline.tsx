@@ -47,7 +47,7 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
 // Component
 // ---------------------------------------------------------------------------
 
-export default function Timeline() {
+export default function Timeline({ minimal = false }: { minimal?: boolean } = {}) {
   const status = useSceneStore((s) => s.status)
   const currentFrameIndex = useSceneStore((s) => s.currentFrameIndex)
   const totalFrames = useSceneStore((s) => s.totalFrames)
@@ -207,8 +207,8 @@ export default function Timeline() {
           />
         </div>
 
-        {/* Annotation lanes — each active feature gets its own thin lane */}
-        {activeLanes.length > 0 && (
+        {/* Annotation lanes — each active feature gets its own thin lane (hidden in minimal mode) */}
+        {!minimal && activeLanes.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', paddingTop: '2px' }}>
             {activeLanes.map(({ key, color, frames }) => (
               <div key={key} style={{ position: 'relative', height: '3px' }}>

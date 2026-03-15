@@ -8,6 +8,8 @@ import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
+import { getEmbedParams, type EmbedParams } from './utils/embedParams'
+import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
 
 
@@ -45,6 +47,7 @@ function useSegmentDiscovery() {
 
 // ---------------------------------------------------------------------------
 // URL parameter auto-load: ?dataset=argoverse2&data=https://...
+// Also handles embed mode: ?embed=true&dataset=...&data=...
 // ---------------------------------------------------------------------------
 
 const SUPPORTED_URL_DATASETS = ['argoverse2'] as const
@@ -81,12 +84,54 @@ function useUrlAutoLoad() {
 }
 
 // ---------------------------------------------------------------------------
+// Embed mode: apply initial params once data is ready
+// ---------------------------------------------------------------------------
+
+function useEmbedInitialState(embedParams: EmbedParams) {
+  const status = useSceneStore((s) => s.status)
+  const appliedRef = useRef(false)
+
+  useEffect(() => {
+    if (!embedParams.embed || status !== 'ready' || appliedRef.current) return
+    appliedRef.current = true
+
+    const actions = useSceneStore.getState().actions
+
+    // Apply initial frame
+    if (embedParams.frame !== null) {
+      const { totalFrames } = useSceneStore.getState()
+      const f = Math.min(embedParams.frame, totalFrames - 1)
+      actions.seekFrame(f)
+    }
+
+    // Apply colormap
+    if (embedParams.colormap) {
+      actions.setColormapMode(embedParams.colormap)
+    }
+
+    // Apply autoplay
+    if (embedParams.autoplay) {
+      actions.togglePlayback()
+    }
+  }, [embedParams, status])
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
 function App() {
+  const [embedParams] = useState(() => getEmbedParams())
   useSegmentDiscovery()
   useUrlAutoLoad()
+  useEmbedInitialState(embedParams)
+
+  // Initialize embed postMessage API when in embed mode
+  useEffect(() => {
+    if (!embedParams.embed) return
+    const cleanup = initEmbedApi(embedParams)
+    return cleanup
+  }, [embedParams])
   const status = useSceneStore((s) => s.status)
   const availableSegments = useSceneStore((s) => s.availableSegments)
   const togglePlayback = useSceneStore((s) => s.actions.togglePlayback)
@@ -159,6 +204,13 @@ function App() {
 
   // Show drop zone when no data loaded (idle + no segments)
   const showDropZone = status === 'idle' && availableSegments.length === 0
+  const isEmbed = embedParams.embed
+  const showTimeline = !showDropZone && (!isEmbed || embedParams.controls !== 'none')
+
+  // Embed mode: custom background color
+  const bgColor = isEmbed && embedParams.bgcolor
+    ? `#${embedParams.bgcolor}`
+    : colors.bgBase
 
   return (
     <div style={{
@@ -166,78 +218,80 @@ function App() {
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: colors.bgBase,
+      backgroundColor: bgColor,
       color: colors.textPrimary,
       fontFamily: fonts.sans,
       overflow: 'hidden',
     }}>
       {/* Memory debug overlay (enable: localStorage.setItem('waymo-memory-log','true') or press M) */}
-      <MemoryOverlay />
+      {!isEmbed && <MemoryOverlay />}
 
-      {/* Header */}
-      <Header />
+      {/* Header — hidden in embed mode */}
+      {!isEmbed && <Header />}
 
       {/* Main Content */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        {showDropZone ? (
+        {showDropZone && !isEmbed ? (
           <DropZone onFilesLoaded={loadFromFiles} />
         ) : (
-          <SensorView />
+          <SensorView embedControls={isEmbed ? embedParams.controls : 'full'} />
         )}
       </main>
 
-      {/* Timeline */}
-      {!showDropZone && (
+      {/* Timeline — hidden in embed controls=none */}
+      {showTimeline && (
         <footer style={{
-          padding: '10px 20px',
+          padding: isEmbed && embedParams.controls === 'minimal' ? '6px 12px' : '10px 20px',
           background: colors.bgSurface,
           borderTop: `1px solid ${colors.border}`,
           flexShrink: 0,
         }}>
-          <Timeline />
+          <Timeline minimal={isEmbed && embedParams.controls === 'minimal'} />
         </footer>
       )}
 
-      {/* Credit bar */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 8,
-        padding: '3px 0',
-        fontSize: '9px',
-        fontFamily: fonts.sans,
-        color: colors.textDim,
-        background: colors.bgDeep,
-        borderTop: `1px solid ${colors.borderSubtle}`,
-        flexShrink: 0,
-      }}>
-        <span>
-          Built by{' '}
-          <a href="https://happyhj.github.io/" target="_blank" rel="noopener noreferrer"
-            style={{ color: colors.textSecondary, textDecoration: 'none', transition: 'color 0.15s' }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = colors.textPrimary }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = colors.textSecondary }}
-          >Heejae Kim</a>
-        </span>
-        <span style={{ opacity: 0.4 }}>·</span>
-        <a href="https://www.linkedin.com/in/heejaekm/" target="_blank" rel="noopener noreferrer"
-          style={{ color: colors.textDim, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3, transition: 'color 0.15s' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = colors.textSecondary }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim }}
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-          LinkedIn
-        </a>
-        <span style={{ opacity: 0.4 }}>·</span>
-        <a href="https://github.com/happyhj/waymo-perception-studio" target="_blank" rel="noopener noreferrer"
-          style={{ color: colors.accent, textDecoration: 'none', transition: 'color 0.15s, opacity 0.15s', opacity: 0.7 }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7' }}
-        >
-          ⭐ Star on GitHub
-        </a>
-      </div>
+      {/* Credit bar — hidden in embed mode */}
+      {!isEmbed && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 8,
+          padding: '3px 0',
+          fontSize: '9px',
+          fontFamily: fonts.sans,
+          color: colors.textDim,
+          background: colors.bgDeep,
+          borderTop: `1px solid ${colors.borderSubtle}`,
+          flexShrink: 0,
+        }}>
+          <span>
+            Built by{' '}
+            <a href="https://happyhj.github.io/" target="_blank" rel="noopener noreferrer"
+              style={{ color: colors.textSecondary, textDecoration: 'none', transition: 'color 0.15s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = colors.textPrimary }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = colors.textSecondary }}
+            >Heejae Kim</a>
+          </span>
+          <span style={{ opacity: 0.4 }}>·</span>
+          <a href="https://www.linkedin.com/in/heejaekm/" target="_blank" rel="noopener noreferrer"
+            style={{ color: colors.textDim, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3, transition: 'color 0.15s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = colors.textSecondary }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            LinkedIn
+          </a>
+          <span style={{ opacity: 0.4 }}>·</span>
+          <a href="https://github.com/happyhj/waymo-perception-studio" target="_blank" rel="noopener noreferrer"
+            style={{ color: colors.accent, textDecoration: 'none', transition: 'color 0.15s, opacity 0.15s', opacity: 0.7 }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7' }}
+          >
+            ⭐ Star on GitHub
+          </a>
+        </div>
+      )}
     </div>
   )
 }
@@ -1263,8 +1317,9 @@ function ShortcutHints() {
   )
 }
 
-function SensorView() {
+function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'minimal' | 'none' }) {
   const status = useSceneStore((s) => s.status)
+  const hideOverlays = embedControls === 'none'
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1273,8 +1328,8 @@ function SensorView() {
         <div style={{ position: 'absolute', inset: 0 }}>
           {status === 'ready' ? (
             <>
-              <LidarViewer />
-              <ShortcutHints />
+              <LidarViewer hideControls={hideOverlays} />
+              {!hideOverlays && <ShortcutHints />}
             </>
           ) : status === 'loading' ? (
             <LoadingSkeleton />
@@ -1295,9 +1350,9 @@ function SensorView() {
         </div>
       </div>
 
-      {/* Camera Image Strip — bottom */}
-      {status === 'ready' && <CameraPanel />}
-      {status === 'loading' && <CameraStripSkeleton />}
+      {/* Camera Image Strip — bottom (hidden when controls=none) */}
+      {status === 'ready' && !hideOverlays && <CameraPanel />}
+      {status === 'loading' && !hideOverlays && <CameraStripSkeleton />}
     </div>
   )
 }
