@@ -261,9 +261,9 @@ erksch doesn't do this conversion in the browser at all. Python server calls `fr
 ### DriveStudio / OmniRe (ICLR 2025 Spotlight)
 - **GitHub**: https://github.com/ziyc/drivestudio
 - **Paper**: OmniRe: Omni Urban Scene Reconstruction (ICLR 2025 Spotlight)
-- **What it does**: 통합 driving scene reconstruction 프레임워크. 정적 배경 + 동적 rigid 객체(차량) + non-rigid 요소(보행자) 통합 재구성. Waymo, nuScenes, PandaSet 등 주요 데이터셋 지원.
-- **Street Gaussians 대비 장점**: non-rigid 보행자 처리, 멀티 데이터셋 통합 지원, 활발한 커뮤니티
-- **Why we use it**: Waymo에 top-down camera 없음 → 3DGS로 BEV 생성 필요. OmniRe가 2025 최신 SOTA이며 Waymo 데이터셋 직접 지원.
+- **What it does**: Unified driving scene reconstruction framework. Integrates static background + dynamic rigid objects (vehicles) + non-rigid elements (pedestrians) into a single reconstruction. Supports major datasets including Waymo, nuScenes, PandaSet.
+- **Advantages vs Street Gaussians**: Better handling of non-rigid pedestrians, multi-dataset unified support, active community development
+- **Why we use it**: Waymo lacks top-down camera data → need to generate BEV via 3DGS. OmniRe is the 2025 state-of-the-art and has direct Waymo dataset support.
 
 ### gsplat.js
 - **GitHub**: https://github.com/dylanebert/gsplat.js
@@ -355,9 +355,9 @@ Dark theme (#1a1a2e). Two tabs: [Sensor View] [3DGS Lab 🧪]
 ## 7. 3DGS Strategy
 
 ### Approach: DriveStudio / OmniRe (ICLR 2025 Spotlight)
-- 통합 프레임워크: 정적 배경 + 동적 객체 + non-rigid 요소(보행자) 통합 재구성
-- Waymo, nuScenes, PandaSet 등 주요 데이터셋 지원
-- Street Gaussians (ECCV 2024) 대비: non-rigid 요소 처리 우수, 학술 인용에 유리
+- Unified framework: Static background + dynamic objects + non-rigid elements (pedestrians) integrated reconstruction
+- Supports major datasets including Waymo, nuScenes, PandaSet
+- Advantages vs Street Gaussians (ECCV 2024): Better non-rigid element handling, superior academic citations
 - Export .ply → bundle with app → orthographic BEV camera
 
 ### Distribution
@@ -365,12 +365,12 @@ Dark theme (#1a1a2e). Two tabs: [Sensor View] [3DGS Lab 🧪]
 - Same segment as README's recommended download → direct raw-vs-reconstructed comparison
 - 3DGS Lab works with zero data download
 
-### Perception Analysis 관점
-- 3D bounding box prediction: 1프레임 입력 → single-frame 추론
-- 3DGS reconstruction: ~200프레임 전체 학습 → dense multi-frame context
-- 3DGS가 single-frame perception보다 ground truth에 가까운 scene representation 제공
-- Perception engineer가 prediction과 3DGS를 교차 비교 → false positive/negative 원인 분석 가능
-- LiDAR (sparse + accurate) + Camera (dense + 2D) + 3DGS (dense + 3D) = 상호 보완적 3가지 뷰
+### Perception Analysis Perspective
+- 3D bounding box prediction: Single-frame input → single-frame inference
+- 3DGS reconstruction: Training on ~200 frames entire sequence → dense multi-frame context
+- 3DGS provides scene representation closer to ground truth than single-frame perception
+- Perception engineer can cross-compare prediction vs 3DGS reconstruction → analyze false positive/negative causes
+- LiDAR (sparse + accurate) + Camera (dense + 2D) + 3DGS (dense + 3D) = mutually complementary three views
 
 ## 8. Performance Notes
 
@@ -384,17 +384,17 @@ Dark theme (#1a1a2e). Two tabs: [Sensor View] [3DGS Lab 🧪]
 - Calibrations + boxes + poses: full load at startup (<2MB total)
 - Perf-critical rendering: useFrame + imperative refs
 
-### R3F vs Vanilla Three.js — 성능 동등성
+### R3F vs Vanilla Three.js — Performance Equivalence
 
-R3F(@react-three/fiber)는 Three.js 위의 얇은 React 바인딩이며, 렌더 루프 자체는 동일한 Three.js `WebGLRenderer`가 실행한다. 성능 차이가 없는 이유:
+R3F (@react-three/fiber) is a thin React binding over Three.js, and the render loop itself runs the same Three.js `WebGLRenderer`. There is no performance difference because:
 
-1. **렌더 루프**: R3F의 `useFrame` 훅은 Three.js의 `requestAnimationFrame` 루프에 직접 콜백을 등록. 포인트 클라우드 업데이트 시 `bufferGeometry.attributes.position.needsUpdate = true`를 imperative하게 호출 — vanilla Three.js와 완전히 동일한 코드 경로.
+1. **Render loop**: R3F's `useFrame` hook registers a callback directly to Three.js's `requestAnimationFrame` loop. When updating point cloud, we imperatively call `bufferGeometry.attributes.position.needsUpdate = true` — exactly the same code path as vanilla Three.js.
 
-2. **Draw call 최소화**: 168K 포인트를 개별 `<mesh>`로 만들면 React reconciliation 오버헤드 발생. 우리는 `BufferGeometry` + `<points>`로 **한 번의 draw call**에 전체 포인트 클라우드 렌더. 바운딩 박스도 `InstancedMesh`로 94개를 **1 draw call**.
+2. **Draw call minimization**: Creating 168K points as individual `<mesh>` elements causes React reconciliation overhead. Instead, we use `BufferGeometry` + `<points>` for **one draw call** of the entire point cloud. Bounding boxes use `InstancedMesh` for 94 objects in **1 draw call**.
 
-3. **React 오버헤드 구간**: 컴포넌트 마운트/언마운트 시 Three.js 오브젝트 생성/삭제에만 발생. 이건 초기화 때 한 번이고 60fps 렌더 루프에는 영향 없음.
+3. **React overhead only during mount/unmount**: Three.js object creation/deletion happens only during component initialization, not in the 60fps render loop, so it doesn't impact performance.
 
-4. **R3F 선택 이유**: Waymo JD가 React/TypeScript를 명시. R3F는 React 생태계 숙련도를 보여주면서도 Three.js 성능을 그대로 유지. 선언적 씬 그래프 구성 (카메라 패널, 컨트롤 등)에서 개발 생산성도 높음.
+4. **Why we chose R3F**: Waymo JD explicitly requires React/TypeScript. R3F demonstrates React ecosystem proficiency while maintaining Three.js performance. Declarative scene graph composition (camera panels, controls) also improves developer productivity.
 
 ## 9. Interview Narrative
 
@@ -495,12 +495,12 @@ Chronological record of technical decisions and the reasoning behind them.
 
 ### D15. Real Data Observations — Range Image Conversion
 
-실제 Waymo v2.0 데이터로 range image → xyz 변환을 구현하면서 발견한 사실들:
+Observations from implementing range image → xyz conversion with actual Waymo v2.0 data:
 
 **Range image format**:
-- Values는 `number[]` (not Float32Array). hyparquet가 Parquet의 float list를 JS Array로 디코딩함.
-- 4 channels [range, intensity, elongation, nlz] 이 flat array로 인터리브됨: `[r0, i0, e0, n0, r1, i1, e1, n1, ...]`
-- Shape은 `[height, width, channels]` = `[64, 2650, 4]` for TOP → 169,600 pixels × 4 values = 678,400 elements.
+- Values are `number[]` (not Float32Array). hyparquet decodes Parquet's float list as JS Array.
+- 4 channels [range, intensity, elongation, nlz] are interleaved in flat array: `[r0, i0, e0, n0, r1, i1, e1, n1, ...]`
+- Shape is `[height, width, channels]` = `[64, 2650, 4]` for TOP → 169,600 pixels × 4 values = 678,400 elements.
 
 **Valid pixel ratio**:
 - TOP lidar: 149,796 valid (range > 0) out of 169,600 total → **88.3%** valid.
@@ -510,7 +510,7 @@ Chronological record of technical decisions and the reasoning behind them.
 **Spatial distribution (vehicle frame)**:
 - Range: 2.3m ~ 75m (this segment, SF downtown).
 - X/Y: max distance ~75m from vehicle center, reasonable for urban lidar.
-- **Z range: -20m ~ +30m** — much wider than the naïve expectation of "ground at -2m, buildings at +10m". SF downtown has steep hills, underground parking ramp exits visible to lidar, and tall buildings/overpasses. Test thresholds adjusted to `[-25, +40]`.
+- **Z range: -20m ~ +30m** — much wider than the naive expectation of "ground at -2m, buildings at +10m". SF downtown has steep hills, underground parking ramp exits visible to lidar, and tall buildings/overpasses. Test thresholds adjusted to `[-25, +40]`.
 
 **Beam inclination**:
 - TOP (`laser_name=1`): `beam_inclination.values` is a 64-element `number[]` — non-uniform spacing, denser near horizon.
@@ -532,20 +532,20 @@ Chronological record of technical decisions and the reasoning behind them.
 - **Why this is good for us**: BROTLI was originally designed by Google for web content delivery (`Content-Encoding: br`). Browser-native support exists for HTTP streams. The JS WASM decompressor in hyparquet-compressors is well-optimized. So Waymo's infrastructure choice accidentally aligns perfectly with browser-based access.
 - **Impact**: Must pass `compressors` option to all `parquetReadObjects()` calls. Added to `parquet.ts` as default. ~3KB additional dependency.
 
-### D18. Data Worker — Parquet I/O + 변환을 메인 스레드에서 완전 분리
+### D18. Data Worker — Completely separate Parquet I/O + conversion from main thread
 
-- **문제**: 프레임 전환에 ~4.5초 소요. 원인은 BROTLI 해제 + Parquet 컬럼 디코딩이 메인 스레드에서 동기적으로 실행되어 UI 프레임 드랍 유발.
-- **단순 프리페칭이 안 되는 이유**: 프리페칭은 동일 작업을 미리 실행할 뿐, BROTLI 해제 자체가 메인 스레드 CPU를 점유. 3프레임 프리페칭 시 블로킹이 3배로 증가.
-- **해결**: `dataWorker.ts` — 전체 파이프라인(fetch → BROTLI 해제 → Parquet 디코딩 → range image → xyz 변환)을 Web Worker에서 실행. 메인 스레드는 최종 `Float32Array`만 `transfer`로 수신 (zero-copy).
-- **아키텍처 — 모듈 책임 분리 유지**:
+- **Problem**: Frame switching took ~4.5 seconds. Root cause: BROTLI decompression + Parquet column decoding executed synchronously on main thread, causing UI frame drops.
+- **Why simple prefetching doesn't work**: Prefetching just executes the same work earlier. BROTLI decompression itself monopolizes main thread CPU. 3-frame prefetch just increases blocking by 3×.
+- **Solution**: `dataWorker.ts` — execute entire pipeline (fetch → BROTLI decompression → Parquet decoding → range image → xyz conversion) in Web Worker. Main thread receives only final `Float32Array` via `transfer` (zero-copy).
+- **Architecture — maintaining module separation of concerns**:
   ```
-  dataWorker.ts (얇은 오케스트레이션, ~130줄)
-    ├── import { readFrameData } from parquet.ts      ← Parquet I/O 책임 (변경 없음)
-    ├── import { convertAllSensors } from rangeImage.ts ← 변환 책임 (변경 없음)
+  dataWorker.ts (thin orchestration, ~130 lines)
+    ├── import { readFrameData } from parquet.ts      ← Parquet I/O responsibility (unchanged)
+    ├── import { convertAllSensors } from rangeImage.ts ← Conversion responsibility (unchanged)
     └── postMessage(Float32Array, [buffer])             ← zero-copy transfer
   ```
-  Worker는 기존 모듈을 import해서 호출만 함. 각 모듈의 단일 책임 원칙 유지. Vite의 `new Worker(new URL(...))` 문법이 import를 자동 번들링.
-- **통신 패턴**: Promise-based request/response. `requestId`로 동시 다발 프리페치 요청 구분.
+  Worker imports existing modules and calls them. Each module maintains single responsibility. Vite's `new Worker(new URL(...))` syntax auto-bundles imports.
+- **Communication pattern**: Promise-based request/response. `requestId` distinguishes concurrent prefetch requests.
   ```
   Main Thread                          Data Worker
   ──────────                          ───────────
@@ -553,55 +553,55 @@ Chronological record of technical decisions and the reasoning behind them.
                                ←──   { type: 'ready' }
   loadFrame(requestId, ts)     ──→   readFrameData → convertAllSensors
                                ←──   { type: 'frameReady', positions: Float32Array } (transfer)
-  loadFrame(requestId+1, ts)   ──→   (프리페치 — 동시 처리)
+  loadFrame(requestId+1, ts)   ──→   (prefetch — concurrent processing)
   loadFrame(requestId+2, ts)   ──→
   ```
-- **프리페칭**: 현재 프레임 로드 완료 후 다음 3프레임을 Worker에 요청. Worker가 별도 스레드에서 처리하므로 메인 스레드 블로킹 제로. 순차 탐색 시 캐시 히트로 즉시 전환.
-- **YouTube-style buffer bar**: `cachedFrames: number[]` 상태로 캐시된 프레임 인덱스를 React에 노출. Timeline에서 연속 구간을 계산하여 반투명 바로 표시. 유저가 프리페치 진행 상황을 시각적으로 확인 가능.
-- **성능 영향**:
-  - 이전: 프레임 전환 시 메인 스레드 ~4.5초 블로킹 → UI 멈춤
-  - 이후: 메인 스레드 블로킹 0ms (postMessage 수신 + 캐시 저장만). Worker에서 ~4.5초 처리되지만 UI는 60fps 유지.
-  - 프리페치 적중 시: 프레임 전환 0ms (캐시에서 즉시 로드)
-- **면접 포인트**: "162MB LiDAR Parquet의 BROTLI 해제가 메인 스레드를 4.5초 블로킹하는 문제를 발견하고, Data Worker + transfer 패턴으로 메인 스레드 블로킹을 제로로 만들었습니다. 기존 parquet.ts와 rangeImage.ts 모듈은 변경 없이 Worker에서 import하여 재사용 — 단일 책임 원칙을 유지하면서 실행 컨텍스트만 이동했습니다."
+- **Prefetching**: After current frame loads, request next 3 frames from Worker. Worker processes on separate thread, so main thread has zero blocking. Sequential traversal hits cache for instant frame switch.
+- **YouTube-style buffer bar**: `cachedFrames: number[]` state exposes cached frame indices to React. Timeline calculates contiguous ranges and displays as semi-transparent bar. User sees prefetch progress visually.
+- **Performance impact**:
+  - Before: Frame switch caused main thread blocking ~4.5s → UI freezes
+  - After: Main thread blocking 0ms (only postMessage receive + cache store). Worker processes ~4.5s on separate thread, UI stays 60fps.
+  - Prefetch hit: Frame switch 0ms (load from cache)
+- **Interview point**: "I discovered that 162MB LiDAR Parquet BROTLI decompression blocked the main thread for 4.5 seconds, discovered the issue through profiling, and fixed it using a Data Worker + structured clone pattern to move CPU-intensive work off main thread. Existing parquet.ts and rangeImage.ts modules remained unchanged — I only moved execution context, demonstrating separation of concerns while solving the performance problem."
 
-### D17. CPU 변환 성능 regression guard — `lastConvertMs < 50ms`
-- **목적**: `convertAllSensors()` (range image → xyz) 알고리즘 변경 시 성능 퇴행을 로컬 테스트에서 자동 감지.
-- **측정 기준**: M2 MacBook Air에서 5 센서 ~168K 포인트 기준 ~5ms. Threshold은 10배 마진인 50ms.
-- **적용 위치**: `useSceneStore.test.ts`의 frame 로딩 테스트 (`nextFrame`, `seekFrame`, `first frame timing`)에 `expect(lastConvertMs).toBeLessThan(50)` assertion.
-- **감지 불가능한 것**: Parquet I/O 성능 (8초 중 5ms만 변환이므로 I/O 노이즈에 묻힘). GPU 변환 (Dawn 소프트웨어 렌더러는 비현실적, 브라우저 프로파일링 필요).
-- **보완**: `rangeImageBenchmark.test.ts`에서 순수 변환만 5회 반복 평균 측정 가능 (기본 vitest run에서 제외, 수동 실행).
+### D17. CPU conversion performance regression guard — `lastConvertMs < 50ms`
+- **Purpose**: Auto-detect performance regression in `convertAllSensors()` (range image → xyz) algorithm when running local tests.
+- **Baseline**: M2 MacBook Air, 5 sensors ~168K points → ~5ms. Threshold set to 50ms for 10× safety margin.
+- **Applied to**: Frame loading tests in `useSceneStore.test.ts` (`nextFrame`, `seekFrame`, `first frame timing`) — `expect(lastConvertMs).toBeLessThan(50)` assertion.
+- **Cannot detect**: Parquet I/O performance (I/O dominates 8 seconds, conversion is 5ms noise). GPU conversion (Dawn software renderer is unrealistic, need browser profiling).
+- **Supplement**: `rangeImageBenchmark.test.ts` measures pure conversion across 5 iterations for averaging (excluded from default vitest run, manual execution).
 
 ### D16. State management → Zustand
 - **Alternatives considered**: (A) Zustand, (B) `useSyncExternalStore` + TS class, (C) Context + `useReducer`
 - **Reasoning**:
-  - **(C) Context 탈락**: 상태 하나 바뀌면 트리 전체 리렌더. 168K 포인트 매 프레임 업데이트하는 이 프로젝트에서 치명적.
-  - **(B) `useSyncExternalStore` 검토**: 의존성 제로, 면접 임팩트. 그러나 subscribe/emit/getSnapshot 보일러플레이트가 커짐. Zustand 내부도 `useSyncExternalStore` 기반이므로 성능 동일하면서 코드가 훨씬 심플.
-  - **(A) Zustand 채택**: selector 기반 슬라이스 구독으로 불필요한 리렌더 없음. React 밖에서 `getState()` 접근 가능 (Worker 결과 반영 등). ~1KB. 보일러플레이트 최소. 나중에 `devtools`/`persist` middleware 필요하면 한 줄 추가로 끝.
-- **구현**: `useSceneStore` — Zustand store에 state + actions 통합. 내부 데이터(Parquet files, frame indices, cache)는 모듈 스코프에 분리하여 React 리렌더에서 제외.
+  - **(C) Context rejected**: State change causes entire tree re-render. Fatal for this project where we update 168K points every frame.
+  - **(B) `useSyncExternalStore` reviewed**: Zero dependencies, good interview impact. But subscribe/emit/getSnapshot boilerplate grows large. Zustand internals use `useSyncExternalStore` anyway, so performance identical while code is much simpler.
+  - **(A) Zustand adopted**: Selector-based slice subscription prevents unnecessary re-renders. Can access `getState()` outside React (for Worker results, etc). ~1KB. Minimal boilerplate. Middleware (`devtools`, `persist`) easily added later if needed.
+- **Implementation**: `useSceneStore` — Zustand store integrates state + actions. Internal data (Parquet files, frame indices, cache) separated to module scope to exclude from React re-renders.
 
-### D19. Azimuth correction — Waymo SDK의 `az_correction` 재현
+### D19. Azimuth correction — Reproducing Waymo SDK's `az_correction`
 
-- **문제**: FRONT/REAR/SIDE 센서의 포인트 클라우드가 차량 기준으로 잘못된 방향에 뿌려짐. FRONT와 REAR가 시각적으로 뒤바뀌어 보임.
-- **원인 분석**: Waymo SDK의 `compute_range_image_polar()` 코드를 확인한 결과, column→azimuth 매핑에 **센서 yaw 보정값**이 필요함을 발견:
+- **Problem**: FRONT/REAR/SIDE sensor point clouds spray at wrong orientation relative to vehicle. FRONT and REAR visually appear swapped.
+- **Root cause analysis**: Inspecting Waymo SDK's `compute_range_image_polar()` code, discovered **sensor yaw correction** required in column→azimuth mapping:
   ```python
-  az_correction = atan2(extrinsic[1][0], extrinsic[0][0])  # 센서의 yaw 각도
+  az_correction = atan2(extrinsic[1][0], extrinsic[0][0])  # Sensor yaw angle
   azimuth = (ratio * 2 - 1) * π - az_correction
   ```
-  이 보정 없이는 모든 센서가 동일한 column→azimuth 매핑을 사용하게 되어, yaw가 큰 센서(REAR: -179°, SIDE: ±90°)에서 방향이 크게 틀어짐. FRONT(yaw≈1°)는 거의 영향 없음.
-- **해결**: `computeAzimuths(width, azCorrection)` 함수에 `azCorrection` 파라미터 추가. `convertRangeImageToPointCloud()`에서 extrinsic으로부터 `atan2(e[4], e[0])` 계산하여 전달.
-- **추가 수정 — TOP 센서 inclination 반전**: TOP의 non-uniform `beam_inclination.values`가 ascending 순서(min→max)로 저장되어 있으나, range image의 row 0 = max(상단). 배열을 역순으로 읽어 uniform 센서와 동일한 descending 컨벤션으로 맞춤.
-- **검증 방법**: 각 센서의 extrinsic 4×4 행렬에서 yaw/pitch/roll, translation, sensor-forward 방향을 추출하여 물리적 장착 위치와 대조:
-  - FRONT: yaw=1°, tx=4.07m (전방 장착, 정면 방향) ✓
-  - REAR: yaw=-179°, tx=-1.16m (후방 장착, 후방 방향) ✓
-  - SIDE_LEFT: yaw=90°, tx=3.24m, ty=1.03m (좌측 전방, 왼쪽 방향) ✓
-  - SIDE_RIGHT: yaw=-89°, tx=3.24m, ty=-1.03m (우측 전방, 오른쪽 방향) ✓
-  - TOP: yaw=148°, tz=2.18m (지붕 위, 360° 회전) ✓
-- **lidar_pose**: Waymo v2의 `lidar_pose` 컴포넌트 분석 결과, TOP 센서만 199행(프레임당 1행), shape `[64, 2650, 6]`의 per-pixel vehicle pose 제공. ego-motion 보정용으로 ~1m 위치 왜곡을 줄이지만, 방향성 오류의 원인은 아님. MVP에서는 미적용.
+  Without this correction, all sensors use identical column→azimuth mapping, but sensors with large yaw (REAR: -179°, SIDE: ±90°) have severely rotated directions. FRONT (yaw≈1°) barely affected.
+- **Fix**: Add `azCorrection` parameter to `computeAzimuths(width, azCorrection)`. `convertRangeImageToPointCloud()` calculates `atan2(e[4], e[0])` from extrinsic and passes it.
+- **Additional fix — TOP sensor inclination flip**: TOP's non-uniform `beam_inclination.values` stored in ascending order (min→max), but range image row 0 = maximum angle (top). Read array in reverse order to match descending convention of uniform sensors.
+- **Verification method**: Extract yaw/pitch/roll, translation, sensor-forward direction from each sensor's extrinsic 4×4 matrix and verify against physical mount position:
+  - FRONT: yaw=1°, tx=4.07m (front mount, forward-facing) ✓
+  - REAR: yaw=-179°, tx=-1.16m (rear mount, rear-facing) ✓
+  - SIDE_LEFT: yaw=90°, tx=3.24m, ty=1.03m (front-left, left-facing) ✓
+  - SIDE_RIGHT: yaw=-89°, tx=3.24m, ty=-1.03m (front-right, right-facing) ✓
+  - TOP: yaw=148°, tz=2.18m (roof, 360° rotation) ✓
+- **lidar_pose**: Analysis of Waymo v2's `lidar_pose` component shows TOP sensor only gets 199 rows (per-frame), shape `[64, 2650, 6]` per-pixel vehicle pose for ego-motion correction. Reduces ~1m positional distortion but not directional error source. Deferred for MVP.
 
-### D20. Worker Pool — 병렬 row group 디컴프레션
+### D20. Worker Pool — Parallel row group decompression
 
-- **문제**: 4개 row group을 순차 로딩하면 전체 세그먼트(199프레임) 캐싱에 row group 1개 시간 × 4 소요.
-- **해결**: `WorkerPool` 클래스 도입. N개의 독립 Data Worker를 생성하여 row group을 병렬 디컴프레스.
+- **Problem**: Sequential loading of 4 row groups takes 1 RG load time × 4. Full segment caching (199 frames) takes too long.
+- **Solution**: `WorkerPool` class. Create N independent Data Workers to decompress row groups in parallel.
   ```
   WorkerPool (concurrency=4)
     ├── Worker 0: init(lidarUrl, calibrations) → loadRowGroup(0)
@@ -609,101 +609,101 @@ Chronological record of technical decisions and the reasoning behind them.
     ├── Worker 2: init(lidarUrl, calibrations) → loadRowGroup(2)
     └── Worker 3: init(lidarUrl, calibrations) → loadRowGroup(3)
   ```
-- **설계 결정사항**:
-  - 각 Worker가 독립적으로 Parquet 파일을 open — row group 간 데이터 의존성 없으므로 안전.
-  - `WORKER_CONCURRENCY = 4` 상수로 조절 가능. 4개 row group에 4개 Worker = 이론적 ~4배 속도.
-  - WorkerPool 내부에 idle worker 탐지 + 대기 큐 구현. 모든 Worker busy 시 요청이 큐에 들어가고, Worker 완료 시 자동 dispatch.
-  - `prefetchAllRowGroups()`가 모든 row group을 `Promise.all`로 한번에 dispatch — Pool이 내부적으로 분배.
-- **사이드 이펙트 분석**:
-  - 메모리: Worker당 디컴프레스 버퍼 동시 점유. 4개 RG × ~40MB = ~160MB 피크. 데스크탑에서는 문제없음.
-  - 프레임 순서: row group 완료 순서가 비결정적이지만, `cacheRowGroupFrames()`가 timestamp 기반으로 frameCache에 삽입하므로 순서 무관.
-  - I/O: 로컬 파일(File API)은 병렬 slice 호출 가능. URL 기반은 브라우저 커넥션 제한(도메인당 6개)에 주의 필요하나, 4개는 안전 범위.
-- **결과**: 1개 row group 로딩 시간에 4개가 동시 완료 — 전체 세그먼트가 거의 즉시 캐싱됨.
+- **Design decisions**:
+  - Each Worker independently opens Parquet file — no data dependencies between row groups, so safe.
+  - `WORKER_CONCURRENCY = 4` constant adjustable. 4 row groups + 4 Workers = theoretical ~4× speedup.
+  - WorkerPool internals track idle Worker detection + wait queue. When all Workers busy, requests queue; Worker completion auto-dispatches.
+  - `prefetchAllRowGroups()` dispatches all row groups via `Promise.all` — Pool internally distributes.
+- **Side effects analysis**:
+  - Memory: Simultaneous decompression buffers per Worker. 4 RGs × ~40MB = ~160MB peak. Fine for desktop.
+  - Frame order: Row group completion order is non-deterministic, but `cacheRowGroupFrames()` inserts to frameCache by timestamp, so order irrelevant.
+  - I/O: Local file (File API) allows parallel slice calls. URL-based aware of browser connection limits (6 per domain) — 4 is safe.
+- **Result**: All 4 row groups complete in time of 1 → segment caches almost immediately.
 
-### D21. Camera Worker Pool — 카메라 JPEG 디코딩 분리
+### D21. Camera Worker Pool — Separate JPEG decoding
 
-- **문제**: 카메라 이미지(328MB)도 BROTLI 해제 + Parquet 디코딩이 필요. LiDAR Worker와 동일 Worker에서 처리하면 카메라 로딩이 LiDAR 프레임 캐싱을 블로킹.
-- **해결**: `CameraWorkerPool` 별도 구현 (2개 Worker). 카메라는 I/O bound이므로 LiDAR(4개)보다 적은 Worker로 충분.
-- **아키텍처**: `cameraWorker.ts`가 camera_image Parquet을 열고, row group 단위로 JPEG ArrayBuffer를 추출. 메인 스레드에서 `cameraImageCache`에 별도 저장 (LiDAR frameCache와 독립).
-- **JPEG 무결성**: `hyparquet`의 `utf8: false` 옵션으로 바이너리 원본 보존. `new Image()` preloading으로 디코딩 완료 후에만 src swap — 깨진 이미지 아이콘 방지.
+- **Problem**: Camera images (328MB) also need BROTLI decompression + Parquet decoding. Processing in same Worker as LiDAR blocks LiDAR frame caching.
+- **Solution**: Separate `CameraWorkerPool` (2 Workers). Camera is I/O-bound, so fewer Workers sufficient.
+- **Architecture**: `cameraWorker.ts` opens camera_image Parquet, extracts JPEG ArrayBuffer per row group. Main thread stores in separate `cameraImageCache` (independent from LiDAR frameCache).
+- **JPEG integrity**: Use hyparquet's `utf8: false` option to preserve binary original. Preload via `new Image()` — only swap src after decode complete — prevents broken image icon.
 
 ### D22. Camera Frustum Visualization + POV Switching
 
-- **카메라 프러스텀**: `camera_calibration`의 intrinsic (f_u, f_v, c_u, c_v, width, height) + extrinsic (4×4 matrix)으로 각 카메라의 시야각(FOV)을 3D 공간에 사다리꼴 와이어프레임으로 렌더링.
-  - FOV 계산: `fovX = 2 * atan(width / (2 * f_u))`, `fovY = 2 * atan(height / (2 * f_v))`
-  - Near plane에 4개 코너 포인트 생성 → extrinsic 역행렬로 vehicle frame 변환
-  - `THREE.LineSegments`로 렌더링 (origin → 4 corners + 4 edges)
-- **POV 전환**: 카메라 패널 클릭 시 `activeCam` 상태 설정 → OrbitControls 비활성화 → `PovController`가 `useFrame`에서 position lerp + quaternion slerp로 부드럽게 전환. ESC 또는 버튼으로 orbital 모드 복귀.
-  - **진입 시**: orbital camera의 position/quaternion/fov/target을 `savedState`에 저장. POV 카메라의 extrinsic quaternion에 optical→Three.js 변환(X축 180° 회전) 적용 후 slerp.
-  - **복귀 시**: 저장된 quaternion으로 직접 slerp. `lookAt()` 미사용 — bird's-eye view(카메라 방향이 Z축과 평행)에서 up vector `(0,0,1)`과 충돌하여 gimbal lock이 발생하므로, lookAt 기반 quaternion 계산을 제거하고 저장된 quaternion으로 직접 보간.
-  - **카메라 간 전환**: 복귀 애니메이션 중 다른 카메라 클릭 시, 복귀 목적지를 새 savedState로 저장하여 끊김 없이 전환.
-- **프러스텀 디스플레이**: 기본 상태에서는 far plane 사각형(base)만 표시, hover/active 시 origin→corner 엣지(pyramid) 추가 표시. `buildFrustumBase()` + `buildFrustumEdges()` 분리. FRUSTUM_FAR = 2m.
-  - FRONT 카메라(넓은 vFov)와 SIDE 카메라(좁은 vFov)의 세로 크기 차이는 실제 FOV 차이를 반영한 정상 동작.
-- **Hover highlight sync**: 카메라 패널 hover → `hoveredCam` 상태 → CameraFrustums에서 해당 프러스텀을 흰색 + 불투명도 1.0으로 강조. 나머지는 dim (0.6).
+- **Camera frustums**: Using `camera_calibration` intrinsic (f_u, f_v, c_u, c_v, width, height) + extrinsic (4×4 matrix), render each camera's field-of-view as 3D trapezoidal wireframe.
+  - FOV calculation: `fovX = 2 * atan(width / (2 * f_u))`, `fovY = 2 * atan(height / (2 * f_v))`
+  - Generate 4 corner points on near plane → transform to vehicle frame via extrinsic inverse
+  - Render with `THREE.LineSegments` (origin → 4 corners + 4 edges)
+- **POV switching**: Click camera panel → set `activeCam` state → disable OrbitControls → `PovController` performs smooth position lerp + quaternion slerp in `useFrame`. ESC or button returns to orbital mode.
+  - **Entry**: Save orbital camera's position/quaternion/fov/target to `savedState`. Apply optical→Three.js transform (180° X rotation) to POV camera's extrinsic quaternion, then slerp.
+  - **Exit**: Directly slerp to saved quaternion. Skip `lookAt()` — bird's-eye view (camera pointing parallel to Z) causes gimbal lock with up vector `(0,0,1)`, so use stored quaternion instead of lookAt-based computation.
+  - **Inter-camera transition**: During exit animation, clicking another camera updates exit destination to new `savedState`, transitioning smoothly without interruption.
+- **Frustum display**: Default shows only far plane quad (base). Hover/active adds origin→corner edges (pyramid). Split `buildFrustumBase()` + `buildFrustumEdges()`. FRUSTUM_FAR = 2m.
+  - FRONT camera (wide vFOV) vs SIDE camera (narrow vFOV) vertical size difference reflects actual FOV difference — normal operation.
+- **Hover highlight sync**: Camera panel hover → `hoveredCam` state → CameraFrustums highlights that frustum white + opaque. Others dim (0.6).
 
 ### D23. Multi-Segment Support
 
-- **자동 탐색**: `waymo_data/vehicle_pose/` 폴더의 `.parquet` 파일 목록에서 세그먼트 ID 추출. `fetch()` + HTTP status로 존재 여부 확인.
-- **UI**: 세그먼트가 2개 이상이면 헤더에 `<select>` 드롭다운 표시. 선택 시 `reset()` → 새 세그먼트의 6개 Parquet 파일 열기 → Worker 재초기화 → 프리페치.
-- **에러 처리**: `openParquetFile()`을 try/catch로 감싸서 optional 컴포넌트(segmentation 등)가 없을 때 graceful skip. `console.warn`으로 로깅만.
+- **Auto-discovery**: Extract segment IDs from `.parquet` files in `waymo_data/vehicle_pose/` folder. Verify existence via `fetch()` + HTTP status.
+- **UI**: 2+ segments → show `<select>` dropdown in header. Selection triggers `reset()` → open 6 Parquet files from new segment → reinitialize Workers → prefetch.
+- **Error handling**: Wrap `openParquetFile()` in try/catch for optional components (segmentation, etc.) that may not exist. Log with `console.warn` only.
 
-### D24. Segmentation 제거 결정
+### D24. Segmentation Removal Decision
 
-- **배경**: lidar_segmentation + camera_segmentation 시각화를 구현 시도.
-- **발견된 문제**:
-  1. 9개 세그먼트 중 1개(`10023947602400723454`)만 segmentation 데이터 보유
-  2. 해당 세그먼트도 199프레임 중 ~10프레임만 라벨 존재 (sparse annotation)
-  3. camera_segmentation은 1Hz (10프레임당 1프레임)
-  4. Worker postMessage로 Int32Array 전송 시 데이터 손실 의심 (라벨이 전부 -1)
-- **결정**: 전체 코드 제거. `semanticColors.ts`, `extractSegmentationLabels()`, `ColorMode` 타입, worker setSegmentation, CameraPanel segmentation overlay 등 모든 관련 코드 삭제.
-- **교훈**: Waymo v2.0의 segmentation annotation은 전체 데이터셋의 일부 subset에만 존재. 데이터 가용성을 먼저 확인한 후 기능을 구현해야 함.
+- **Background**: Attempted lidar_segmentation + camera_segmentation visualization.
+- **Problems discovered**:
+  1. Only 1 of 9 segments has segmentation data
+  2. That segment has labels in only ~10 of 199 frames (sparse annotation)
+  3. camera_segmentation is 1Hz (1 frame per 10)
+  4. Suspected data loss when posting Int32Array via Worker postMessage (all labels became -1)
+- **Decision**: Remove all segmentation code entirely. Delete `semanticColors.ts`, `extractSegmentationLabels()`, `ColorMode` type, worker setSegmentation, CameraPanel segmentation overlay, etc.
+- **Lesson**: Always verify data availability before implementing features. Waymo v2.0 segmentation exists only for subset of full dataset.
 
 ### D25. Spacebar Play/Pause + Auto-Rewind
 
-- **구현**: `App.tsx`에서 global `keydown` 이벤트 리스너. `Space` 키 → `togglePlayback()`.
-- **input 보호**: `e.target.tagName`이 INPUT/TEXTAREA/SELECT면 무시 (텍스트 입력 중 오동작 방지).
-- **Auto-rewind**: 마지막 프레임(currentFrameIndex >= totalFrames - 1)에서 play 시 자동으로 frame 0으로 이동 후 재생 시작.
+- **Implementation**: Global `keydown` listener in `App.tsx`. `Space` key → `togglePlayback()`.
+- **Input protection**: Check `e.target.tagName` — skip if INPUT/TEXTAREA/SELECT (prevent accidental toggle during text entry).
+- **Auto-rewind**: Reaching last frame (currentFrameIndex >= totalFrames - 1) during playback → auto-jump to frame 0, resume playback.
 
-### D26. Waymo-Inspired UI Theme — 다크 테마 + 컬러 체계
+### D26. Waymo-Inspired UI Theme — Dark theme + Color palette
 
-- **배경**: 기본 R3F 씬이 개발 도구 느낌이라 포트폴리오 품질에 미달. Waymo 브랜드와 조화되는 전문적 UI 필요.
-- **결정**: 다크 테마 (#1a1a2e 배경) + Waymo teal (#00bfa5) 액센트 컬러. 전체 레이아웃을 Full-screen 3D viewport + 하단 카메라 스트립 + 타임라인으로 고정.
-- **세부 변경**: LiDAR 뷰어 배경을 검정(#0a0a1a)으로, 카메라 패널 160px 고정 높이, 타임라인 컨트롤을 teal 계열로 통일, 세그먼트 셀렉터 + 상태 표시를 상단 바에 집약.
+- **Background**: Stock R3F scene looked like dev tool, not portfolio-quality. Need professional UI aligned with Waymo brand.
+- **Decision**: Dark theme (#1a1a2e background) + Waymo teal (#00bfa5) accent. Full-screen 3D viewport + bottom camera strip + timeline.
+- **Details**: LiDAR viewport background black (#0a0a1a), camera panels 160px fixed, timeline controls teal, segment selector + status in header bar.
 
-### D27. Drag & Drop + Folder Picker — File 객체를 Worker에 직접 전달
+### D27. Drag & Drop + Folder Picker — Pass File objects directly to Worker
 
-- **문제**: GitHub Pages 배포 시 `/api/segments` 엔드포인트 없음. 사용자가 `waymo_data/` 폴더를 드래그 & 드롭해야 함.
-- **해결**: `folderScan.ts` 유틸 신규 추가. `FileSystemDirectoryHandle` (Chrome `showDirectoryPicker()`) 또는 `DataTransferItem.webkitGetAsEntry()` (드래그 & 드롭)로 폴더 트래버싱.
-  - 폴더 구조 `{component}/{segment_id}.parquet` 파싱 → `Map<segmentId, Map<component, File>>` 반환
-  - `vehicle_pose/` 서브폴더 존재 여부로 세그먼트 자동 탐지
-  - 상위 `waymo_data/` 폴더가 없이 component 폴더를 직접 드롭해도 처리
-- **Worker 전달 방식**: `File` 객체를 `postMessage`로 직접 전달 (structured clone). Worker 내에서 `File.slice()` → `ArrayBuffer`로 Parquet 읽기. `URL.createObjectURL()`이 불필요해짐.
-  - 이전 계획에서는 blob URL 방식을 고려했으나, `File`이 structured clone 가능하고 `hyparquet`의 `AsyncBuffer`가 File을 직접 지원하므로 더 단순한 방식 채택.
-- **Store 변경**: `loadFromFiles(segments)` 액션 추가. `internal.filesBySegment`에 File Map 저장. `selectSegment()`가 file 모드 vs URL 모드를 자동 분기.
+- **Problem**: GitHub Pages has no `/api/segments` endpoint. Users must drag & drop `waymo_data/` folder.
+- **Solution**: New `folderScan.ts` util. Handle `FileSystemDirectoryHandle` (Chrome `showDirectoryPicker()`) or `DataTransferItem.webkitGetAsEntry()` (drag & drop) for folder traversal.
+  - Parse `{component}/{segment_id}.parquet` structure → return `Map<segmentId, Map<component, File>>`
+  - Auto-detect segments by `vehicle_pose/` subfolder presence
+  - Handle direct component folder drop (no parent `waymo_data/` folder)
+- **Worker delivery**: Pass `File` object directly via `postMessage` (structured clone). Worker uses `File.slice()` → `ArrayBuffer` for Parquet reading. No `URL.createObjectURL()` needed.
+  - Previous plan considered blob URL approach, but since `File` is structured-cloneable and `hyparquet` supports File directly, simpler approach adopted.
+- **Store change**: Add `loadFromFiles(segments)` action. Store internal `filesBySegment` as File Map. `selectSegment()` auto-branches file vs URL mode.
 
-### D28. 세그먼트 메타데이터 — stats 컴포넌트 활용
+### D28. Segment Metadata — Utilize stats component
 
-- **발견**: `stats` Parquet에 세그먼트별 `location`, `time_of_day`, `weather` 등 메타데이터 존재.
-- **활용**: 드롭다운 옵션에 `#1 · 10023947… · SF Downtown · Day` 형식으로 truncated segment ID + 위치 + 시간대 표시.
-- **LOCATION_LABELS 매핑**: `location_sf_downtown` → `SF Downtown`, `location_phx_mesa` → `Phoenix Mesa` 등 Waymo 공식 location 코드를 사람이 읽기 좋은 라벨로 변환.
+- **Discovery**: `stats` Parquet contains segment-level metadata: `location`, `time_of_day`, `weather`, etc.
+- **Usage**: Dropdown options show truncated segment ID + location + time. Example: `#1 · 10023947… · SF Downtown · Day`
+- **LOCATION_LABELS mapping**: Convert Waymo official codes (`location_sf_downtown` → `SF Downtown`, `location_phx_mesa` → `Phoenix Mesa`, etc.) to human-readable labels.
 
-### D29. Keyboard Shortcuts — 프레임 탐색 + ShortcutHints
+### D29. Keyboard Shortcuts — Frame navigation + ShortcutHints
 
-- **구현**: `App.tsx`에서 global `keydown` 리스너.
-  - `← →`: ±1 프레임
-  - `J L`: ±10 프레임 (빠른 탐색)
+- **Implementation**: Global `keydown` listener in `App.tsx`.
+  - `← →`: ±1 frame
+  - `J L`: ±10 frames (fast navigation)
   - `Space`: play/pause
-  - `Shift+← →`: 이전/다음 세그먼트
-  - `?`: ShortcutHints 토글
-- **ShortcutHints 컴포넌트**: 첫 로드 시 5초간 표시 후 자동 페이드아웃 (CSS opacity transition 300ms). `?` 키로 재표시/숨김 토글. 아무 키 입력(? 제외) 시 페이드아웃 트리거.
-- **Input 보호**: 모든 키보드 핸들러에서 `e.target.tagName`이 INPUT/TEXTAREA/SELECT면 무시.
+  - `Shift+← →`: previous/next segment
+  - `?`: toggle ShortcutHints
+- **ShortcutHints component**: Display for 5s on first load, then auto-fade (CSS opacity transition 300ms). `?` key toggles show/hide. Any keypress (except `?`) triggers fade-out.
+- **Input protection**: All keyboard handlers skip if `e.target.tagName` is INPUT/TEXTAREA/SELECT.
 
-### D30. 2개 Row Group 사전 로딩 — RG 경계 재생 끊김 방지
+### D30. 2 Row Groups Pre-load — Prevent playback stutter at RG boundary
 
-- **문제**: 첫 RG만 로딩 후 렌더 시작 → 자동재생이 두 번째 RG 경계에 도달하면 아직 로딩 중이라 재생이 잠시 멈춤.
-- **기존 메커니즘**: `setInterval` 기반 재생에서 캐시 미스 시 retry (100ms 폴링). 멈추진 않지만 눈에 띄는 끊김 발생.
-- **시도했으나 철회한 방식**: `rgLoadPromises` Map으로 진행 중인 RG 로딩을 추적하고 `loadFrame`에서 await하는 방식. 기존 poll-based retry가 이미 동작하고 있었고, 불필요한 복잡도 추가라 판단하여 `git checkout`으로 즉시 롤백.
-- **채택한 방식**: `loadDataset()` 에서 첫 프레임 로딩 단계를 RG 0 + RG 1 병렬 로딩으로 확장. LiDAR와 Camera 각각 2개 RG를 `Promise.all`로 동시 로딩. ~100프레임 분량이 사전 캐싱되어 prefetch가 따라잡을 시간 확보.
+- **Problem**: Load first RG, start rendering → auto-play reaches second RG boundary, still loading, playback stutters.
+- **Existing mechanism**: `setInterval` playback retries on cache miss (100ms polling). Doesn't pause but visible stutter.
+- **Tried then reverted**: Track in-flight RG loading with `rgLoadPromises` Map, await in `loadFrame`. Existing poll-based retry already worked; unnecessary complexity — `git checkout` immediately.
+- **Adopted approach**: Expand `loadDataset()` first-frame phase to parallel-load RG 0 + RG 1. LiDAR and Camera each preload 2 RGs via `Promise.all`. ~100 frames cached before playback begins, giving prefetch time to catch up.
   ```ts
   // LiDAR RG 0+1
   firstFramePromises.push(loadAndCacheRowGroup(0, set))
@@ -713,81 +713,81 @@ Chronological record of technical decisions and the reasoning behind them.
   if (internal.cameraNumRowGroups > 1) firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
   await Promise.all(firstFramePromises)
   ```
-- **교훈**: 단순한 해결책(사전 로딩량 증가)이 복잡한 해결책(await 기반 로딩 파이프라인 변경)보다 나을 때가 있다.
+- **Lesson**: Simple solution (load more upfront) beats complex one (pipeline restructuring).
 
-### D31. Loading Skeleton — 4단계 진행 표시 + 카메라 스트립 스켈레톤
+### D31. Loading Skeleton — 4-step progress display + camera strip shimmer
 
-- **로딩 UX**: `loadStep` 상태로 4단계 진행 표시:
+- **Loading UX**: `loadStep` state tracks 4 stages:
   1. `calibration` — "Loading calibrations…"
   2. `metadata` — "Loading frame metadata…"
   3. `first-frame` — "Decoding first frame…"
-  4. `ready` — 렌더링 시작
-- **3D 뷰포트**: 로딩 중 반투명 오버레이 + 단계별 메시지 + CSS pulse 애니메이션.
-- **카메라 스트립 스켈레톤**: 5개 카메라 슬롯에 shimmer 애니메이션 (gradient slide). 실제 이미지가 로드되면 자연스럽게 교체.
-- **중복 제거**: 센터 로딩 스켈레톤이 이미 진행 상태를 보여주므로, 헤더의 "Loading… 100%" 텍스트와 타임라인의 ⏳ 이모지를 제거.
+  4. `ready` — render begins
+- **3D viewport**: Semi-transparent overlay + stage message + CSS pulse animation during load.
+- **Camera strip skeleton**: 5 camera slots with shimmer animation (gradient slide). Real images replace when loaded.
+- **De-duplication**: Center loading skeleton already shows progress, so removed "Loading… 100%" text from header and ⏳ emoji from timeline.
 
-### D32. Landing Page — 소개 + 다운로드 가이드
+### D32. Landing Page — Intro + download guide
 
-- **문제**: README를 통해 접근하지 않은 방문자가 처음 보는 화면이 "드래그 앤 드롭하세요" — 맥락 없이 무엇을 드롭하라는 건지 모름.
-- **해결**: DropZone 상단에 소개 섹션 추가:
-  - 제목: "Perception Studio"
-  - 설명: "In-browser perception explorer for Waymo Open Dataset v2.0.1. No setup, no server — just drop Parquet files and explore."
-- **DownloadGuide 컴포넌트**: 접이식(collapsible) 쉘 스크립트 가이드.
-  - "How to get data ▸" 클릭 → gsutil 다운로드 스크립트 표시 (N=3 세그먼트 기본값)
-  - 복사 버튼 (navigator.clipboard.writeText)
-  - `overflow: auto` + 커스텀 투명 스크롤바로 긴 스크립트 스크롤 지원
-- **Product naming**: "Browser-based 3D viewer" → "In-browser perception explorer". Foxglove, Rerun 등 경쟁 제품의 자기 명명 관행 참고. "Zero-install"은 모호하여 제거, "No setup, no server"로 대체.
+- **Problem**: Visitors without README context see "drag and drop" with no context — what are they dropping?
+- **Solution**: Add intro section above DropZone:
+  - Title: "Perception Studio"
+  - Subtitle: "In-browser perception explorer for Waymo Open Dataset v2.0.1. No setup, no server — just drop Parquet files and explore."
+- **DownloadGuide component**: Collapsible shell script guide.
+  - "How to get data ▸" expands gsutil download script (N=3 segments default)
+  - Copy button (navigator.clipboard.writeText)
+  - Scrollable with custom transparent scrollbar for long script
+- **Product naming**: "Browser-based 3D viewer" → "In-browser perception explorer". Follow Foxglove/Rerun's self-naming convention. Drop "Zero-install" (vague) → "No setup, no server" (specific).
 
-### D33. Worker Concurrency 조정 — LiDAR 3 + Camera 2
+### D33. Worker Concurrency Tuning — LiDAR 3 + Camera 2
 
-- **변경**: LiDAR Worker Pool을 4개 → 3개로 축소. Camera Worker Pool은 2개 유지.
-- **이유**: 총 5개 Worker가 동시 실행 시 CPU 코어 경합. LiDAR는 CPU-intensive (BROTLI 해제 + range image 변환), Camera는 I/O-bound (BROTLI 해제 + JPEG 추출). 3+2 = 5 Worker가 대부분의 머신에서 적정 수준.
-- **Worker 초기화**: `initWorkerPools()`에서 LiDAR Pool과 Camera Pool을 `Promise.all`로 병렬 초기화 — 순차 초기화 대비 ~50% 시간 단축.
+- **Change**: LiDAR Worker Pool 4 → 3. Camera Worker Pool stays 2.
+- **Reasoning**: 5 concurrent Workers total. LiDAR CPU-intensive (BROTLI + range image), Camera I/O-bound (BROTLI + JPEG extract). 3+2=5 strikes balance for most machines.
+- **Worker init**: `initWorkerPools()` parallel-initialize LiDAR and Camera Pools via `Promise.all` — ~50% faster than sequential.
 
-### D34. 3DGS 전략 업데이트 — DriveStudio/OmniRe 선호
+### D34. 3DGS Strategy Update — Prefer DriveStudio/OmniRe
 
-- **배경**: Street Gaussians (ECCV 2024) vs DriveStudio/OmniRe (ICLR 2025 Spotlight) 비교 검토.
-- **DriveStudio 장점**:
-  - Waymo, nuScenes, PandaSet 등 주요 데이터셋 모두 지원하는 통합 프레임워크
-  - OmniRe (ICLR 2025 Spotlight): 정적 배경 + 동적 객체 + non-rigid 요소(보행자) 통합 재구성
-  - 활발한 개발 + 커뮤니티 (GitHub 업데이트 빈번)
-  - 학술 논문에서 인용/비교에 유리
-- **Street Gaussians 한계**: 동적 전경 처리가 rigid-body 가정 (보행자 같은 non-rigid 객체에 약함)
-- **전략 변경**: 3DGS Lab에서 사용할 .ply 생성을 DriveStudio/OmniRe 파이프라인으로 전환 검토.
-- **Perception 분석 관점에서 3DGS의 의미**:
-  - 3D bounding box prediction은 보통 1프레임의 LiDAR/Camera 데이터로 생성
-  - 3DGS는 세그먼트 전체(~200프레임)의 데이터를 학습하여 dense reconstruction 생성
-  - 결과적으로 3DGS reconstruction이 single-frame perception보다 ground truth에 가까움
-  - LiDAR는 정확하지만 sparse, Camera는 dense하지만 2D → 3DGS가 dense + 3D context 제공
-  - Perception engineer가 prediction과 3DGS reconstruction을 교차 비교하면 false positive/negative 원인 분석 가능
+- **Background**: Street Gaussians (ECCV 2024) vs DriveStudio/OmniRe (ICLR 2025 Spotlight) comparison.
+- **DriveStudio advantages**:
+  - Unified framework supporting Waymo, nuScenes, PandaSet
+  - OmniRe (ICLR 2025 Spotlight): Static background + dynamic objects + non-rigid elements (pedestrians) integrated reconstruction
+  - Active development + community (frequent GitHub updates)
+  - Favorable for academic paper citations/comparisons
+- **Street Gaussians limitation**: Dynamic foreground handles rigid-body only (weak on non-rigid like pedestrians).
+- **Strategic shift**: Generate .ply via DriveStudio/OmniRe pipeline for 3DGS Lab.
+- **Perception analysis significance**:
+  - 3D box prediction uses single-frame LiDAR/Camera → single-frame inference
+  - 3DGS trains on ~200-frame sequence → dense multi-frame context
+  - Result: 3DGS reconstruction closer to ground truth than single-frame prediction
+  - LiDAR (sparse+accurate) + Camera (dense+2D) + 3DGS (dense+3D) = mutually complementary views
+  - Engineer can cross-compare prediction vs 3DGS to trace false positive/negative causes
 
-### D35. LiDAR Colormap 모드 — 4가지 시각화 속성
+### D35. LiDAR Colormap Modes — 4 visualization attributes
 
-- **배경**: 포인트 클라우드가 intensity 단일 색상만 지원 → perception 분석에 부족. 자율주행 업계에서 range/height/elongation 컬러맵이 표준적으로 사용됨.
-- **구현**: `POINT_STRIDE`를 4→6으로 확장하여 `[x, y, z, intensity, range, elongation]` interleaved. 각 속성별 전용 컬러 팔레트:
-  - **Intensity** (0–1): dark → cyan → yellow → white (turbo 계열)
-  - **Height/Z** (-3–8m): blue → green → yellow → red (지면/객체 분리에 유용)
-  - **Range** (0–75m): green → yellow → red → dark (거리 기반 밀도 분석)
-  - **Elongation** (0–1): dark → purple → magenta → pink (반사 특성)
-- **R3F 버퍼 업데이트 타이밍 이슈**: `useEffect` + `needsUpdate = true` 방식이 R3F reconciler의 `<bufferAttribute {...posAttr} />` 재적용으로 무효화됨. **해결**: dirty ref + `useFrame` 패턴으로 전환 — 버퍼 업데이트를 Three.js 렌더 루프 내에서 수행하여 reconciler 간섭 회피.
-- **센서별 색상 제거**: 모든 5개 센서가 동일한 4채널 range image 포맷이므로, 센서 필터링 시에도 항상 선택된 컬러맵 적용 (기존 센서별 고유색 제거).
+- **Background**: Point cloud previously intensity-only → insufficient for perception analysis. Auto industry standard: range/height/elongation colormaps.
+- **Implementation**: Extend `POINT_STRIDE` from 4 → 6 for `[x, y, z, intensity, range, elongation]` interleaved. Dedicated palette per attribute:
+  - **Intensity** (0–1): dark → cyan → yellow → white (turbo-like)
+  - **Height/Z** (-3–8m): blue → green → yellow → red (ground/object separation)
+  - **Range** (0–75m): green → yellow → red → dark (distance-based density analysis)
+  - **Elongation** (0–1): dark → purple → magenta → pink (reflection characteristic)
+- **R3F buffer update timing issue**: `useEffect` + `needsUpdate = true` invalidated by R3F reconciler's `<bufferAttribute {...posAttr} />` reapplication. **Fix**: dirty ref + `useFrame` pattern — perform buffer update in Three.js render loop, bypassing reconciler.
+- **Remove per-sensor colors**: All 5 sensors use identical 4-channel range image format, so sensor filtering always applies selected colormap (removed sensor-specific colors).
 
-### D36. 통합 Frosted Glass 컨트롤 패널
+### D36. Unified Frosted Glass Control Panel
 
-- **문제**: 개별 UI 요소(버튼, 레이블)에 배경이 없어 밝은 장면에서 가독성 저하. 레이블에만 frost 배경을 넣으면 디자인 불일치.
-- **해결**: 전체 컨트롤 패널을 단일 frosted container로 감싸기:
+- **Problem**: Individual UI elements (buttons, labels) lack background — poor readability on bright scenes. Adding frost to labels only breaks design cohesion.
+- **Solution**: Wrap entire control panel in single frosted container:
   - `backgroundColor: rgba(26, 31, 53, 0.75)` + `backdropFilter: blur(12px)`
-  - 내부 요소는 개별 배경 없이, 활성 요소만 `rgba(255,255,255,0.06)` subtle highlight
-  - 섹션 구분: 1px `colors.border` divider
-- **레이블 변경**: "Sensors" → "LiDAR" (더 직관적)
-- **조건부 UI**: 모든 센서 off 시 opacity 슬라이더 숨김 (`visibleSensors.size > 0` 조건)
+  - Inner elements no individual backgrounds; active elements only get `rgba(255,255,255,0.06)` subtle highlight
+  - Sections divided by 1px `colors.border` separator
+- **Label change**: "Sensors" → "LiDAR" (more intuitive)
+- **Conditional UI**: Hide opacity slider when all sensors off (`visibleSensors.size > 0` condition)
 
-### D37. POV 복귀 Gimbal Lock 수정 — Quaternion 직접 Slerp
+### D37. POV Exit Gimbal Lock Fix — Direct Quaternion Slerp
 
-- **문제**: bird's-eye view(Z축 직하방)에서 POV 진입 후 복귀 시 카메라가 비정상적으로 회전.
-- **원인**: 복귀 애니메이션에서 매 프레임 `Matrix4.lookAt(pos, target, up=(0,0,1))`로 target quaternion 계산. 카메라 방향이 Z축과 거의 평행할 때 lookAt의 up vector와 forward vector가 충돌 → 불안정한 rotation matrix → gimbal lock.
-- **해결**: POV 진입 시 orbital camera의 `quaternion`을 `savedState`에 함께 저장. 복귀 시 `lookAt()` 없이 저장된 quaternion으로 직접 `camera.quaternion.slerp(rt.quat, LERP_SPEED)`. Quaternion slerp는 특이점이 없으므로 모든 카메라 각도에서 안정적 보간.
-- **교훈**: 3D 카메라 시스템에서 `lookAt()`은 편리하지만, up vector가 view direction과 평행한 경우(top-down, bottom-up) degenerate. 가능하면 quaternion을 직접 저장/보간하는 것이 안정적.
+- **Problem**: Bird's-eye view (Z-axis straight down) → enter POV → exit causes abnormal camera rotation.
+- **Root cause**: Exit animation calculates target quaternion every frame via `Matrix4.lookAt(pos, target, up=(0,0,1))`. When view direction near-parallel to Z, lookAt's up vector conflicts with forward → unstable rotation matrix → gimbal lock.
+- **Fix**: On POV entry, save orbital camera's `quaternion` to `savedState` along with position. Exit via direct `camera.quaternion.slerp(rt.quat, LERP_SPEED)` — no lookAt(). Quaternion slerp has no singularities, stable for all camera angles.
+- **Lesson**: `lookAt()` convenient but degenerate when up-vector parallel to view-direction (top-down, bottom-up). Prefer direct quaternion storage/interpolation for robustness.
 
 ## 11. Progress Tracker
 

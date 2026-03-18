@@ -4,3 +4,4 @@ waymo_data/
 .env
 .DS_Store
 *.local
+.git-rewrite/
