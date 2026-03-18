@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://egolens.github.io/egolens"><strong>Live Demo</strong></a> ·
+  <a href="https://egolens.org"><strong>Live Demo</strong></a> ·
   <a href="#url-loading">URL Loading</a> ·
   <a href="#share-view">Share View</a> ·
   <a href="#dev-setup">Dev Setup</a>
@@ -26,15 +26,13 @@
 
 ## What It Does
 
-Drop in a dataset folder (or provide a URL) and instantly explore autonomous driving scenes in 3D — no Python, no preprocessing, no uploads.
+One tool for the three most widely used AV datasets. Drop a folder or paste a URL — auto-detected, zero setup.
 
-- **LiDAR point clouds** from up to 5 sensors with 6 colormap modes (intensity, height, range, elongation, semantic segmentation, camera projection)
-- **3D bounding boxes** rendered as wireframes or 3D models (vehicle, pedestrian, cyclist) with color-coded tracking
-- **5 synchronized camera views** with POV switching — click a camera to jump into its viewpoint
-- **Cross-modal hover linking** — hover a 2D camera box and its 3D counterpart highlights, and vice versa
+- **LiDAR point clouds** with multiple colormap modes (intensity, height, range, segmentation, camera projection)
+- **3D bounding boxes** as wireframes or 3D models with color-coded tracking
+- **Synchronized camera views** with POV switching — click a camera to jump into its viewpoint
 - **Trajectory trails** showing object movement over past frames
-- **Human keypoints** — 14-joint 3D skeleton per pedestrian, with 2D camera overlay
-- **Semantic segmentation** — LiDAR (23-class) and camera panoptic (29-class) overlays
+- **Semantic segmentation** overlays (LiDAR and camera)
 - **Timeline** with play/pause, speed control (0.5x–4x), and buffer progress bars
 
 <table>
@@ -68,7 +66,7 @@ Dataset format is auto-detected from folder structure.
 
 ### Local files (drag & drop)
 
-1. Open the [live demo](https://egolens.github.io/egolens)
+1. Open the [live demo](https://egolens.org)
 2. Drag & drop your dataset folder into the browser
 3. Done — browse frames, toggle sensors, play the timeline
 
@@ -82,9 +80,9 @@ Load data directly from S3 or any static file server by providing a URL.
 - **URL + Segment ID** — loads a specific segment directly (works with any static file server)
 
 ```
-https://egolens.github.io/egolens/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
-https://egolens.github.io/egolens/?dataset=nuscenes&data=https://your-server.com/nuscenes/
-https://egolens.github.io/egolens/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
+https://egolens.org/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
+https://egolens.org/?dataset=nuscenes&data=https://your-server.com/nuscenes/
+https://egolens.org/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
 ```
 
 The URL should point to a directory containing the dataset's standard folder structure. Works with S3 buckets, any HTTP server, or localhost.
@@ -93,7 +91,7 @@ The URL should point to a directory containing the dataset's standard folder str
 
 ### Share View
 
-When data is loaded via URL, a **Share View** button appears in the header. It copies a link that captures your exact view state — frame position, colormap, sensor toggles, overlays, point settings, and more. Anyone with the same data URL can open the link and see exactly what you see.
+**Share what you see.** Click the Share View button and get a URL that captures your exact view — frame, colormap, camera angle, overlays, everything. Anyone with the same data can open the link and land on exactly what you were looking at.
 
 ## Dev Setup
 
