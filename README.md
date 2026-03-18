@@ -22,6 +22,7 @@
 <p align="center">
   <img src="assets/hero.png" alt="EgoLens screenshot" width="720" />
 </p>
+<p align="center"><sub>Waymo Open Dataset — 3D segmentation, keypoints, and camera views. Timeline markers indicate frames with annotations (cyan = LiDAR seg, lime = 3D keypoints, light-cyan = 2D keypoints, magenta = camera seg).</sub></p>
 
 ## What It Does
 
@@ -36,8 +37,12 @@ One tool for the three most widely used AV datasets. Drop a folder or paste a UR
 
 <table>
   <tr>
-    <td><img src="https://private-user-images.githubusercontent.com/3903575/556982733-8ca4aa6e-5818-4d2f-bed2-58687dd825d8.gif" alt="LiDAR point cloud driving scene" /></td>
-    <td><img src="https://private-user-images.githubusercontent.com/3903575/556980659-0c99b33b-59d8-4fcb-9a47-cba7bdaa51fa.gif" alt="3D model rendering and POV switching" /></td>
+    <td><img src="assets/nuscenes_seg_lidarcam.gif" alt="nuScenes 32-class LiDAR segmentation with camera projection" /></td>
+    <td><img src="assets/argoverse_cam_pov.gif" alt="Argoverse 2 camera colormap and POV switching" /></td>
+  </tr>
+  <tr>
+    <td><sub>nuScenes — 32-class LiDAR segmentation projected onto camera views via LiDAR overlay</sub></td>
+    <td><sub>Argoverse 2 — camera colormap mode with 7-camera POV switching</sub></td>
   </tr>
 </table>
 

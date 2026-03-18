@@ -754,7 +754,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
+        justifyContent: 'safe center',
         gap: '24px',
         padding: '40px',
         overflow: 'auto',
