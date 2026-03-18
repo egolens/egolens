@@ -5,12 +5,13 @@
 <p align="center">
   Browser-native 3D perception explorer for autonomous driving datasets<br/>
   <strong>Waymo · nuScenes · Argoverse 2</strong><br/>
-  No install. No server. Your data never leaves your browser.
+  Everything runs in your browser — no backend, no preprocessing.
 </p>
 
 <p align="center">
   <a href="https://happyhj.github.io/egolens"><strong>Live Demo</strong></a> ·
   <a href="#url-loading">URL Loading</a> ·
+  <a href="#share-view">Share View</a> ·
   <a href="#dev-setup">Dev Setup</a>
 </p>
 
@@ -40,11 +41,21 @@ Drop in a dataset folder (or provide a URL) and instantly explore autonomous dri
 
 ## Supported Datasets
 
-| Dataset | Local (drag & drop) | URL loading |
-|---------|:------------------:|:-----------:|
-| [Waymo Open Dataset v2.0](https://waymo.com/open/) | ✓ | ✓ |
-| [nuScenes](https://www.nuscenes.org/) | ✓ | ✓ |
-| [Argoverse 2](https://www.argoverse.org/) | ✓ | ✓ |
+| Feature | Waymo v2 | nuScenes | Argoverse 2 |
+|---------|:--------:|:--------:|:-----------:|
+| LiDAR point cloud | ✓ (5 sensors) | ✓ (1 sensor + 5 radar) | ✓ (2 sensors) |
+| Camera images | ✓ (5 cams) | ✓ (6 cams) | ✓ (7 cams) |
+| 3D bounding boxes | ✓ | ✓ | ✓ |
+| 2D camera boxes | ✓ | — | — |
+| Cross-modal hover linking | ✓ | — | — |
+| Trajectory trails | ✓ | ✓ | ✓ |
+| 3D human keypoints | ✓ | — | — |
+| 2D camera keypoints | ✓ | — | — |
+| LiDAR segmentation | ✓ (23-class) | ✓ (32-class) | — |
+| Camera panoptic seg | ✓ (29-class) | — | — |
+| POV camera switching | ✓ | ✓ | ✓ |
+| Local (drag & drop) | ✓ | ✓ | ✓ |
+| URL loading | ✓ | ✓ | ✓ |
 
 Dataset format is auto-detected from folder structure.
 
@@ -58,7 +69,7 @@ Dataset format is auto-detected from folder structure.
 
 ### URL Loading
 
-Provide a URL to load data directly from S3 or any HTTP server.
+Load data directly from S3 or any static file server by providing a URL.
 
 **Two modes:**
 
@@ -66,12 +77,18 @@ Provide a URL to load data directly from S3 or any HTTP server.
 - **URL + Segment ID** — loads a specific segment directly (works with any static file server)
 
 ```
-https://happyhj.github.io/egolens/?dataset=argoverse2&data=https://your-bucket.s3.amazonaws.com/av2/sensor/val/
-https://happyhj.github.io/egolens/?dataset=nuscenes&data=https://data.egolens.org/nuscenes/
+https://happyhj.github.io/egolens/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
+https://happyhj.github.io/egolens/?dataset=nuscenes&data=https://your-server.com/nuscenes/
 https://happyhj.github.io/egolens/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
 ```
 
+The URL should point to a directory containing the dataset's standard folder structure. Works with S3 buckets, any HTTP server, or localhost.
+
 > **Note:** Waymo's license prohibits data redistribution, so no hosted demo data is available. You'll need to host your own copy after accepting the [Waymo Open Dataset License](https://waymo.com/open/terms/).
+
+### Share View
+
+When data is loaded via URL, a **Share View** button appears in the header. It copies a link that captures your exact view state — frame position, colormap, sensor toggles, overlays, point settings, and more. Anyone with the same data URL can open the link and see exactly what you see.
 
 ## Dev Setup
 
