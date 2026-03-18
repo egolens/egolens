@@ -796,10 +796,10 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
             disabled={urlLoading}
             placeholder={
               urlDataset === 'nuscenes'
-                ? 'https://data.egolens.org/nuscenes/'
+                ? 'https://your-server.com/nuscenes/'
                 : urlDataset === 'waymo'
-                  ? 'https://your-bucket.s3.amazonaws.com/waymo_data/'
-                  : 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/'
+                  ? 'https://your-server.com/waymo_data/'
+                  : 'https://your-server.com/av2/sensor/train/'
             }
             style={{
               flex: 1,
@@ -840,6 +840,20 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           >
             {urlLoading ? '…' : 'Load'}
           </button>
+        </div>
+
+        {/* Hint: what URL to provide */}
+        <div style={{
+          fontSize: '11px',
+          fontFamily: fonts.sans,
+          color: colors.textDim,
+          lineHeight: 1.4,
+          padding: '0 2px',
+        }}>
+          {urlDataset === 'nuscenes' && 'Point to a folder that contains v1.0-mini/ or v1.0-trainval/ with JSON metadata and sample data.'}
+          {urlDataset === 'waymo' && 'Point to a folder that contains Waymo v2 component directories (vehicle_pose/, lidar/, camera_image/, …).'}
+          {urlDataset === 'argoverse2' && 'Point to an AV2 log folder, or a parent directory (e.g. .../sensor/train/) to discover all logs.'}
+          {' '}Works with any static file server, S3 bucket, or localhost.
         </div>
 
         {/* Optional scene/segment ID for direct access (all datasets) */}
