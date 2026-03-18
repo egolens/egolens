@@ -376,6 +376,7 @@ function WorldFollowCamera({ orbitRef, enabled, returningRef }: {
     // Detect frame change since last useFrame tick
     const fi = frameIndexRef.current
     if (fi === prevFrameIndexRef.current) return
+    const frameDelta = Math.abs(fi - prevFrameIndexRef.current)
     prevFrameIndexRef.current = fi
 
     // Skip during POV mode or POV return animation
@@ -392,9 +393,16 @@ function WorldFollowCamera({ orbitRef, enabled, returningRef }: {
     if (enabledRef.current && prevPos.current && orbitRef.current) {
       _followDelta.copy(_followCurrPos).sub(prevPos.current)
 
-      // Large jump (rewind, scrub, segment switch) → snap to chase-cam.
-      // Normal driving delta is <2m/frame; threshold 100 = 10m squared.
-      if (_followDelta.lengthSq() > 100) {
+      // Large jump detection uses FRAME INDEX delta, not position delta.
+      // React batches rapid scrubs into a single commit (e.g. frames 50→0
+      // becomes one update), inflating the position delta even though the
+      // user only scrubbed a few frames.  The old subscriber approach saw
+      // each intermediate frame individually, but useFrame only sees the
+      // final batched state.  Frame index delta accurately reflects the
+      // user's intent: sequential scrubbing (small delta) vs segment
+      // switch / large rewind (large delta).
+      // Threshold: >30 frames ≈ 3 seconds of driving → snap to chase-cam.
+      if (frameDelta > 30) {
         _resetPoseMat.fromArray(pose).transpose()
         _resetPos.copy(CHASE_CAM_POSITION).applyMatrix4(_resetPoseMat)
         _resetTarget.copy(CHASE_CAM_TARGET).applyMatrix4(_resetPoseMat)
