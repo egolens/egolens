@@ -1,15 +1,18 @@
-<p align="center">
-  <img src="assets/banner.png" alt="EgoLens" width="720" />
-</p>
+<h1 align="center">EgoLens</h1>
 
 <p align="center">
   Browser-native 3D perception explorer for autonomous driving datasets<br/>
-  <strong>Waymo · nuScenes · Argoverse 2</strong><br/>
   Everything runs in your browser — no backend, no preprocessing.
 </p>
 
 <p align="center">
-  <a href="https://happyhj.github.io/egolens"><strong>Live Demo</strong></a> ·
+  <a href="https://waymo.com/open/download/"><img src="https://img.shields.io/badge/Waymo_Open_Dataset-Perception_v2.0-4285F4?style=for-the-badge" alt="Waymo" /></a>&nbsp;
+  <a href="https://www.nuscenes.org/"><img src="https://img.shields.io/badge/nuScenes-v1.0-00B4D8?style=for-the-badge" alt="nuScenes" /></a>&nbsp;
+  <a href="https://www.argoverse.org/"><img src="https://img.shields.io/badge/Argoverse_2-sensor-FF6F00?style=for-the-badge" alt="Argoverse 2" /></a>
+</p>
+
+<p align="center">
+  <a href="https://egolens.github.io/egolens"><strong>Live Demo</strong></a> ·
   <a href="#url-loading">URL Loading</a> ·
   <a href="#share-view">Share View</a> ·
   <a href="#dev-setup">Dev Setup</a>
@@ -63,7 +66,7 @@ Dataset format is auto-detected from folder structure.
 
 ### Local files (drag & drop)
 
-1. Open the [live demo](https://happyhj.github.io/egolens)
+1. Open the [live demo](https://egolens.github.io/egolens)
 2. Drag & drop your dataset folder into the browser
 3. Done — browse frames, toggle sensors, play the timeline
 
@@ -77,9 +80,9 @@ Load data directly from S3 or any static file server by providing a URL.
 - **URL + Segment ID** — loads a specific segment directly (works with any static file server)
 
 ```
-https://happyhj.github.io/egolens/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
-https://happyhj.github.io/egolens/?dataset=nuscenes&data=https://your-server.com/nuscenes/
-https://happyhj.github.io/egolens/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
+https://egolens.github.io/egolens/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
+https://egolens.github.io/egolens/?dataset=nuscenes&data=https://your-server.com/nuscenes/
+https://egolens.github.io/egolens/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
 ```
 
 The URL should point to a directory containing the dataset's standard folder structure. Works with S3 buckets, any HTTP server, or localhost.
@@ -93,7 +96,7 @@ When data is loaded via URL, a **Share View** button appears in the header. It c
 ## Dev Setup
 
 ```bash
-git clone https://github.com/happyhj/egolens.git
+git clone https://github.com/egolens/egolens.git
 cd egolens
 npm install
 npm run dev

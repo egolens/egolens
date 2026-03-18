@@ -8,7 +8,7 @@ import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
-import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, type ShareableState } from './utils/urlState'
+import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -195,6 +195,27 @@ function App() {
     const cleanup = initEmbedApi(embedParams)
     return cleanup
   }, [embedParams])
+
+  // Browser back button: return to landing page when navigating back
+  useEffect(() => {
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search)
+      if (!params.has('data')) {
+        // No data param = landing page — full reset including segments
+        const store = useSceneStore.getState()
+        store.actions.reset()
+        // reset() preserves segments for segment switching — clear them for landing
+        useSceneStore.setState({
+          availableSegments: [],
+          currentSegment: null,
+          segmentMetas: new Map(),
+        })
+        clearUrlSource()
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
   const status = useSceneStore((s) => s.status)
   const availableSegments = useSceneStore((s) => s.availableSegments)
   const togglePlayback = useSceneStore((s) => s.actions.togglePlayback)
@@ -541,7 +562,7 @@ function Header() {
           </button>
         )}
         <a
-          href="https://github.com/happyhj/egolens"
+          href="https://github.com/egolens/egolens"
           target="_blank"
           rel="noopener noreferrer"
           title="View on GitHub"
@@ -713,37 +734,121 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           color: colors.textSecondary,
           lineHeight: 1.7,
         }}>
-          Browser-based 3D perception explorer for{' '}
-          <a href="https://waymo.com/open/" target="_blank" rel="noopener noreferrer"
-            style={{ color: colors.accent, textDecoration: 'none' }}>Waymo</a>,{' '}
-          <a href="https://www.nuscenes.org/" target="_blank" rel="noopener noreferrer"
-            style={{ color: colors.accent, textDecoration: 'none' }}>nuScenes</a>, and{' '}
-          <a href="https://www.argoverse.org/av2.html" target="_blank" rel="noopener noreferrer"
-            style={{ color: colors.accent, textDecoration: 'none' }}>Argoverse 2</a>.
-          <br />
+          Browser-based 3D perception explorer.<br />
           Everything runs in your browser — no backend, no preprocessing.
         </div>
-        <a
-          href="https://github.com/happyhj/egolens"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            alignSelf: 'center',
-            gap: '6px',
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          alignSelf: 'center',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+        }}>
+          {[
+            { label: 'Waymo v2', color: '#4285F4', href: 'https://waymo.com/open/download/' },
+            { label: 'nuScenes', color: '#00B4D8', href: 'https://www.nuscenes.org/' },
+            { label: 'Argoverse 2', color: '#FF6F00', href: 'https://www.argoverse.org/av2.html' },
+          ].map(({ label, color, href }) => (
+            <a
+              key={label}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-block',
+                padding: '3px 10px',
+                fontSize: '11px',
+                fontFamily: fonts.sans,
+                fontWeight: 600,
+                color: '#fff',
+                backgroundColor: color,
+                borderRadius: '4px',
+                textDecoration: 'none',
+                letterSpacing: '0.02em',
+                opacity: 0.9,
+                transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.9' }}
+            >
+              {label}
+            </a>
+          ))}
+        </div>
+
+        {/* Quick start — try with hosted data */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '10px',
+          marginTop: '4px',
+        }}>
+          <span style={{
             fontSize: '12px',
             fontFamily: fonts.sans,
             color: colors.textDim,
-            textDecoration: 'none',
-            transition: 'color 0.15s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = colors.textSecondary }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-          GitHub
-        </a>
+            letterSpacing: '0.03em',
+          }}>Try it now with hosted data</span>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            {([
+              { dataset: 'nuscenes', label: 'nuScenes mini', url: 'https://data.egolens.org/nuscenes/', note: 'Hosted by EgoLens · 10 scenes' },
+              { dataset: 'argoverse2', label: 'Argoverse 2', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', note: 'Via Argoverse S3 · validation split' },
+            ] as const).map((preset) => {
+              const isActive = urlDataset === preset.dataset && urlInput === preset.url
+              return (
+                <button
+                  key={preset.dataset}
+                  onClick={() => {
+                    setUrlDataset(preset.dataset)
+                    setUrlInput(preset.url)
+                    setUrlSegment('')
+                    setUrlError(null)
+                  }}
+                  disabled={urlLoading}
+                  title={preset.note}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '2px',
+                    padding: '10px 20px',
+                    fontSize: '13px',
+                    fontFamily: fonts.sans,
+                    fontWeight: 600,
+                    color: isActive ? '#000' : colors.textPrimary,
+                    backgroundColor: isActive ? colors.accent : colors.bgOverlay,
+                    border: `1px solid ${isActive ? colors.accent : colors.border}`,
+                    borderRadius: radius.md,
+                    cursor: urlLoading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s',
+                    opacity: urlLoading ? 0.5 : 1,
+                    minWidth: '180px',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!urlLoading && !isActive) {
+                      e.currentTarget.style.borderColor = colors.accent
+                      e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.08)'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.borderColor = colors.border
+                      e.currentTarget.style.backgroundColor = colors.bgOverlay
+                    }
+                  }}
+                >
+                  {preset.label}
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 400,
+                    color: isActive ? 'rgba(0,0,0,0.6)' : colors.textDim,
+                  }}>{preset.note}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
 
       {/* URL input section */}
@@ -915,71 +1020,6 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           URL only: auto-discovers all segments. URL + ID: loads a specific segment directly.
         </div>
 
-        {/* Preset examples */}
-        <div style={{
-          display: 'flex',
-          gap: '8px',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <span style={{
-            fontSize: '11px',
-            fontFamily: fonts.sans,
-            color: colors.textDim,
-          }}>Try:</span>
-          {([
-            { dataset: 'nuscenes', label: 'nuScenes mini', url: 'https://data.egolens.org/nuscenes/', source: 'hosted by EgoLens' },
-            { dataset: 'argoverse2', label: 'Argoverse 2 val', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', source: 'via Argoverse S3' },
-          ] as const).map((preset) => {
-            const isActive = urlDataset === preset.dataset && urlInput === preset.url
-            return (
-              <button
-                key={preset.dataset}
-                onClick={() => {
-                  setUrlDataset(preset.dataset)
-                  setUrlInput(preset.url)
-                  setUrlSegment('')
-                  setUrlError(null)
-                }}
-                disabled={urlLoading}
-                title={preset.source}
-                style={{
-                  padding: '6px 14px',
-                  fontSize: '12px',
-                  fontFamily: fonts.sans,
-                  fontWeight: 500,
-                  color: isActive ? colors.accent : colors.textSecondary,
-                  backgroundColor: isActive ? 'rgba(0, 232, 157, 0.1)' : colors.bgOverlay,
-                  border: `1px solid ${isActive ? colors.accent : colors.border}`,
-                  borderRadius: '14px',
-                  cursor: urlLoading ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s',
-                  opacity: urlLoading ? 0.5 : 1,
-                }}
-                onMouseEnter={(e) => {
-                  if (!urlLoading && !isActive) {
-                    e.currentTarget.style.borderColor = colors.textSecondary
-                    e.currentTarget.style.color = colors.textPrimary
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.borderColor = colors.border
-                    e.currentTarget.style.color = colors.textSecondary
-                  }
-                }}
-              >
-                {preset.label}
-                <span style={{
-                  fontSize: '9px',
-                  fontWeight: 400,
-                  opacity: 0.6,
-                  marginLeft: '4px',
-                }}>({preset.source})</span>
-              </button>
-            )
-          })}
-        </div>
       </div>
 
       {/* ── or divider ── */}

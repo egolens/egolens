@@ -5,7 +5,7 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Development
 
 ```bash
-git clone https://github.com/happyhj/egolens.git
+git clone https://github.com/egolens/egolens.git
 cd egolens
 npm install
 npm run dev

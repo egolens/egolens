@@ -16,15 +16,28 @@
 /** Source info stored when loading from URL — needed for replaceState */
 let sourceDataset: string | null = null
 let sourceBaseUrl: string | null = null
+/** Whether we've already pushed one history entry for this session */
+let historyPushed = false
 
 export function setUrlSource(dataset: string, baseUrl: string) {
   sourceDataset = dataset
   sourceBaseUrl = baseUrl
+
+  // Push one history entry so browser back returns to the landing page.
+  // Only push once — subsequent segment switches use replaceState.
+  if (!historyPushed) {
+    historyPushed = true
+    const params = new URLSearchParams()
+    params.set('dataset', dataset)
+    params.set('data', baseUrl)
+    window.history.pushState({ egolens: true }, '', `${window.location.pathname}?${params}`)
+  }
 }
 
 export function clearUrlSource() {
   sourceDataset = null
   sourceBaseUrl = null
+  historyPushed = false
 }
 
 /** Check whether data was loaded from a URL (not drag & drop) */
