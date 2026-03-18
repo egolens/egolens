@@ -9,6 +9,7 @@ import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
 import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
+import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -142,6 +143,10 @@ function useUrlViewRestore() {
     if (viewParams.keypoints2D && !state.showKeypoints2D) actions.toggleKeypoints2D()
     if (viewParams.cameraSeg && !state.showCameraSeg) actions.toggleCameraSeg()
     if (viewParams.speed != null) actions.setPlaybackSpeed(viewParams.speed)
+    if (viewParams.followCam === false) actions.setFollowCam(false)
+    if (viewParams.cameraPos && viewParams.cameraTarget) {
+      setPendingCameraPose(viewParams.cameraPos, viewParams.cameraTarget)
+    }
   }, [status])
 }
 
@@ -388,6 +393,7 @@ function Header() {
   const handleShare = useCallback(() => {
     const s = useSceneStore.getState()
     const src = getUrlSource()
+    const cam = getCameraPose()
     const state: ShareableState = {
       dataset: src?.dataset,
       baseUrl: src?.baseUrl,
@@ -406,6 +412,9 @@ function Header() {
       keypoints2D: s.showKeypoints2D,
       cameraSeg: s.showCameraSeg,
       speed: s.playbackSpeed,
+      followCam: s.followCam,
+      cameraPos: cam.position,
+      cameraTarget: cam.target,
     }
     const url = buildShareUrl(state)
 
@@ -711,6 +720,25 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         .dropzone-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
         .dropzone-scroll { scrollbar-color: rgba(255,255,255,0.15) transparent; scrollbar-width: thin; }
       `}</style>
+      {/* Safari warning */}
+      {/^((?!chrome|android).)*safari/i.test(navigator.userAgent) && (
+        <div style={{
+          maxWidth: '520px',
+          width: '100%',
+          padding: '8px 14px',
+          fontSize: '11px',
+          fontFamily: fonts.sans,
+          color: '#FFB347',
+          backgroundColor: 'rgba(255, 179, 71, 0.08)',
+          border: '1px solid rgba(255, 179, 71, 0.2)',
+          borderRadius: radius.sm,
+          textAlign: 'center',
+          lineHeight: 1.5,
+        }}>
+          Safari may crash on large datasets due to memory limits. <strong>Chrome or Edge</strong> is recommended.
+        </div>
+      )}
+
       {/* Intro */}
       <div style={{
         maxWidth: '520px',

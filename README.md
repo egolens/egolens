@@ -116,7 +116,7 @@ React 19 · TypeScript · Three.js · React Three Fiber · Vite · Zustand · hy
 
 ## Browser Support
 
-Chrome / Edge recommended (folder drag & drop + folder picker). Firefox / Safari support folder drag & drop only.
+**Chrome / Edge recommended.** Safari may crash on large datasets due to WebKit memory limits. Firefox works but lacks the folder picker API.
 
 ## Feedback
 

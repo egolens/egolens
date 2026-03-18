@@ -104,6 +104,11 @@ export interface ShareableState {
   keypoints2D?: boolean
   cameraSeg?: boolean
   speed?: number
+  followCam?: boolean
+  /** Camera position [x,y,z] */
+  cameraPos?: [number, number, number]
+  /** Camera target/look-at [x,y,z] */
+  cameraTarget?: [number, number, number]
 }
 
 /**
@@ -133,6 +138,9 @@ export function buildShareUrl(state: ShareableState): string {
   if (state.keypoints2D) params.set('kp2d', '1')
   if (state.cameraSeg) params.set('camseg', '1')
   if (state.speed != null && state.speed !== 1) params.set('speed', String(state.speed))
+  if (state.followCam === false) params.set('follow', '0')
+  if (state.cameraPos) params.set('cp', state.cameraPos.map(v => v.toFixed(1)).join(','))
+  if (state.cameraTarget) params.set('ct', state.cameraTarget.map(v => v.toFixed(1)).join(','))
 
   const qs = params.toString()
   return `${window.location.origin}${window.location.pathname}${qs ? '?' + qs : ''}`
@@ -182,6 +190,19 @@ export function parseViewParams(search?: string): Partial<ShareableState> {
 
   const speed = params.get('speed')
   if (speed) { const n = parseFloat(speed); if (n > 0) state.speed = n }
+
+  if (params.get('follow') === '0') state.followCam = false
+
+  const cp = params.get('cp')
+  if (cp) {
+    const nums = cp.split(',').map(Number)
+    if (nums.length === 3 && nums.every(n => !isNaN(n))) state.cameraPos = nums as [number, number, number]
+  }
+  const ct = params.get('ct')
+  if (ct) {
+    const nums = ct.split(',').map(Number)
+    if (nums.length === 3 && nums.every(n => !isNaN(n))) state.cameraTarget = nums as [number, number, number]
+  }
 
   return state
 }

@@ -143,6 +143,7 @@ interface SceneActions {
   setBgPreset: (id: BgPresetId) => void
   setPointShape: (shape: PointShape) => void
   setPointSize: (size: number) => void
+  setFollowCam: (follow: boolean) => void
   reset: () => void
 }
 
@@ -240,6 +241,8 @@ export interface SceneState {
   pointShape: PointShape
   /** Point world-space size (default 0.08) */
   pointSize: number
+  /** Whether camera follows ego vehicle in world mode */
+  followCam: boolean
 
   /** All discovered segment IDs */
   availableSegments: string[]
@@ -560,6 +563,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   bgPreset: 'dark' as BgPresetId,
   pointShape: 'circle' as PointShape,
   pointSize: 0.08,
+  followCam: true,
   availableSegments: [],
   segmentMetas: new Map(),
   currentSegment: null,
@@ -901,6 +905,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     setBgPreset: (id: BgPresetId) => set({ bgPreset: id }),
     setPointShape: (shape: PointShape) => set({ pointShape: shape }),
     setPointSize: (size: number) => set({ pointSize: size }),
+    setFollowCam: (follow: boolean) => set({ followCam: follow }),
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Local files — clear URL source so segment changes don't sync to URL bar
       clearUrlSource()
@@ -2032,39 +2037,58 @@ async function runPostWorkerPipeline(
   logLabel: string,
   mainThreadFallback?: () => Promise<void>,
 ): Promise<void> {
-  // 1. Load first 2 batches: LiDAR + Camera in parallel
+  // Determine target frame from Share URL (if any)
+  const initSearch = getInitialSearch()
+  const viewParams = initSearch ? parseViewParams(initSearch) : {}
+  const targetFrame = viewParams.frame != null
+    ? Math.min(viewParams.frame, internal.timestamps.length - 1)
+    : 0
+
+  // Compute which batch contains the target frame
+  const framesPerBatch = internal.numBatches > 0
+    ? Math.ceil(internal.timestamps.length / internal.numBatches)
+    : internal.timestamps.length
+  const targetBatch = Math.floor(targetFrame / framesPerBatch)
+
+  // 1. Load batches: always batch 0 + target batch (+ neighbors)
   set({ loadStep: 'first-frame' as LoadStep })
   const rgT0 = performance.now()
   const firstFramePromises: Promise<void>[] = []
 
   if (internal.workerPool?.isReady()) {
-    firstFramePromises.push(loadAndCacheRowGroup(0, set))
-    if (internal.numBatches > 1) {
-      firstFramePromises.push(loadAndCacheRowGroup(1, set))
+    const batchesToLoad = new Set([0, targetBatch])
+    // Also load neighbor batch for smoother playback from target
+    if (targetBatch > 0) batchesToLoad.add(targetBatch - 1)
+    if (targetBatch + 1 < internal.numBatches) batchesToLoad.add(targetBatch + 1)
+    for (const b of batchesToLoad) {
+      firstFramePromises.push(loadAndCacheRowGroup(b, set))
     }
   } else if (mainThreadFallback) {
     firstFramePromises.push(mainThreadFallback())
   }
 
   if (internal.cameraPool?.isReady()) {
-    firstFramePromises.push(loadAndCacheCameraRowGroup(0, set))
-    if (internal.cameraNumBatches > 1) {
-      firstFramePromises.push(loadAndCacheCameraRowGroup(1, set))
+    const camBatchesToLoad = new Set([0, targetBatch])
+    if (targetBatch > 0) camBatchesToLoad.add(targetBatch - 1)
+    if (targetBatch + 1 < internal.cameraNumBatches) camBatchesToLoad.add(targetBatch + 1)
+    for (const b of camBatchesToLoad) {
+      firstFramePromises.push(loadAndCacheCameraRowGroup(b, set))
     }
   }
 
   await Promise.all(firstFramePromises)
   const rgMs = performance.now() - rgT0
   memLog.snap(`${logLabel}:first-batches-loaded`, {
-    note: `${rgMs.toFixed(0)}ms`,
+    note: `${rgMs.toFixed(0)}ms, target frame ${targetFrame}`,
   })
 
-  // 2. Show first frame
-  const firstFrame = internal.frameCache.get(0)
+  // 2. Show target frame (or frame 0 as fallback)
+  const displayFrame = internal.frameCache.has(targetFrame) ? targetFrame : 0
+  const firstFrame = internal.frameCache.get(displayFrame)
   if (firstFrame) {
-    const camData = internal.cameraImageCache.get(0)
+    const camData = internal.cameraImageCache.get(displayFrame)
     set({
-      currentFrameIndex: 0,
+      currentFrameIndex: displayFrame,
       currentFrame: {
         ...firstFrame,
         cameraImages: camData ? new Map(camData) : new Map(),
@@ -2079,9 +2103,8 @@ async function runPostWorkerPipeline(
     note: `${internal.frameCache.size} frames cached`,
   })
 
-  // Auto-play unless opened via Share URL (has view params like frame/colormap)
-  const initSearch = getInitialSearch()
-  const hasViewParams = initSearch ? Object.keys(parseViewParams(initSearch)).length > 0 : false
+  // Auto-play unless opened via Share URL (has view params)
+  const hasViewParams = Object.keys(viewParams).length > 0
   if (!hasViewParams) {
     get().actions.play()
   }

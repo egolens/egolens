@@ -327,7 +327,15 @@ function InitialCameraSetup({ orbitRef }: { orbitRef: React.RefObject<any> }) {
   const initialized = useRef(false)
   useFrame(() => {
     if (!initialized.current && orbitRef.current) {
-      orbitRef.current.target.copy(CHASE_CAM_TARGET)
+      if (_pendingCameraPose) {
+        // Restore camera pose from Share URL
+        const { position, target } = _pendingCameraPose
+        orbitRef.current.object.position.set(...position)
+        orbitRef.current.target.set(...target)
+        _pendingCameraPose = null
+      } else {
+        orbitRef.current.target.copy(CHASE_CAM_TARGET)
+      }
       orbitRef.current.update()
       initialized.current = true
     }
@@ -466,6 +474,26 @@ function BgColorSync() {
 }
 
 // ---------------------------------------------------------------------------
+// Module-level camera state for Share View (avoids putting high-frequency
+// camera updates into Zustand which would cause unnecessary re-renders)
+// ---------------------------------------------------------------------------
+let _cameraPos: [number, number, number] = [0, 0, 0]
+let _cameraTarget: [number, number, number] = [0, 0, 0]
+
+/** Read current orbit camera position + target (for Share URL) */
+export function getCameraPose() {
+  return { position: _cameraPos, target: _cameraTarget }
+}
+
+/** Pending camera pose to apply when OrbitControls mounts (set by URL restore) */
+let _pendingCameraPose: { position: [number, number, number]; target: [number, number, number] } | null = null
+
+/** Queue a camera pose to be applied once the 3D scene is ready */
+export function setPendingCameraPose(pos: [number, number, number], target: [number, number, number]) {
+  _pendingCameraPose = { position: pos, target: target }
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -509,7 +537,8 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const resetRequestedRef = useRef(false)
   const bevCanvasRef = useRef<HTMLCanvasElement>(null)
   const [bevZoom, setBevZoom] = useState(1)
-  const [followCam, setFollowCam] = useState(true)
+  const followCam = useSceneStore((s) => s.followCam)
+  const setFollowCam = useSceneStore((s) => s.actions.setFollowCam)
   const [panelOpen, setPanelOpen] = useState(true)
   const [opDragging, setOpDragging] = useState(false)
   const [szDragging, setSzDragging] = useState(false)
@@ -593,6 +622,15 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
           minDistance={5}
           maxDistance={200}
           enablePan={!(worldMode && followCam)}
+          onChange={() => {
+            if (orbitRef.current) {
+              const c = orbitRef.current
+              const p = c.object.position
+              const t = c.target
+              _cameraPos = [p.x, p.y, p.z]
+              _cameraTarget = [t.x, t.y, t.z]
+            }
+          }}
           /* enabled is controlled imperatively by PovController via orbitRef */
         />
 
