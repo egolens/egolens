@@ -1937,22 +1937,29 @@ async function loadAndCacheCameraRowGroup(
     const result = await internal.cameraPool!.requestRowGroup(rgIndex)
     cacheCameraRowGroupFrames(result)
 
-    // Update camera loading progress + buffer bar
+    // Update camera loading progress + buffer bar, and patch current frame
+    // if new camera images arrived for it.  Merged into a single set() to
+    // avoid triggering two separate React re-render cycles.
     syncCameraCachedFrames(set)
-    set({ cameraLoadedCount: internal.cameraLoadedRowGroups.size })
-
-    // Force re-render of current frame with new camera data
     const state = useSceneStore.getState()
     const fi = state.currentFrameIndex
     const cached = internal.frameCache.get(fi)
     const camData = internal.cameraImageCache.get(fi)
-    if (cached && camData && camData.size > 0) {
+    const currentFrame = state.currentFrame
+    // Only replace currentFrame when camera count actually increased —
+    // if loadFrame already merged the same images, skip the redundant update.
+    const needsFramePatch = cached && camData && camData.size > 0 &&
+      (!currentFrame || currentFrame.cameraImages.size !== camData.size)
+    if (needsFramePatch) {
       set({
+        cameraLoadedCount: internal.cameraLoadedRowGroups.size,
         currentFrame: {
           ...cached,
           cameraImages: new Map(camData),
         },
       })
+    } else {
+      set({ cameraLoadedCount: internal.cameraLoadedRowGroups.size })
     }
   } catch (e) {
     console.error(`[CameraPool] Failed to load RG ${rgIndex}:`, e)
