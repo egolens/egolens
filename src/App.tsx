@@ -631,7 +631,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           <a href="https://www.argoverse.org/av2.html" target="_blank" rel="noopener noreferrer"
             style={{ color: colors.accent, textDecoration: 'none' }}>Argoverse 2</a>.
           <br />
-          Drop local files or paste an S3 / public URL — no install, no server required.
+          Everything runs in your browser — no backend, no preprocessing.
         </div>
         <a
           href="https://github.com/happyhj/egolens"
@@ -656,140 +656,104 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         </a>
       </div>
 
-      {/* Drop area */}
+      {/* ── Demo cards ── */}
       <div style={{
         width: '100%',
         maxWidth: '520px',
-        padding: '48px 40px',
-        borderRadius: '16px',
-        border: `2px dashed ${dragging ? colors.accent : colors.border}`,
-        backgroundColor: dragging ? 'rgba(0, 232, 157, 0.08)' : colors.bgSurface,
         display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '20px',
-        transition: 'all 0.2s',
+        gap: '10px',
       }}>
-        {scanning ? (
-          <>
-            <div style={{
+        {([
+          {
+            dataset: 'nuscenes',
+            label: 'nuScenes',
+            detail: 'mini split · 10 scenes',
+            url: 'https://data.egolens.org/nuscenes/',
+            source: 'Hosted by EgoLens',
+          },
+          {
+            dataset: 'argoverse2',
+            label: 'Argoverse 2',
+            detail: 'val split · 150 logs',
+            url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/',
+            source: 'via Argoverse S3',
+          },
+        ] as const).map((demo) => (
+          <button
+            key={demo.dataset}
+            onClick={() => {
+              if (urlLoading) return
+              setUrlDataset(demo.dataset)
+              setUrlInput(demo.url)
+              setUrlError(null)
+              // Trigger load directly
+              const baseUrl = normalizeBaseUrl(demo.url)
+              setUrlLoading(true)
+              loadFromUrl(demo.dataset, baseUrl).catch((err) => {
+                setUrlError(err instanceof Error ? err.message : String(err))
+                setUrlLoading(false)
+              })
+            }}
+            disabled={urlLoading}
+            style={{
+              flex: 1,
+              padding: '16px 14px',
+              borderRadius: radius.md,
+              border: `1px solid ${colors.border}`,
+              backgroundColor: colors.bgSurface,
+              cursor: urlLoading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              textAlign: 'left',
+            }}
+            onMouseEnter={(e) => {
+              if (!urlLoading) {
+                e.currentTarget.style.borderColor = colors.accent
+                e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.06)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = colors.border
+              e.currentTarget.style.backgroundColor = colors.bgSurface
+            }}
+          >
+            <span style={{
               fontSize: '14px',
+              fontWeight: 600,
+              fontFamily: fonts.sans,
+              color: colors.textPrimary,
+            }}>{demo.label}</span>
+            <span style={{
+              fontSize: '11px',
               fontFamily: fonts.sans,
               color: colors.textSecondary,
-            }}>
-              Scanning folder for segments…
-            </div>
-          </>
-        ) : (
-          <>
-            {/* Icon */}
-            <div style={{ fontSize: '36px', opacity: 0.6 }}>
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={dragging ? colors.accent : colors.textDim} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                <line x1="12" y1="11" x2="12" y2="17" />
-                <polyline points="9 14 12 11 15 14" />
-              </svg>
-            </div>
-
-            <div style={{ textAlign: 'center' }}>
-              <div style={{
-                fontSize: '16px',
-                fontWeight: 600,
-                fontFamily: fonts.sans,
-                color: colors.textPrimary,
-                marginBottom: '8px',
-              }}>
-                Drop a dataset folder here
-              </div>
-              <div style={{
-                fontSize: '13px',
-                fontFamily: fonts.sans,
-                color: colors.textSecondary,
-                lineHeight: 1.5,
-              }}>
-                Waymo, nuScenes, or Argoverse 2 — auto-detected
-              </div>
-            </div>
-
-            {/* Folder picker button */}
-            {hasDirectoryPicker() && (
-              <button
-                onClick={onPickFolder}
-                style={{
-                  padding: '10px 24px',
-                  fontSize: '13px',
-                  fontFamily: fonts.sans,
-                  fontWeight: 500,
-                  backgroundColor: 'transparent',
-                  color: colors.accent,
-                  border: `1px solid ${colors.accent}`,
-                  borderRadius: radius.md,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.1)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                }}
-              >
-                Select Folder
-              </button>
-            )}
-
-            {error && (
-              <div style={{
-                fontSize: '12px',
-                fontFamily: fonts.sans,
-                color: '#FF6B6B',
-                textAlign: 'center',
-                padding: '8px 16px',
-                backgroundColor: 'rgba(255, 107, 107, 0.1)',
-                borderRadius: radius.sm,
-              }}>
-                {error}
-              </div>
-            )}
-
-            {/* Hint — expected folder structures */}
-            <div style={{
+            }}>{demo.detail}</span>
+            <span style={{
               fontSize: '10px',
-              fontFamily: fonts.mono,
+              fontFamily: fonts.sans,
               color: colors.textDim,
-              textAlign: 'left',
-              lineHeight: 1.5,
-              display: 'flex',
-              gap: '24px',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-            }}>
-              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
-`Waymo (drop this) 📂
-├── vehicle_pose/
-├── lidar/
-├── camera_image/
-└── …/*.parquet`
-              }</pre>
-              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
-`nuScenes (drop this) 📂
-├── v1.0-{mini,trainval,test}/
-├── samples/
-├── sweeps/
-└── lidarseg/`
-              }</pre>
-              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
-`AV2 log (drop this) 📂
-├── sensors/
-├── calibration/
-├── city_SE3_egovehicle…
-└── annotations.feather`
-              }</pre>
-            </div>
-          </>
-        )}
+              marginTop: '2px',
+            }}>{demo.source}</span>
+          </button>
+        ))}
       </div>
 
+      {/* Waymo notice */}
+      <div style={{
+        width: '100%',
+        maxWidth: '520px',
+        fontSize: '10px',
+        fontFamily: fonts.sans,
+        color: colors.textDim,
+        textAlign: 'center',
+        lineHeight: 1.5,
+      }}>
+        Waymo — redistribution prohibited. Host your own copy after accepting the{' '}
+        <a href="https://waymo.com/open/terms/" target="_blank" rel="noopener noreferrer"
+          style={{ color: colors.accent, textDecoration: 'underline' }}>license</a>.
+      </div>
 
       {/* ── or divider ── */}
       <div style={{
@@ -802,7 +766,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       }}>
         <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
         <span style={{ fontSize: '11px', fontFamily: fonts.sans, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          or load from URL
+          or load manually
         </span>
         <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
       </div>
@@ -951,7 +915,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           </div>
         )}
 
-        {/* Hint + example */}
+        {/* Hint */}
         <div style={{
           fontSize: '11px',
           fontFamily: fonts.sans,
@@ -959,46 +923,151 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           textAlign: 'center',
           lineHeight: 1.6,
         }}>
-          URL only: auto-discovers all segments. URL + ID: loads that segment directly.
-          {urlDataset === 'waymo' ? (
-            <span> Waymo data redistribution is prohibited — host your own copy after accepting the{' '}
-              <a
-                href="https://waymo.com/open/terms/"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: colors.accent, textDecoration: 'underline' }}
-              >license</a>.
-            </span>
-          ) : (
-            <>
-              {' '}
-              <button
-                onClick={() => {
-                  if (urlDataset === 'nuscenes') {
-                    setUrlInput('https://data.egolens.org/nuscenes/')
-                  } else {
-                    setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/')
-                  }
-                  setUrlError(null)
-                }}
-                disabled={urlLoading}
-                style={{
-                  padding: 0,
-                  fontSize: '11px',
+          URL only: auto-discovers all segments. URL + ID: loads a specific segment directly.
+        </div>
+      </div>
+
+      {/* ── or divider ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        maxWidth: '520px',
+        width: '100%',
+        margin: '4px 0',
+      }}>
+        <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
+        <span style={{ fontSize: '11px', fontFamily: fonts.sans, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          or drop local files
+        </span>
+        <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
+      </div>
+
+      {/* Drop area */}
+      <div style={{
+        width: '100%',
+        maxWidth: '520px',
+        padding: '32px 40px',
+        borderRadius: '16px',
+        border: `2px dashed ${dragging ? colors.accent : colors.border}`,
+        backgroundColor: dragging ? 'rgba(0, 232, 157, 0.08)' : colors.bgSurface,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '16px',
+        transition: 'all 0.2s',
+      }}>
+        {scanning ? (
+          <div style={{
+            fontSize: '14px',
+            fontFamily: fonts.sans,
+            color: colors.textSecondary,
+          }}>
+            Scanning folder for segments…
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? colors.accent : colors.textDim} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                <line x1="12" y1="11" x2="12" y2="17" />
+                <polyline points="9 14 12 11 15 14" />
+              </svg>
+              <div>
+                <div style={{
+                  fontSize: '14px',
+                  fontWeight: 600,
                   fontFamily: fonts.sans,
+                  color: colors.textPrimary,
+                }}>
+                  Drop a dataset folder here
+                </div>
+                <div style={{
+                  fontSize: '12px',
+                  fontFamily: fonts.sans,
+                  color: colors.textSecondary,
+                }}>
+                  Waymo, nuScenes, or Argoverse 2 — auto-detected
+                </div>
+              </div>
+            </div>
+
+            {hasDirectoryPicker() && (
+              <button
+                onClick={onPickFolder}
+                style={{
+                  padding: '8px 20px',
+                  fontSize: '12px',
+                  fontFamily: fonts.sans,
+                  fontWeight: 500,
+                  backgroundColor: 'transparent',
                   color: colors.accent,
-                  background: 'none',
-                  border: 'none',
+                  border: `1px solid ${colors.accent}`,
+                  borderRadius: radius.sm,
                   cursor: 'pointer',
-                  textDecoration: 'underline',
-                  opacity: urlLoading ? 0.5 : 1,
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.1)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent'
                 }}
               >
-                Try example
+                Select Folder
               </button>
-            </>
-          )}
-        </div>
+            )}
+
+            {error && (
+              <div style={{
+                fontSize: '12px',
+                fontFamily: fonts.sans,
+                color: '#FF6B6B',
+                textAlign: 'center',
+                padding: '8px 16px',
+                backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                borderRadius: radius.sm,
+              }}>
+                {error}
+              </div>
+            )}
+
+            {/* Hint — expected folder structures */}
+            <div style={{
+              fontSize: '10px',
+              fontFamily: fonts.mono,
+              color: colors.textDim,
+              textAlign: 'left',
+              lineHeight: 1.5,
+              display: 'flex',
+              gap: '24px',
+              justifyContent: 'center',
+              flexWrap: 'wrap',
+            }}>
+              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
+`Waymo (drop this) 📂
+├── vehicle_pose/
+├── lidar/
+├── camera_image/
+└── …/*.parquet`
+              }</pre>
+              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
+`nuScenes (drop this) 📂
+├── v1.0-{mini,trainval,test}/
+├── samples/
+├── sweeps/
+└── lidarseg/`
+              }</pre>
+              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
+`AV2 log (drop this) 📂
+├── sensors/
+├── calibration/
+├── city_SE3_egovehicle…
+└── annotations.feather`
+              }</pre>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
