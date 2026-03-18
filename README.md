@@ -95,7 +95,7 @@ The URL should point to a directory containing the dataset's standard folder str
 
 ### Share View
 
-**Share what you see.** Click the Share View button and get a URL that captures your exact view — frame, colormap, camera angle, overlays, everything. Anyone with the same data can open the link and land on exactly what you were looking at.
+**Point your team to exactly what you see.** When data is loaded via URL, click Share View to get a link that encodes your exact view — frame, colormap, camera angle, overlays, everything. Paste it in Slack or a PR comment and your teammate lands on the same frame, same angle, same overlays. No screenshots, no "go to frame 142 and turn on segmentation."
 
 <p align="center">
   <img src="assets/share_view.gif" alt="Share View — copy URL and restore exact camera angle in a new tab" width="720" />
