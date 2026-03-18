@@ -8,7 +8,7 @@ import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
-import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, clearUrlSource, type ShareableState } from './utils/urlState'
+import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -100,7 +100,8 @@ function useUrlViewRestore() {
     if (urlViewRestoreApplied) return
     if (status !== 'ready') return
 
-    const viewParams = parseViewParams()
+    // Use initial search (captured before replaceState overwrites view params)
+    const viewParams = parseViewParams(getInitialSearch() ?? undefined)
     // Only restore if there are view params beyond dataset/data/scene
     if (Object.keys(viewParams).length === 0) return
 
@@ -133,7 +134,6 @@ function useUrlViewRestore() {
       }
     }
     if (viewParams.pointSize != null) actions.setPointSize(viewParams.pointSize)
-    if (viewParams.pointShape) actions.setPointShape(viewParams.pointShape as typeof state.pointShape)
     if (viewParams.pointOpacity != null) actions.setPointOpacity(viewParams.pointOpacity)
     if (viewParams.activeCam != null) actions.setActiveCam(viewParams.activeCam)
     if (viewParams.trailLength != null) actions.setTrailLength(viewParams.trailLength)
@@ -398,7 +398,6 @@ function Header() {
       worldMode: s.worldMode,
       sensors: [...s.visibleSensors],
       pointSize: s.pointSize,
-      pointShape: s.pointShape,
       pointOpacity: s.pointOpacity,
       activeCam: s.activeCam,
       trailLength: s.trailLength,

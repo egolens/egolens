@@ -18,10 +18,18 @@ let sourceDataset: string | null = null
 let sourceBaseUrl: string | null = null
 /** Whether we've already pushed one history entry for this session */
 let historyPushed = false
+/** Snapshot of the initial URL search string — captured before replaceState overwrites it */
+let initialSearch: string | null = null
 
 export function setUrlSource(dataset: string, baseUrl: string) {
   sourceDataset = dataset
   sourceBaseUrl = baseUrl
+
+  // Capture initial URL search before any replaceState overwrites it.
+  // This preserves view params (colormap, box, frame, etc.) from shared URLs.
+  if (initialSearch === null) {
+    initialSearch = window.location.search
+  }
 
   // Push one history entry so browser back returns to the landing page.
   // Only push once — subsequent segment switches use replaceState.
@@ -38,6 +46,7 @@ export function clearUrlSource() {
   sourceDataset = null
   sourceBaseUrl = null
   historyPushed = false
+  initialSearch = null
 }
 
 /** Check whether data was loaded from a URL (not drag & drop) */
@@ -49,6 +58,11 @@ export function hasUrlSource(): boolean {
 export function getUrlSource(): { dataset: string; baseUrl: string } | null {
   if (!sourceDataset || !sourceBaseUrl) return null
   return { dataset: sourceDataset, baseUrl: sourceBaseUrl }
+}
+
+/** Get the initial URL search string captured before replaceState overwrites */
+export function getInitialSearch(): string | null {
+  return initialSearch
 }
 
 /**
@@ -82,7 +96,6 @@ export interface ShareableState {
   worldMode?: boolean
   sensors?: number[]
   pointSize?: number
-  pointShape?: string
   pointOpacity?: number
   activeCam?: number | null
   trailLength?: number
@@ -112,7 +125,6 @@ export function buildShareUrl(state: ShareableState): string {
     if (sorted.length < 5) params.set('sensors', sorted.join(','))
   }
   if (state.pointSize != null && state.pointSize !== 0.08) params.set('ps', String(state.pointSize))
-  if (state.pointShape && state.pointShape !== 'circle') params.set('shape', state.pointShape)
   if (state.pointOpacity != null && state.pointOpacity !== 0.85) params.set('opacity', String(state.pointOpacity))
   if (state.activeCam != null) params.set('cam', String(state.activeCam))
   if (state.trailLength != null && state.trailLength !== 10) params.set('trail', String(state.trailLength))
@@ -153,9 +165,6 @@ export function parseViewParams(search?: string): Partial<ShareableState> {
 
   const ps = params.get('ps')
   if (ps) { const n = parseFloat(ps); if (n > 0) state.pointSize = n }
-
-  const shape = params.get('shape')
-  if (shape && ['square', 'circle'].includes(shape)) state.pointShape = shape
 
   const opacity = params.get('opacity')
   if (opacity) { const n = parseFloat(opacity); if (n >= 0 && n <= 1) state.pointOpacity = n }

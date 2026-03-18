@@ -118,9 +118,11 @@ React 19 · TypeScript · Three.js · React Three Fiber · Vite · Zustand · hy
 
 Chrome / Edge recommended (folder drag & drop + folder picker). Firefox / Safari support folder drag & drop only.
 
-## Contributing
+## Feedback
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Found a bug? Have a feature idea? Want support for another dataset? [Open an issue](https://github.com/egolens/egolens/issues) — all feedback is welcome.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines · [Changelog](CHANGELOG.md)
 
 ## License
 

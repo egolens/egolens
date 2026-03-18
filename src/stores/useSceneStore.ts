@@ -73,7 +73,7 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
-import { setUrlSource, clearUrlSource, syncSegmentToUrl } from '../utils/urlState'
+import { setUrlSource, clearUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
@@ -2078,7 +2078,13 @@ async function runPostWorkerPipeline(
   memLog.snap(`${logLabel}:first-frame-rendered`, {
     note: `${internal.frameCache.size} frames cached`,
   })
-  get().actions.play()
+
+  // Auto-play unless opened via Share URL (has view params like frame/colormap)
+  const initSearch = getInitialSearch()
+  const hasViewParams = initSearch ? Object.keys(parseViewParams(initSearch)).length > 0 : false
+  if (!hasViewParams) {
+    get().actions.play()
+  }
 
   // 3. Prefetch remaining batches in background
   if (internal.workerPool?.isReady() && !internal.prefetchStarted) {

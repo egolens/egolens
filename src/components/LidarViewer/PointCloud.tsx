@@ -197,7 +197,6 @@ export default function PointCloud() {
       world: s0.worldMode,
       cam: s0.activeCam,
       opacity: s0.pointOpacity,
-      shape: s0.pointShape,
       size: s0.pointSize,
     }
     return useSceneStore.subscribe((state) => {
@@ -207,7 +206,6 @@ export default function PointCloud() {
           state.worldMode !== prev.world ||
           state.activeCam !== prev.cam ||
           state.pointOpacity !== prev.opacity ||
-          state.pointShape !== prev.shape ||
           state.pointSize !== prev.size) {
         dirtyRef.current = true
         prev.frame = state.currentFrame
@@ -216,7 +214,6 @@ export default function PointCloud() {
         prev.world = state.worldMode
         prev.cam = state.activeCam
         prev.opacity = state.pointOpacity
-        prev.shape = state.pointShape
         prev.size = state.pointSize
       }
     })
@@ -239,7 +236,7 @@ export default function PointCloud() {
     // Always read latest state from store (no stale closure)
     const { currentFrame: curFrame, visibleSensors: visSensors,
             colormapMode: cmap, worldMode: wmode, pointOpacity,
-            pointShape, pointSize } =
+            pointSize } =
       useSceneStore.getState()
 
     const geom = geometryRef.current
@@ -263,12 +260,11 @@ export default function PointCloud() {
     // ---------------------------------------------------------------------------
     // Material swap + opacity + point shape/size
     // ---------------------------------------------------------------------------
-    const isCircle = pointShape === 'circle'
     if (pts) {
       if (isCameraMode) {
         if (pts.material !== cameraMat) pts.material = cameraMat
         cameraMat.uniforms.uOpacity.value = pointOpacity
-        cameraMat.uniforms.uCircle.value = isCircle ? 1.0 : 0.0
+        cameraMat.uniforms.uCircle.value = 1.0
         // Size attenuation: compute scale from canvas height
         const canvasH = gl.domElement.height || 1080
         cameraMat.uniforms.uPointSize.value = pointSize * canvasH * 0.5
@@ -276,9 +272,9 @@ export default function PointCloud() {
         if (pts.material !== normalMat) pts.material = normalMat
         normalMat.opacity = pointOpacity
         normalMat.size = pointSize
-        // Update circle uniform if shader has been compiled
+        // Circle shape: always on
         const circleU = (normalMat as unknown as Record<string, unknown>)._circleUniform as { value: number } | undefined
-        if (circleU) circleU.value = isCircle ? 1.0 : 0.0
+        if (circleU) circleU.value = 1.0
       }
     }
 

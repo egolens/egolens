@@ -129,7 +129,6 @@ export function BevMinimapRenderer({
         state.pointOpacity !== prev.pointOpacity ||
         state.trailLength !== prev.trailLength ||
         state.bgPreset !== prev.bgPreset ||
-        state.pointShape !== prev.pointShape ||
         state.pointSize !== prev.pointSize
       ) {
         scheduleRender()

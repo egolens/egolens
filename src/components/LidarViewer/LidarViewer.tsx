@@ -501,8 +501,6 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const toggleWorldMode = useSceneStore((s) => s.actions.toggleWorldMode)
   // Display settings
   const bgPreset = useSceneStore((s) => s.bgPreset)
-  const pointShape = useSceneStore((s) => s.pointShape)
-  const setPointShape = useSceneStore((s) => s.actions.setPointShape)
   const pointSize = useSceneStore((s) => s.pointSize)
   const setPointSize = useSceneStore((s) => s.actions.setPointSize)
   const orbitRef = useRef<any>(null)
@@ -513,6 +511,8 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const [bevZoom, setBevZoom] = useState(1)
   const [followCam, setFollowCam] = useState(true)
   const [panelOpen, setPanelOpen] = useState(true)
+  const [opDragging, setOpDragging] = useState(false)
+  const [szDragging, setSzDragging] = useState(false)
 
   // Parse calibrations once
   const calibMap = useMemo(
@@ -866,25 +866,47 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             )
           })}
 
-          {/* Opacity slider — hidden when all sensors off */}
+          {/* Opacity + Size sliders — hidden when all sensors off */}
           {visibleSensors.size > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
-              <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-                Opacity
-              </span>
-              <input
-                type="range" min={10} max={100}
-                value={Math.round(pointOpacity * 100)}
-                onChange={(e) => setPointOpacity(Number(e.target.value) / 100)}
-                style={{ width: 52, height: 2, accentColor: colors.accent }}
-              />
-              <span style={{
-                fontSize: '10px', fontFamily: fonts.mono, color: colors.textPrimary,
-                minWidth: 24, textAlign: 'right',
-              }}>
-                {Math.round(pointOpacity * 100)}%
-              </span>
-            </div>
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px' }}>
+                <span title="Opacity" style={{
+                  fontSize: '10px', fontFamily: opDragging ? fonts.mono : fonts.sans,
+                  fontWeight: 500, color: opDragging ? colors.textPrimary : colors.textSecondary,
+                  cursor: 'default', minWidth: 18, textAlign: 'right',
+                  transition: 'color 0.1s',
+                }}>
+                  {opDragging ? `${Math.round(pointOpacity * 100)}%` : 'Op'}
+                </span>
+                <input
+                  type="range" min={10} max={100}
+                  value={Math.round(pointOpacity * 100)}
+                  onChange={(e) => setPointOpacity(Number(e.target.value) / 100)}
+                  onPointerDown={() => setOpDragging(true)}
+                  onPointerUp={() => setOpDragging(false)}
+                  onPointerLeave={() => setOpDragging(false)}
+                  style={{ flex: 1, minWidth: 0, height: 2, accentColor: colors.accent }}
+                />
+                <span style={{ fontSize: '10px', color: colors.border }}>·</span>
+                <span title="Point Size" style={{
+                  fontSize: '10px', fontFamily: szDragging ? fonts.mono : fonts.sans,
+                  fontWeight: 500, color: szDragging ? colors.textPrimary : colors.textSecondary,
+                  cursor: 'default', minWidth: 14, textAlign: 'right',
+                  transition: 'color 0.1s',
+                }}>
+                  {szDragging ? pointSize.toFixed(1) : 'Sz'}
+                </span>
+                <input
+                  type="range" min={2} max={30}
+                  value={Math.round(pointSize * 100)}
+                  onChange={(e) => setPointSize(Number(e.target.value) / 100)}
+                  onPointerDown={() => setSzDragging(true)}
+                  onPointerUp={() => setSzDragging(false)}
+                  onPointerLeave={() => setSzDragging(false)}
+                  style={{ flex: 1, minWidth: 0, height: 2, accentColor: colors.accent }}
+                />
+              </div>
+            </>
           )}
 
           {/* Colormap — hide when dataset only supports one mode */}
@@ -1248,60 +1270,6 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             </>)}
           </>}
 
-          {/* ── DISPLAY section (rendering style) ── */}
-          <div style={{ height: '1px', backgroundColor: colors.border, margin: '4px 4px' }} />
-          <div style={{
-            fontSize: '9px', fontFamily: fonts.sans, fontWeight: 600,
-            color: colors.textDim, letterSpacing: '1.2px', textTransform: 'uppercase',
-            padding: '2px 4px 2px',
-          }}>
-            Display
-          </div>
-
-          {/* Point shape toggle */}
-          <div style={{
-            display: 'flex', borderRadius: radius.sm, overflow: 'hidden',
-            backgroundColor: 'rgba(255,255,255,0.04)',
-          }}>
-            {([['square', 'Square'], ['circle', 'Circle']] as const).map(([shape, label]) => {
-              const active = pointShape === shape
-              return (
-                <button
-                  key={shape}
-                  onClick={() => setPointShape(shape)}
-                  style={{
-                    flex: 1, padding: '4px 0', fontSize: '10px',
-                    fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
-                    border: 'none', cursor: 'pointer',
-                    backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
-                    color: active ? colors.accentBlue : colors.textDim,
-                    transition: 'all 0.15s', letterSpacing: '0.3px',
-                  }}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Point size slider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px' }}>
-            <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-              Size
-            </span>
-            <input
-              type="range" min={2} max={30}
-              value={Math.round(pointSize * 100)}
-              onChange={(e) => setPointSize(Number(e.target.value) / 100)}
-              style={{ width: 52, height: 2, accentColor: colors.accentBlue }}
-            />
-            <span style={{
-              fontSize: '10px', fontFamily: fonts.mono, color: colors.textPrimary,
-              minWidth: 24, textAlign: 'right',
-            }}>
-              {pointSize.toFixed(2)}
-            </span>
-          </div>
 
         </>}
       </div>}
