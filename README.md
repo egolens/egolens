@@ -100,7 +100,7 @@ The URL should point to a directory containing the dataset's standard folder str
 <p align="center">
   <img src="assets/share_view.gif" alt="Share View — copy URL and restore exact camera angle in a new tab" width="720" />
 </p>
-<p align="center"><sub>Copy a Share View link and open it in a new tab — frame, camera angle, and all settings restored instantly.</sub></p>
+<p align="center"><sub>Share what you see — one link captures frame, camera angle, overlays, and all settings.</sub></p>
 
 ## Dev Setup
 
