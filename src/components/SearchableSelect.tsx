@@ -11,7 +11,7 @@
  *   - Works fine with small lists too (nuScenes 10 scenes)
  */
 
-import { useState, useRef, useEffect, useCallback, useMemo, useId } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { colors, fonts, radius } from '../theme'
 
 /** Thin dark scrollbar styles injected once per component instance */

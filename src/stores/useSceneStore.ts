@@ -60,6 +60,11 @@ import {
   isAV2ParentUrl,
   discoverAV2LogsFromS3,
 } from '../adapters/argoverse2/remote'
+import {
+  fetchWaymoManifest as fetchWaymoRemoteManifest,
+  discoverWaymoSegments,
+  buildWaymoSegmentUrls,
+} from '../adapters/waymo/remote'
 import type { AV2LidarFrameDescriptor } from '../workers/av2LidarWorker'
 import type {
   AV2CameraFrameDescriptor,
@@ -320,6 +325,9 @@ const internal = {
   av2SampleFiles: null as Map<string, File | string> | null,
   /** Discovered AV2 logs from parent URL (multi-log mode) */
   av2DiscoveredLogs: null as { logId: string; logUrl: string }[] | null,
+  // -- Waymo-specific remote state --
+  /** Base URL for remote Waymo loading (e.g. https://bucket.s3.../waymo_data/) */
+  waymoBaseUrl: null as string | null,
 }
 
 function resetInternal() {
@@ -860,17 +868,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      // Waymo: URL-based path (Vite dev server)
-      const components = [
-        'vehicle_pose', 'lidar_calibration', 'camera_calibration',
-        'lidar_box', 'camera_box', 'camera_to_lidar_box_association',
-        'lidar', 'camera_image', 'stats',
-        'lidar_segmentation', 'camera_segmentation', 'lidar_hkp', 'camera_hkp',
-      ]
-      const sources = new Map<string, string>()
-      for (const comp of components) {
-        sources.set(comp, `/waymo_data/${comp}/${segmentId}.parquet`)
-      }
+      // Waymo: URL-based path (remote S3 or Vite dev server)
+      const waymoBase = internal.waymoBaseUrl || '/waymo_data/'
+      const sources = buildWaymoSegmentUrls(waymoBase, segmentId)
       await get().actions.loadDataset(sources as Map<string, File | string>)
     },
 
@@ -970,6 +970,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       internal.av2Db = null
       internal.av2SampleFiles = null
       internal.av2DiscoveredLogs = null
+      internal.waymoBaseUrl = null
       setManifest(waymoManifest)
       internal.filesBySegment = segments
       const segmentIds = [...segments.keys()].sort()
@@ -1167,10 +1168,63 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      // Waymo URL loading — not yet implemented
+      if (dataset === 'waymo') {
+        set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
+
+        try {
+          // Common state setup
+          internal.datasetId = 'waymo'
+          internal.waymoBaseUrl = baseUrl
+          internal.filesBySegment = null
+          internal.nuScenesDb = null
+          internal.nuScenesSampleFiles = null
+          internal.av2Db = null
+          internal.av2SampleFiles = null
+          internal.av2DiscoveredLogs = null
+          setManifest(waymoManifest)
+
+          // Direct segment access: if scene param is provided, skip discovery
+          if (initialScene) {
+            console.log(`[loadFromUrl] Waymo direct segment: ${initialScene}`)
+            set({ availableSegments: [initialScene], loadProgress: 0.15 })
+            await get().actions.selectSegment(initialScene)
+            return
+          }
+
+          // Segment discovery: manifest → S3 listing → HTTP directory listing
+          const manifest = await fetchWaymoRemoteManifest(baseUrl)
+          let segmentIds: string[]
+
+          if (manifest) {
+            console.log(`[loadFromUrl] Waymo manifest found: ${manifest.segments.length} segments`)
+            segmentIds = manifest.segments.sort()
+          } else {
+            console.log('[loadFromUrl] No Waymo manifest — discovering segments...')
+            segmentIds = await discoverWaymoSegments(baseUrl)
+            console.log(`[loadFromUrl] Discovered ${segmentIds.length} Waymo segments`)
+          }
+
+          if (segmentIds.length === 0) {
+            throw new Error(
+              'No Waymo segments found. Expected vehicle_pose/*.parquet files at the given URL.'
+            )
+          }
+          set({ availableSegments: segmentIds, loadProgress: 0.15 })
+          await get().actions.selectSegment(segmentIds[0])
+        } catch (e) {
+          console.error('[loadFromUrl] Waymo error:', e)
+          set({
+            status: 'error',
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
+        return
+      }
+
+      // Unknown dataset
       set({
         status: 'error',
-        error: `URL loading for "${dataset}" is not yet supported.`,
+        error: `URL loading for "${dataset}" is not supported.`,
       })
     },
 

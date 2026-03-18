@@ -51,7 +51,7 @@ function useSegmentDiscovery() {
 // Also handles embed mode: ?embed=true&dataset=...&data=...
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_URL_DATASETS = ['argoverse2', 'nuscenes'] as const
+const SUPPORTED_URL_DATASETS = ['argoverse2', 'nuscenes', 'waymo'] as const
 type UrlDataset = typeof SUPPORTED_URL_DATASETS[number]
 
 /** Guard against double-invocation from React StrictMode */
@@ -493,6 +493,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
   // URL loading state
   const [urlDataset, setUrlDataset] = useState<string>('argoverse2')
   const [urlInput, setUrlInput] = useState('')
+  const [urlSegment, setUrlSegment] = useState('')
   const [urlLoading, setUrlLoading] = useState(false)
   const [urlError, setUrlError] = useState<string | null>(null)
   const loadFromUrl = useSceneStore((s) => s.actions.loadFromUrl)
@@ -829,7 +830,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           </label>
           <select
             value={urlDataset}
-            onChange={(e) => { setUrlDataset(e.target.value); setUrlError(null) }}
+            onChange={(e) => { setUrlDataset(e.target.value); setUrlInput(''); setUrlSegment(''); setUrlError(null) }}
             disabled={urlLoading}
             style={{
               flex: 1,
@@ -846,7 +847,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           >
             <option value="argoverse2">Argoverse 2</option>
             <option value="nuscenes">nuScenes</option>
-            <option value="waymo" disabled>Waymo (coming soon)</option>
+            <option value="waymo">Waymo</option>
           </select>
         </div>
 
@@ -862,9 +863,13 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               }
             }}
             disabled={urlLoading}
-            placeholder={urlDataset === 'nuscenes'
-              ? 'https://data.egolens.org/nuscenes/'
-              : 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/'}
+            placeholder={
+              urlDataset === 'nuscenes'
+                ? 'https://data.egolens.org/nuscenes/'
+                : urlDataset === 'waymo'
+                  ? 'https://your-bucket.s3.amazonaws.com/waymo_data/'
+                  : 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/'
+            }
             style={{
               flex: 1,
               padding: '8px 12px',
@@ -906,6 +911,39 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           </button>
         </div>
 
+        {/* Optional scene/segment ID for direct access (all datasets) */}
+        <input
+          type="text"
+          value={urlSegment}
+          onChange={(e) => { setUrlSegment(e.target.value); setUrlError(null) }}
+          disabled={urlLoading}
+          placeholder={
+            urlDataset === 'waymo'
+              ? 'Segment ID (optional — e.g. 10455472356147194054_1560_000_1580_000)'
+              : urlDataset === 'nuscenes'
+                ? 'Scene name (optional — e.g. scene-0061)'
+                : 'Log ID (optional — e.g. 00a6ffc1-6ce9-3bc3-a060-6006e9893a1a)'
+          }
+          style={{
+            padding: '8px 12px',
+            fontSize: '12px',
+            fontFamily: fonts.mono,
+            backgroundColor: colors.bgOverlay,
+            color: colors.textPrimary,
+            border: `1px solid ${colors.border}`,
+            borderRadius: radius.sm,
+            outline: 'none',
+            transition: 'border-color 0.15s',
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = colors.accent }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = colors.border }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && urlInput.trim() && !urlLoading) {
+              handleUrlLoad()
+            }
+          }}
+        />
+
         {/* URL error */}
         {urlError && (
           <div style={{
@@ -929,31 +967,45 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           textAlign: 'center',
           lineHeight: 1.6,
         }}>
-          Supports S3-hosted or any public URL with standard dataset structure.{' '}
-          <button
-            onClick={() => {
-              if (urlDataset === 'nuscenes') {
-                setUrlInput('https://data.egolens.org/nuscenes/')
-              } else {
-                setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/')
-              }
-              setUrlError(null)
-            }}
-            disabled={urlLoading}
-            style={{
-              padding: 0,
-              fontSize: '11px',
-              fontFamily: fonts.sans,
-              color: colors.accent,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              opacity: urlLoading ? 0.5 : 1,
-            }}
-          >
-            Try example
-          </button>
+          URL only: auto-discovers all segments. URL + ID: loads that segment directly.
+          {urlDataset === 'waymo' ? (
+            <span> Waymo data redistribution is prohibited — host your own copy after accepting the{' '}
+              <a
+                href="https://waymo.com/open/terms/"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: colors.accent, textDecoration: 'underline' }}
+              >license</a>.
+            </span>
+          ) : (
+            <>
+              {' '}
+              <button
+                onClick={() => {
+                  if (urlDataset === 'nuscenes') {
+                    setUrlInput('https://data.egolens.org/nuscenes/')
+                  } else {
+                    setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/')
+                  }
+                  setUrlError(null)
+                }}
+                disabled={urlLoading}
+                style={{
+                  padding: 0,
+                  fontSize: '11px',
+                  fontFamily: fonts.sans,
+                  color: colors.accent,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  opacity: urlLoading ? 0.5 : 1,
+                }}
+              >
+                Try example
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -966,7 +1018,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 
     try {
       const baseUrl = normalizeBaseUrl(urlInput)
-      await loadFromUrl(urlDataset, baseUrl)
+      const scene = urlSegment.trim() || undefined
+      await loadFromUrl(urlDataset, baseUrl, scene)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setUrlError(msg)
