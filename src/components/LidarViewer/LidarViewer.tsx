@@ -312,9 +312,44 @@ function InitialCameraSetup({ orbitRef }: { orbitRef: React.RefObject<any> }) {
     if (!initialized.current && orbitRef.current) {
       if (_pendingCameraPose) {
         // Restore camera pose from Share URL
-        const { position, target } = _pendingCameraPose
-        orbitRef.current.object.position.set(...position)
+        const { position, target, azimuth, distance } = _pendingCameraPose
         orbitRef.current.target.set(...target)
+
+        if (azimuth != null && distance != null) {
+          // Azimuth-aware restore: fixes BEV gimbal-lock.
+          //
+          // Problem: at BEV angles, cp and ct have nearly identical x,y
+          // after toFixed() rounding. OrbitControls uses an internal quat
+          // (from camera.up → Y-up) before computing spherical coords.
+          // At BEV the rotated offset's XZ components → ~0, so
+          // theta = atan2(0,0) = 0 — compass direction lost.
+          //
+          // Fix: compute the same Z-up → Y-up quat ourselves (OrbitControls'
+          // _quat is a private closure variable, NOT accessible on the instance).
+          // Then rebuild the offset from saved azimuth + distance.
+          const quat = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0, 0, 1), // camera.up (Z-up)
+            new THREE.Vector3(0, 1, 0), // Three.js convention (Y-up)
+          )
+          const quatInv = quat.clone().invert()
+
+          const rawOffset = new THREE.Vector3(...position).sub(new THREE.Vector3(...target))
+          // Rotate into OrbitControls' internal Y-up frame
+          rawOffset.applyQuaternion(quat)
+          const sph = new THREE.Spherical().setFromVector3(rawOffset)
+          sph.theta = azimuth
+          sph.phi = Math.max(sph.phi, 0.001) // prevent degenerate pole
+          sph.radius = distance
+          // Convert back to world frame
+          const offset = new THREE.Vector3().setFromSpherical(sph)
+          offset.applyQuaternion(quatInv)
+          orbitRef.current.object.position.copy(
+            new THREE.Vector3(...target).add(offset),
+          )
+        } else {
+          // Legacy fallback: cp/ct only (no azimuth in URL)
+          orbitRef.current.object.position.set(...position)
+        }
         _pendingCameraPose = null
       } else {
         orbitRef.current.target.copy(CHASE_CAM_TARGET)
@@ -492,18 +527,33 @@ function BgColorSync() {
 // ---------------------------------------------------------------------------
 let _cameraPos: [number, number, number] = [0, 0, 0]
 let _cameraTarget: [number, number, number] = [0, 0, 0]
+/** Azimuthal angle (theta) from OrbitControls — directly encodes the compass
+ *  direction without gimbal-lock precision loss at BEV angles. */
+let _cameraAzimuth = 0
+let _cameraDistance = 0
 
-/** Read current orbit camera position + target (for Share URL) */
+/** Read current orbit camera state (for Share URL) */
 export function getCameraPose() {
-  return { position: _cameraPos, target: _cameraTarget }
+  return { position: _cameraPos, target: _cameraTarget, azimuth: _cameraAzimuth, distance: _cameraDistance }
 }
 
 /** Pending camera pose to apply when OrbitControls mounts (set by URL restore) */
-let _pendingCameraPose: { position: [number, number, number]; target: [number, number, number] } | null = null
+let _pendingCameraPose: {
+  position: [number, number, number]
+  target: [number, number, number]
+  /** Azimuthal angle — overrides theta derived from cp/ct at BEV angles */
+  azimuth?: number
+  distance?: number
+} | null = null
 
 /** Queue a camera pose to be applied once the 3D scene is ready */
-export function setPendingCameraPose(pos: [number, number, number], target: [number, number, number]) {
-  _pendingCameraPose = { position: pos, target: target }
+export function setPendingCameraPose(
+  pos: [number, number, number],
+  target: [number, number, number],
+  azimuth?: number,
+  distance?: number,
+) {
+  _pendingCameraPose = { position: pos, target: target, azimuth, distance }
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +692,10 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
               const t = c.target
               _cameraPos = [p.x, p.y, p.z]
               _cameraTarget = [t.x, t.y, t.z]
+              // Capture azimuthal angle via public API — this is the compass
+              // direction that gets lost at BEV angles when encoding as cp/ct
+              _cameraAzimuth = c.getAzimuthalAngle()
+              _cameraDistance = p.distanceTo(t)
             }
           }}
           /* enabled is controlled imperatively by PovController via orbitRef */

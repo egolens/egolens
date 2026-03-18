@@ -148,7 +148,7 @@ function useUrlViewRestore() {
     if (viewParams.speed != null) actions.setPlaybackSpeed(viewParams.speed)
     if (viewParams.followCam === false) actions.setFollowCam(false)
     if (viewParams.cameraPos && viewParams.cameraTarget) {
-      setPendingCameraPose(viewParams.cameraPos, viewParams.cameraTarget)
+      setPendingCameraPose(viewParams.cameraPos, viewParams.cameraTarget, viewParams.cameraAzimuth, viewParams.cameraDistance)
     }
   }, [status])
 }
@@ -450,6 +450,8 @@ function Header() {
       followCam: s.followCam,
       cameraPos: cam.position,
       cameraTarget: cam.target,
+      cameraAzimuth: cam.azimuth,
+      cameraDistance: cam.distance || undefined,
     }
     const url = buildShareUrl(state)
 

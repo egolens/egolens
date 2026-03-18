@@ -109,6 +109,10 @@ export interface ShareableState {
   cameraPos?: [number, number, number]
   /** Camera target/look-at [x,y,z] */
   cameraTarget?: [number, number, number]
+  /** Azimuthal angle (theta) — orbit compass direction, fixes BEV gimbal-lock */
+  cameraAzimuth?: number
+  /** Camera distance to target */
+  cameraDistance?: number
 }
 
 /**
@@ -139,8 +143,14 @@ export function buildShareUrl(state: ShareableState): string {
   if (state.cameraSeg) params.set('camseg', '1')
   if (state.speed != null && state.speed !== 1) params.set('speed', String(state.speed))
   if (state.followCam === false) params.set('follow', '0')
-  if (state.cameraPos) params.set('cp', state.cameraPos.map(v => v.toFixed(1)).join(','))
-  if (state.cameraTarget) params.set('ct', state.cameraTarget.map(v => v.toFixed(1)).join(','))
+  if (state.cameraPos) params.set('cp', state.cameraPos.map(v => v.toFixed(2)).join(','))
+  if (state.cameraTarget) params.set('ct', state.cameraTarget.map(v => v.toFixed(2)).join(','))
+  // Azimuthal angle (theta) — the compass direction of the orbit camera.
+  // At near-BEV angles, cp/ct have identical x,y after rounding, so
+  // OrbitControls can't recover theta from atan2(0,0). Saving theta
+  // directly as a single float avoids gimbal-lock entirely.
+  if (state.cameraAzimuth != null) params.set('az', state.cameraAzimuth.toFixed(4))
+  if (state.cameraDistance != null) params.set('cd', state.cameraDistance.toFixed(2))
 
   const qs = params.toString()
   return `${window.location.origin}${window.location.pathname}${qs ? '?' + qs : ''}`
@@ -203,6 +213,10 @@ export function parseViewParams(search?: string): Partial<ShareableState> {
     const nums = ct.split(',').map(Number)
     if (nums.length === 3 && nums.every(n => !isNaN(n))) state.cameraTarget = nums as [number, number, number]
   }
+  const az = params.get('az')
+  if (az) { const n = parseFloat(az); if (!isNaN(n)) state.cameraAzimuth = n }
+  const cd = params.get('cd')
+  if (cd) { const n = parseFloat(cd); if (n > 0) state.cameraDistance = n }
 
   return state
 }
