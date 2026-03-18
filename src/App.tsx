@@ -10,6 +10,7 @@ import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils
 import { normalizeBaseUrl } from './utils/urlValidation'
 import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
+import { trackDatasetLoad, trackShareView, trackPresetClick } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -79,6 +80,8 @@ function useUrlAutoLoad() {
 
     try {
       const baseUrl = normalizeBaseUrl(dataUrl)
+      const hasView = new URLSearchParams(window.location.search).has('frame')
+      trackDatasetLoad(dataset, hasView ? 'url' : 'preset')
       loadFromUrl(dataset, baseUrl, scene)
     } catch {
       // Invalid URL — silently ignore, user will see the landing page
@@ -425,6 +428,7 @@ function Header() {
     if (s.activeCam != null) parts.push('POV cam')
     const summary = parts.join(' · ')
 
+    trackShareView(src?.dataset ?? 'unknown')
     navigator.clipboard.writeText(url).then(() => {
       setShareCopied(summary)
       setTimeout(() => setShareCopied(false), 3000)
@@ -828,6 +832,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               <button
                 key={preset.dataset}
                 onClick={() => {
+                  trackPresetClick(preset.dataset)
                   setUrlDataset(preset.dataset)
                   setUrlInput(preset.url)
                   setUrlSegment('')
@@ -1222,6 +1227,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
     try {
       const baseUrl = normalizeBaseUrl(urlInput)
       const scene = urlSegment.trim() || undefined
+      trackDatasetLoad(urlDataset, 'url')
       await loadFromUrl(urlDataset, baseUrl, scene)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

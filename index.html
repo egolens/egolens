@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EgoLens</title>
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4LENPW8TBE"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-4LENPW8TBE', {
+        storage: 'none',
+        client_id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

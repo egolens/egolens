@@ -74,6 +74,7 @@ import type {
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
 import { setUrlSource, clearUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
@@ -753,6 +754,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     setBoxMode: (mode: BoxMode) => {
       set({ boxMode: mode })
+      trackOverlayToggle('box_mode', mode !== 'off')
     },
 
     setTrailLength: (len: number) => {
@@ -764,12 +766,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
     setColormapMode: (mode: ColormapMode) => {
       set({ colormapMode: mode })
+      trackColormapChange(mode)
     },
     setActiveCam: (cam: number | null) => {
       set({ activeCam: cam })
+      trackPovSwitch(cam !== null ? `camera_${cam}` : 'orbit')
     },
     toggleActiveCam: (cam: number) => {
-      set((s) => ({ activeCam: s.activeCam === cam ? null : cam }))
+      const next = get().activeCam === cam ? null : cam
+      set({ activeCam: next })
+      trackPovSwitch(next !== null ? `camera_${cam}` : 'orbit')
     },
     setHoveredCam: (cam: number | null) => {
       set({ hoveredCam: cam })
@@ -813,6 +819,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     selectSegment: async (segmentId: string) => {
       const prev = get()
+      trackSegmentSwitch(internal.datasetId ?? segmentId)
       prev.actions.reset()
 
       // After reset, UI prefs are already preserved. Just set the segment.
@@ -892,13 +899,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set((s) => ({ showLidarOverlay: !s.showLidarOverlay }))
     },
     toggleKeypoints3D: () => {
-      set((s) => ({ showKeypoints3D: !s.showKeypoints3D }))
+      const next = !get().showKeypoints3D
+      set({ showKeypoints3D: next })
+      trackOverlayToggle('keypoints_3d', next)
     },
     toggleKeypoints2D: () => {
-      set((s) => ({ showKeypoints2D: !s.showKeypoints2D }))
+      const next = !get().showKeypoints2D
+      set({ showKeypoints2D: next })
+      trackOverlayToggle('keypoints_2d', next)
     },
     toggleCameraSeg: () => {
-      set((s) => ({ showCameraSeg: !s.showCameraSeg }))
+      const next = !get().showCameraSeg
+      set({ showCameraSeg: next })
+      trackOverlayToggle('camera_seg', next)
     },
 
     // Display settings
@@ -909,6 +922,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Local files — clear URL source so segment changes don't sync to URL bar
       clearUrlSource()
+      const datasetHint = segments.has('__nuscenes__') ? 'nuscenes' : segments.has('__argoverse2__') ? 'argoverse2' : 'waymo'
+      trackDatasetLoad(datasetHint, 'local')
 
       // Check for nuScenes sentinel key (produced by folder scanner)
       if (segments.has('__nuscenes__')) {

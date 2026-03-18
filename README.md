@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://egolens.org"><strong>Live Demo</strong></a> ·
+  <a href="https://egolens.github.io/egolens"><strong>Live Demo</strong></a> ·
   <a href="#url-loading">URL Loading</a> ·
   <a href="#share-view">Share View</a> ·
   <a href="#dev-setup">Dev Setup</a>
@@ -66,7 +66,7 @@ Dataset format is auto-detected from folder structure.
 
 ### Local files (drag & drop)
 
-1. Open the [live demo](https://egolens.org)
+1. Open the [live demo](https://egolens.github.io/egolens)
 2. Drag & drop your dataset folder into the browser
 3. Done — browse frames, toggle sensors, play the timeline
 
@@ -80,9 +80,9 @@ Load data directly from S3 or any static file server by providing a URL.
 - **URL + Segment ID** — loads a specific segment directly (works with any static file server)
 
 ```
-https://egolens.org/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
-https://egolens.org/?dataset=nuscenes&data=https://your-server.com/nuscenes/
-https://egolens.org/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
+https://egolens.github.io/egolens/?dataset=argoverse2&data=https://your-server.com/av2/sensor/val/
+https://egolens.github.io/egolens/?dataset=nuscenes&data=https://your-server.com/nuscenes/
+https://egolens.github.io/egolens/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
 ```
 
 The URL should point to a directory containing the dataset's standard folder structure. Works with S3 buckets, any HTTP server, or localhost.
