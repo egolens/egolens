@@ -1025,8 +1025,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 // ---------------------------------------------------------------------------
 
 const LOAD_STEP_LABELS: Record<string, string> = {
-  'opening': 'Opening Parquet files…',
-  'parsing': 'Parsing poses & calibrations…',
+  'opening': 'Opening data files…',
+  'parsing': 'Loading metadata…',
   'workers': 'Initializing workers…',
   'first-frame': 'Decoding first frame…',
 }
