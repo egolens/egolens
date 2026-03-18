@@ -1,8 +1,10 @@
 <h1 align="center">EgoLens</h1>
 
 <p align="center">
-  Browser-native 3D perception explorer for autonomous driving datasets<br/>
-  Everything runs in your browser — no backend, no preprocessing.
+  Explore the most widely used autonomous driving datasets<br/>
+  — Waymo, nuScenes, and Argoverse 2 —<br/>
+  directly in your browser, straight from the original files.<br/>
+  No conversion, no preprocessing.
 </p>
 
 <p align="center">

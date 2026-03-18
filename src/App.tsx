@@ -734,9 +734,11 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           color: colors.textSecondary,
           lineHeight: 1.7,
         }}>
-          Browser-based 3D perception explorer.<br />
-          Everything runs in your browser — no backend, no preprocessing.
+          Explore the most widely used autonomous driving datasets<br />
+          directly in your browser, straight from the original files.<br />
+          No conversion, no preprocessing.
         </div>
+        {/* Dataset badges — outlined, info only */}
         <div style={{
           display: 'flex',
           gap: '8px',
@@ -760,16 +762,17 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 fontSize: '11px',
                 fontFamily: fonts.sans,
                 fontWeight: 600,
-                color: '#fff',
-                backgroundColor: color,
+                color: color,
+                backgroundColor: 'transparent',
+                border: `1px solid ${color}`,
                 borderRadius: '4px',
                 textDecoration: 'none',
                 letterSpacing: '0.02em',
-                opacity: 0.9,
+                opacity: 0.7,
                 transition: 'opacity 0.15s',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.9' }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7' }}
             >
               {label}
             </a>
@@ -777,78 +780,84 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         </div>
 
         {/* Quick start — try with hosted data */}
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '10px',
-          marginTop: '4px',
-        }}>
-          <span style={{
-            fontSize: '12px',
-            fontFamily: fonts.sans,
-            color: colors.textDim,
-            letterSpacing: '0.03em',
-          }}>Try it now with hosted data</span>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            {([
-              { dataset: 'nuscenes', label: 'nuScenes mini', url: 'https://data.egolens.org/nuscenes/', note: 'Hosted by EgoLens · 10 scenes' },
-              { dataset: 'argoverse2', label: 'Argoverse 2', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', note: 'Via Argoverse S3 · validation split' },
-            ] as const).map((preset) => {
-              const isActive = urlDataset === preset.dataset && urlInput === preset.url
-              return (
-                <button
-                  key={preset.dataset}
-                  onClick={() => {
-                    setUrlDataset(preset.dataset)
-                    setUrlInput(preset.url)
-                    setUrlSegment('')
-                    setUrlError(null)
-                  }}
-                  disabled={urlLoading}
-                  title={preset.note}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '2px',
-                    padding: '10px 20px',
-                    fontSize: '13px',
-                    fontFamily: fonts.sans,
-                    fontWeight: 600,
-                    color: isActive ? '#000' : colors.textPrimary,
-                    backgroundColor: isActive ? colors.accent : colors.bgOverlay,
-                    border: `1px solid ${isActive ? colors.accent : colors.border}`,
-                    borderRadius: radius.md,
-                    cursor: urlLoading ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.15s',
-                    opacity: urlLoading ? 0.5 : 1,
-                    minWidth: '180px',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!urlLoading && !isActive) {
-                      e.currentTarget.style.borderColor = colors.accent
-                      e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.08)'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      e.currentTarget.style.borderColor = colors.border
-                      e.currentTarget.style.backgroundColor = colors.bgOverlay
-                    }
-                  }}
-                >
-                  {preset.label}
-                  <span style={{
-                    fontSize: '10px',
-                    fontWeight: 400,
-                    color: isActive ? 'rgba(0,0,0,0.6)' : colors.textDim,
-                  }}>{preset.note}</span>
-                </button>
-              )
-            })}
-          </div>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '8px' }}>
+          {([
+            { dataset: 'nuscenes', label: 'Try nuScenes mini', url: 'https://data.egolens.org/nuscenes/', note: 'Hosted by EgoLens · 10 scenes' },
+            { dataset: 'argoverse2', label: 'Try Argoverse 2', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', note: 'Via Argoverse S3 · validation split' },
+          ] as const).map((preset) => {
+            const isActive = urlDataset === preset.dataset && urlInput === preset.url
+            return (
+              <button
+                key={preset.dataset}
+                onClick={() => {
+                  setUrlDataset(preset.dataset)
+                  setUrlInput(preset.url)
+                  setUrlSegment('')
+                  setUrlError(null)
+                }}
+                disabled={urlLoading}
+                title={preset.note}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '2px',
+                  padding: '10px 20px',
+                  fontSize: '13px',
+                  fontFamily: fonts.sans,
+                  fontWeight: 600,
+                  color: isActive ? '#000' : colors.textPrimary,
+                  backgroundColor: isActive ? colors.accent : colors.bgOverlay,
+                  border: `1px solid ${isActive ? colors.accent : colors.border}`,
+                  borderRadius: radius.md,
+                  cursor: urlLoading ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                  opacity: urlLoading ? 0.5 : 1,
+                  minWidth: '180px',
+                }}
+                onMouseEnter={(e) => {
+                  if (!urlLoading && !isActive) {
+                    e.currentTarget.style.borderColor = colors.accent
+                    e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.08)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.borderColor = colors.border
+                    e.currentTarget.style.backgroundColor = colors.bgOverlay
+                  }
+                }}
+              >
+                {preset.label}
+                <span style={{
+                  fontSize: '10px',
+                  fontWeight: 400,
+                  color: isActive ? 'rgba(0,0,0,0.6)' : colors.textDim,
+                }}>{preset.note}</span>
+              </button>
+            )
+          })}
         </div>
+      </div>
+
+      {/* ── or load your own data ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        width: '100%',
+        maxWidth: '520px',
+      }}>
+        <div style={{ flex: 1, height: '1px', background: colors.border }} />
+        <span style={{
+          fontSize: '11px',
+          fontFamily: fonts.sans,
+          color: colors.textDim,
+          textTransform: 'uppercase' as const,
+          letterSpacing: '0.08em',
+          whiteSpace: 'nowrap',
+        }}>or load your own data</span>
+        <div style={{ flex: 1, height: '1px', background: colors.border }} />
       </div>
 
       {/* URL input section */}
@@ -1062,56 +1071,56 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? colors.accent : colors.textDim} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={dragging ? colors.accent : colors.textDim} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 <line x1="12" y1="11" x2="12" y2="17" />
                 <polyline points="9 14 12 11 15 14" />
               </svg>
-              <div>
-                <div style={{
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  fontFamily: fonts.sans,
-                  color: colors.textPrimary,
-                }}>
-                  Drop a dataset folder here
-                </div>
-                <div style={{
-                  fontSize: '12px',
-                  fontFamily: fonts.sans,
-                  color: colors.textSecondary,
-                }}>
-                  Waymo, nuScenes, or Argoverse 2 — auto-detected
-                </div>
-              </div>
+              <span style={{
+                fontSize: '14px',
+                fontWeight: 600,
+                fontFamily: fonts.sans,
+                color: colors.textPrimary,
+              }}>
+                Drop a dataset folder here
+              </span>
+              {hasDirectoryPicker() && (
+                <>
+                  <span style={{ fontSize: '12px', fontFamily: fonts.sans, color: colors.textDim }}>or</span>
+                  <button
+                    onClick={onPickFolder}
+                    style={{
+                      padding: '5px 14px',
+                      fontSize: '12px',
+                      fontFamily: fonts.sans,
+                      fontWeight: 500,
+                      backgroundColor: 'transparent',
+                      color: colors.accent,
+                      border: `1px solid ${colors.accent}`,
+                      borderRadius: radius.sm,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.1)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    }}
+                  >
+                    Select Folder
+                  </button>
+                </>
+              )}
             </div>
-
-            {hasDirectoryPicker() && (
-              <button
-                onClick={onPickFolder}
-                style={{
-                  padding: '8px 20px',
-                  fontSize: '12px',
-                  fontFamily: fonts.sans,
-                  fontWeight: 500,
-                  backgroundColor: 'transparent',
-                  color: colors.accent,
-                  border: `1px solid ${colors.accent}`,
-                  borderRadius: radius.sm,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.1)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                }}
-              >
-                Select Folder
-              </button>
-            )}
+            <div style={{
+              fontSize: '12px',
+              fontFamily: fonts.sans,
+              color: colors.textSecondary,
+            }}>
+              Waymo, nuScenes, or Argoverse 2 — auto-detected
+            </div>
 
             {error && (
               <div style={{
