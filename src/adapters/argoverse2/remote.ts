@@ -242,6 +242,138 @@ export async function discoverAV2FramesFromS3(
 }
 
 // ---------------------------------------------------------------------------
+// Multi-log discovery (parent directory listing)
+// ---------------------------------------------------------------------------
+
+/** Single page of S3 ListObjectsV2 with delimiter — returns CommonPrefixes (subdirectories). */
+interface S3PrefixListPage {
+  prefixes: string[]
+  isTruncated: boolean
+  nextContinuationToken?: string
+}
+
+/**
+ * Fetch one page of S3 subdirectories using delimiter='/'.
+ * Returns CommonPrefixes (folder names) instead of individual file keys.
+ */
+async function fetchS3PrefixPage(
+  bucketEndpoint: string,
+  prefix: string,
+  continuationToken?: string,
+): Promise<S3PrefixListPage> {
+  const params = new URLSearchParams({
+    'list-type': '2',
+    'prefix': prefix,
+    'delimiter': '/',
+    'max-keys': '1000',
+  })
+  if (continuationToken) params.set('continuation-token', continuationToken)
+
+  const url = `${bucketEndpoint}/?${params}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new DataLoadError(
+        'S3 bucket listing is not publicly accessible (403 Forbidden).',
+        'CORS', url,
+      )
+    }
+    throw classifyHttpError(res.status, url)
+  }
+
+  const xml = await res.text()
+
+  // Extract <Prefix>...</Prefix> inside <CommonPrefixes> blocks
+  const prefixes: string[] = []
+  const prefixRegex = /<CommonPrefixes>\s*<Prefix>(.*?)<\/Prefix>/g
+  let m: RegExpExecArray | null
+  while ((m = prefixRegex.exec(xml)) !== null) {
+    prefixes.push(m[1])
+  }
+
+  const truncMatch = xml.match(/<IsTruncated>(.*?)<\/IsTruncated>/)
+  const isTruncated = truncMatch?.[1] === 'true'
+  const tokenMatch = xml.match(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/)
+
+  return {
+    prefixes,
+    isTruncated,
+    nextContinuationToken: tokenMatch?.[1],
+  }
+}
+
+/**
+ * Detect if a URL points to a split directory (e.g. .../train/) rather than a specific log.
+ * Heuristic: if the last path segment is 'train', 'val', or 'test',
+ * it's a parent directory containing logs.
+ */
+export function isAV2ParentUrl(baseUrl: string): boolean {
+  const path = new URL(baseUrl).pathname.replace(/\/$/, '')
+  const lastSegment = path.split('/').pop() || ''
+  return ['train', 'val', 'test'].includes(lastSegment)
+}
+
+/**
+ * Discover AV2 log IDs from a split-level S3 directory (e.g. .../train/).
+ *
+ * Uses delimiter='/' for efficient subdirectory-only listing.
+ * Each split (train/val/test) should be entered as a separate URL —
+ * keeps logic simple and decoupled.
+ *
+ * @param baseUrl - Split URL with trailing slash (e.g. ".../sensor/train/")
+ * @param maxLogs - Maximum number of logs to discover (default 700)
+ * @returns Array of { logId, logUrl } entries
+ */
+export async function discoverAV2LogsFromS3(
+  baseUrl: string,
+  maxLogs = 700,
+): Promise<{ logId: string; logUrl: string }[]> {
+  const s3 = parseS3Url(baseUrl)
+  if (!s3) {
+    throw new DataLoadError(
+      'Cannot discover logs: URL is not a recognized S3 endpoint.',
+      'MANIFEST', baseUrl,
+    )
+  }
+
+  return discoverAV2LogsInSplit(s3.bucketEndpoint, s3.prefix, maxLogs)
+}
+
+/**
+ * Discover log IDs within a single AV2 split directory.
+ */
+async function discoverAV2LogsInSplit(
+  bucketEndpoint: string,
+  prefix: string,
+  maxLogs: number,
+): Promise<{ logId: string; logUrl: string }[]> {
+  const logs: { logId: string; logUrl: string }[] = []
+  let continuationToken: string | undefined
+  let pageCount = 0
+
+  do {
+    const page = await fetchS3PrefixPage(bucketEndpoint, prefix, continuationToken)
+
+    for (const pfx of page.prefixes) {
+      // pfx looks like "datasets/av2/sensor/train/00a6ffc1-.../""
+      const segments = pfx.replace(/\/$/, '').split('/')
+      const logId = segments[segments.length - 1]
+      if (logId) {
+        const logUrl = `${bucketEndpoint}/${pfx}`
+        logs.push({ logId, logUrl })
+      }
+      if (logs.length >= maxLogs) break
+    }
+
+    continuationToken = page.isTruncated ? page.nextContinuationToken : undefined
+    pageCount++
+  } while (continuationToken && logs.length < maxLogs && pageCount < 10)
+
+  return logs
+}
+
+// ---------------------------------------------------------------------------
 // Buffer fetch helper
 // ---------------------------------------------------------------------------
 

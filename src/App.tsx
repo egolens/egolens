@@ -50,7 +50,7 @@ function useSegmentDiscovery() {
 // Also handles embed mode: ?embed=true&dataset=...&data=...
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_URL_DATASETS = ['argoverse2'] as const
+const SUPPORTED_URL_DATASETS = ['argoverse2', 'nuscenes'] as const
 type UrlDataset = typeof SUPPORTED_URL_DATASETS[number]
 
 /** Guard against double-invocation from React StrictMode */
@@ -67,6 +67,7 @@ function useUrlAutoLoad() {
     const params = new URLSearchParams(window.location.search)
     const dataset = params.get('dataset')
     const dataUrl = params.get('data')
+    const scene = params.get('scene') || undefined
 
     if (!dataset || !dataUrl) return
     if (!SUPPORTED_URL_DATASETS.includes(dataset as UrlDataset)) return
@@ -75,7 +76,7 @@ function useUrlAutoLoad() {
 
     try {
       const baseUrl = normalizeBaseUrl(dataUrl)
-      loadFromUrl(dataset, baseUrl)
+      loadFromUrl(dataset, baseUrl, scene)
     } catch {
       // Invalid URL — silently ignore, user will see the landing page
       urlAutoLoadStarted = false
@@ -407,9 +408,14 @@ function Header() {
           {availableSegments.map((seg, i) => {
             const meta = segmentMetas.get(seg)
             const shortId = seg.slice(0, 7)
-            const label = meta
-              ? `#${i + 1} · ${shortId} · ${LOCATION_LABELS[meta.location] ?? meta.location} · ${meta.timeOfDay}`
-              : `#${i + 1} · ${shortId}`
+            // Build label parts, filtering out empty values
+            const parts = [`#${i + 1}`, shortId]
+            if (meta) {
+              const loc = LOCATION_LABELS[meta.location] ?? meta.location
+              if (loc) parts.push(loc)
+              if (meta.timeOfDay) parts.push(meta.timeOfDay)
+            }
+            const label = parts.join(' · ')
             return <option key={seg} value={seg}>{label}</option>
           })}
         </select>
@@ -950,8 +956,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
             }}
           >
             <option value="argoverse2">Argoverse 2</option>
+            <option value="nuscenes">nuScenes</option>
             <option value="waymo" disabled>Waymo (coming soon)</option>
-            <option value="nuscenes" disabled>nuScenes (coming soon)</option>
           </select>
         </div>
 
@@ -967,7 +973,9 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               }
             }}
             disabled={urlLoading}
-            placeholder="https://your-bucket.s3.amazonaws.com/av2/log_id/"
+            placeholder={urlDataset === 'nuscenes'
+              ? 'https://data.egolens.org/nuscenes/'
+              : 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/'}
             style={{
               flex: 1,
               padding: '8px 12px',
@@ -1032,11 +1040,14 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           textAlign: 'center',
           lineHeight: 1.6,
         }}>
-          Supports S3-hosted data (public listing or <span style={{ fontFamily: fonts.mono }}>manifest.json</span>).{' '}
+          Supports S3-hosted or any public URL with standard dataset structure.{' '}
           <button
             onClick={() => {
-              setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/00a6ffc1-6ce9-3bc3-a060-6006e9893a1a/')
-              setUrlDataset('argoverse2')
+              if (urlDataset === 'nuscenes') {
+                setUrlInput('https://data.egolens.org/nuscenes/')
+              } else {
+                setUrlInput('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/')
+              }
               setUrlError(null)
             }}
             disabled={urlLoading}

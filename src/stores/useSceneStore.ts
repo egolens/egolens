@@ -57,6 +57,8 @@ import {
 import {
   fetchAV2Manifest,
   loadAV2FromUrl,
+  isAV2ParentUrl,
+  discoverAV2LogsFromS3,
 } from '../adapters/argoverse2/remote'
 import type { AV2LidarFrameDescriptor } from '../workers/av2LidarWorker'
 import type {
@@ -124,8 +126,8 @@ interface SceneActions {
   setAvailableSegments: (segments: string[]) => void
   selectSegment: (segmentId: string) => Promise<void>
   loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
-  /** Load dataset from a remote URL (AV2 supported, Waymo/nuScenes planned) */
-  loadFromUrl: (dataset: string, baseUrl: string) => Promise<void>
+  /** Load dataset from a remote URL. Optional initialScene to auto-select a specific scene. */
+  loadFromUrl: (dataset: string, baseUrl: string, initialScene?: string) => Promise<void>
   toggleWorldMode: () => void
   toggleLidarOverlay: () => void
   toggleKeypoints3D: () => void
@@ -305,13 +307,15 @@ const internal = {
   datasetId: 'waymo' as string,
   /** Parsed nuScenes database (built once from JSON, reused across scene switches) */
   nuScenesDb: null as NuScenesDatabase | null,
-  /** nuScenes sample data files keyed by relative path (e.g. "samples/LIDAR_TOP/xxx.pcd.bin") */
-  nuScenesSampleFiles: null as Map<string, File> | null,
+  /** nuScenes sample data files keyed by relative path (File for local, string URL for remote) */
+  nuScenesSampleFiles: null as Map<string, File | string> | null,
   // -- Argoverse 2-specific state --
   /** Parsed AV2 log database */
   av2Db: null as AV2LogDatabase | null,
   /** AV2 sensor data files keyed by relative path (File for local, string URL for remote) */
   av2SampleFiles: null as Map<string, File | string> | null,
+  /** Discovered AV2 logs from parent URL (multi-log mode) */
+  av2DiscoveredLogs: null as { logId: string; logUrl: string }[] | null,
 }
 
 function resetInternal() {
@@ -779,9 +783,32 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      if (internal.datasetId === 'argoverse2' && internal.av2Db) {
-        await loadAV2Scene(segmentId, set, get)
-        return
+      if (internal.datasetId === 'argoverse2') {
+        // Multi-log mode: if switching to a different log, load it from URL first
+        if (internal.av2DiscoveredLogs && (!internal.av2Db || internal.av2Db.logId !== segmentId)) {
+          const logEntry = internal.av2DiscoveredLogs.find(l => l.logId === segmentId)
+          if (!logEntry) throw new Error(`AV2 log not found: ${segmentId}`)
+
+          set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
+
+          const manifest = await fetchAV2Manifest(logEntry.logUrl)
+          const { db, fileEntries } = await loadAV2FromUrl(logEntry.logUrl, manifest, (p) => {
+            set({ loadProgress: p * 0.2 })
+          })
+
+          const sampleFiles = new Map<string, string>()
+          for (const [filename, url] of fileEntries) {
+            sampleFiles.set(filename, url)
+          }
+
+          internal.av2Db = db
+          internal.av2SampleFiles = sampleFiles
+        }
+
+        if (internal.av2Db) {
+          await loadAV2Scene(segmentId, set, get)
+          return
+        }
       }
 
       // Waymo: file-based path (drag & drop / folder picker)
@@ -902,6 +929,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       internal.nuScenesSampleFiles = null
       internal.av2Db = null
       internal.av2SampleFiles = null
+      internal.av2DiscoveredLogs = null
       setManifest(waymoManifest)
       internal.filesBySegment = segments
       const segmentIds = [...segments.keys()].sort()
@@ -913,12 +941,42 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
     },
 
-    loadFromUrl: async (dataset: string, baseUrl: string) => {
+    loadFromUrl: async (dataset: string, baseUrl: string, initialScene?: string) => {
       if (dataset === 'argoverse2') {
-        // 1. Try manifest.json first, fall back to S3 listing
         set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
         try {
+          // Check if this is a parent URL (e.g. .../train/) → multi-log discovery
+          if (isAV2ParentUrl(baseUrl)) {
+            console.log('[loadFromUrl] AV2 parent URL detected — discovering logs...')
+            const logs = await discoverAV2LogsFromS3(baseUrl, 700)
+            console.log(`[loadFromUrl] Found ${logs.length} AV2 logs`)
+
+            if (logs.length === 0) {
+              throw new Error('No AV2 logs found under this URL.')
+            }
+
+            // Store discovered logs for later selectSegment calls
+            internal.datasetId = 'argoverse2'
+            internal.av2DiscoveredLogs = logs
+            internal.av2Db = null
+            internal.av2SampleFiles = null
+            setManifest(argoverse2Manifest)
+
+            // Show all log IDs as available segments
+            const logIds = logs.map(l => l.logId)
+            set({ availableSegments: logIds, loadProgress: 0.1 })
+
+            // Auto-select: use initialScene if valid, otherwise first log
+            const targetLog = initialScene && logIds.includes(initialScene)
+              ? initialScene
+              : logIds[0]
+            await get().actions.selectSegment(targetLog)
+            return
+          }
+
+          // Single log URL — existing flow
+          // 1. Try manifest.json first, fall back to S3 listing
           const manifest = await fetchAV2Manifest(baseUrl)
           if (manifest) {
             console.log('[loadFromUrl] Using manifest.json for frame discovery')
@@ -959,10 +1017,120 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      // Waymo and nuScenes URL loading — not yet implemented
+      if (dataset === 'nuscenes') {
+        set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
+
+        try {
+          // 1. Auto-detect split by probing known metadata paths
+          const splits = ['v1.0-mini', 'v1.0-trainval', 'v1.0-test']
+          let detectedSplit: string | null = null
+
+          for (const split of splits) {
+            try {
+              const url = `${baseUrl}${split}/scene.json`
+              const res = await fetch(url, { method: 'HEAD' })
+              if (res.ok) {
+                detectedSplit = split
+                console.log(`[loadFromUrl] nuScenes detected: ${split}`)
+                break
+              }
+            } catch { /* try next split */ }
+          }
+
+          if (!detectedSplit) {
+            throw new Error(
+              'Could not detect nuScenes data. Expected v1.0-mini/, v1.0-trainval/, or v1.0-test/ folder with scene.json at the given URL.'
+            )
+          }
+          set({ loadProgress: 0.05 })
+
+          // 2. Fetch all metadata JSONs as text strings (buildNuScenesDatabase accepts string values)
+          const metaBase = `${baseUrl}${detectedSplit}/`
+          const jsonFileNames = [
+            'scene.json', 'sample.json', 'sample_data.json', 'ego_pose.json',
+            'sample_annotation.json', 'calibrated_sensor.json', 'sensor.json',
+            'instance.json', 'category.json', 'log.json',
+            'lidarseg.json', 'panoptic.json', 'attribute.json', 'visibility.json',
+          ]
+
+          const jsonFiles = new Map<string, string>()
+          const fetchResults = await Promise.allSettled(
+            jsonFileNames.map(async (name) => {
+              const res = await fetch(`${metaBase}${name}`)
+              if (res.ok) {
+                jsonFiles.set(name, await res.text())
+              }
+            })
+          )
+          // Log any failures (non-critical files like panoptic.json may be missing)
+          for (let i = 0; i < fetchResults.length; i++) {
+            if (fetchResults[i].status === 'rejected') {
+              console.warn(`[loadFromUrl] Failed to fetch ${jsonFileNames[i]}`)
+            }
+          }
+          set({ loadProgress: 0.15 })
+
+          // 3. Build nuScenes database (same as local mode)
+          internal.datasetId = 'nuscenes'
+          setManifest(nuScenesManifest)
+          set({ loadStep: 'parsing' as LoadStep })
+
+          const db = await buildNuScenesDatabase(jsonFiles)
+          internal.nuScenesDb = db
+          console.log(`[loadFromUrl] nuScenes DB built: ${db.scenes.length} scenes`)
+          set({ loadProgress: 0.2 })
+
+          // 4. Build URL-based sample file map (filename → full URL)
+          //    Workers will fetch files by URL string instead of reading File objects
+          const sampleFiles = new Map<string, string>()
+          for (const [, sd] of db.sampleDataByToken) {
+            sampleFiles.set(sd.filename, `${baseUrl}${sd.filename}`)
+          }
+          // Also add lidarseg/panoptic files if present
+          if (jsonFiles.has('lidarseg.json')) {
+            try {
+              const lidarsegEntries = JSON.parse(jsonFiles.get('lidarseg.json')!) as Array<{ filename: string }>
+              for (const entry of lidarsegEntries) {
+                sampleFiles.set(entry.filename, `${baseUrl}${entry.filename}`)
+              }
+            } catch { /* ignore parse errors */ }
+          }
+          if (jsonFiles.has('panoptic.json')) {
+            try {
+              const panopticEntries = JSON.parse(jsonFiles.get('panoptic.json')!) as Array<{ filename: string }>
+              for (const entry of panopticEntries) {
+                sampleFiles.set(entry.filename, `${baseUrl}${entry.filename}`)
+              }
+            } catch { /* ignore parse errors */ }
+          }
+          internal.nuScenesSampleFiles = sampleFiles
+          console.log(`[loadFromUrl] nuScenes file map: ${sampleFiles.size} entries`)
+
+          // 5. Set available scenes and auto-select first
+          const sceneNames = db.scenes.map(s => s.name).sort()
+          set({ availableSegments: sceneNames, loadProgress: 0.25 })
+
+          if (sceneNames.length > 0) {
+            // If a specific scene was requested, use it; otherwise first scene
+            const targetScene = initialScene && sceneNames.includes(initialScene)
+              ? initialScene
+              : sceneNames[0]
+            await get().actions.selectSegment(targetScene)
+          }
+        } catch (e) {
+          console.error('[loadFromUrl] nuScenes error:', e)
+          set({
+            status: 'error',
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
+        return
+      }
+
+      // Waymo URL loading — not yet implemented
       set({
         status: 'error',
-        error: `URL loading for "${dataset}" is not yet supported. Currently only "argoverse2" is supported.`,
+        error: `URL loading for "${dataset}" is not yet supported.`,
       })
     },
 
@@ -1397,10 +1565,10 @@ async function initNuScenesLidarWorker(
       }
     }
   }
-  const fileEntries: [string, File][] = []
+  const fileEntries: [string, File | string][] = []
   for (const filename of neededFiles) {
-    const file = internal.nuScenesSampleFiles.get(filename)
-    if (file) fileEntries.push([filename, file])
+    const entry = internal.nuScenesSampleFiles.get(filename)
+    if (entry) fileEntries.push([filename, entry])
   }
 
   const pool = new WorkerPool<Record<string, unknown>, LidarBatchResult>(
@@ -1433,10 +1601,10 @@ async function initNuScenesCameraWorker(
       }
     }
   }
-  const fileEntries: [string, File][] = []
+  const fileEntries: [string, File | string][] = []
   for (const filename of neededFiles) {
-    const file = internal.nuScenesSampleFiles.get(filename)
-    if (file) fileEntries.push([filename, file])
+    const entry = internal.nuScenesSampleFiles.get(filename)
+    if (entry) fileEntries.push([filename, entry])
   }
 
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(

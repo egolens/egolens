@@ -485,10 +485,12 @@ export function loadAV2LogMetadata(db: AV2LogDatabase): MetadataBundle {
   }
 
   // 6. Build scene metadata
+  //    AV2 doesn't provide explicit location/timeOfDay in its feather files.
+  //    Leave them empty so the UI can show a clean label without "Unknown Unknown".
   const sceneMeta = {
     segmentId: db.logId,
-    timeOfDay: 'Unknown',
-    location: 'Unknown',
+    timeOfDay: '',
+    location: '',
     weather: '',
     objectCounts: {} as Record<number, number>,
   }
