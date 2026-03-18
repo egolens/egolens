@@ -8,6 +8,7 @@ import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
+import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, type ShareableState } from './utils/urlState'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -86,6 +87,65 @@ function useUrlAutoLoad() {
 }
 
 // ---------------------------------------------------------------------------
+// URL view restore: apply shared view state params once data is ready
+// ---------------------------------------------------------------------------
+
+/** Guard against double-invocation */
+let urlViewRestoreApplied = false
+
+function useUrlViewRestore() {
+  const status = useSceneStore((s) => s.status)
+
+  useEffect(() => {
+    if (urlViewRestoreApplied) return
+    if (status !== 'ready') return
+
+    const viewParams = parseViewParams()
+    // Only restore if there are view params beyond dataset/data/scene
+    if (Object.keys(viewParams).length === 0) return
+
+    urlViewRestoreApplied = true
+    const actions = useSceneStore.getState().actions
+    const state = useSceneStore.getState()
+
+    if (viewParams.frame != null) {
+      const f = Math.min(viewParams.frame, state.totalFrames - 1)
+      actions.seekFrame(f)
+    }
+    if (viewParams.colormap) {
+      actions.setColormapMode(viewParams.colormap as typeof state.colormapMode)
+    }
+    if (viewParams.boxMode) {
+      actions.setBoxMode(viewParams.boxMode as typeof state.boxMode)
+    }
+    if (viewParams.worldMode === false && state.worldMode) {
+      actions.toggleWorldMode()
+    }
+    if (viewParams.sensors) {
+      // Set exact sensor selection by toggling off all, then toggling on specified ones
+      const allSensorIds = new Set(state.visibleSensors)
+      const targetIds = new Set(viewParams.sensors)
+      for (const id of allSensorIds) {
+        if (!targetIds.has(id)) actions.toggleSensor(id)
+      }
+      for (const id of targetIds) {
+        if (!allSensorIds.has(id)) actions.toggleSensor(id)
+      }
+    }
+    if (viewParams.pointSize != null) actions.setPointSize(viewParams.pointSize)
+    if (viewParams.pointShape) actions.setPointShape(viewParams.pointShape as typeof state.pointShape)
+    if (viewParams.pointOpacity != null) actions.setPointOpacity(viewParams.pointOpacity)
+    if (viewParams.activeCam != null) actions.setActiveCam(viewParams.activeCam)
+    if (viewParams.trailLength != null) actions.setTrailLength(viewParams.trailLength)
+    if (viewParams.lidarOverlay && !state.showLidarOverlay) actions.toggleLidarOverlay()
+    if (viewParams.keypoints3D && !state.showKeypoints3D) actions.toggleKeypoints3D()
+    if (viewParams.keypoints2D && !state.showKeypoints2D) actions.toggleKeypoints2D()
+    if (viewParams.cameraSeg && !state.showCameraSeg) actions.toggleCameraSeg()
+    if (viewParams.speed != null) actions.setPlaybackSpeed(viewParams.speed)
+  }, [status])
+}
+
+// ---------------------------------------------------------------------------
 // Embed mode: apply initial params once data is ready
 // ---------------------------------------------------------------------------
 
@@ -126,6 +186,7 @@ function App() {
   const [embedParams] = useState(() => getEmbedParams())
   useSegmentDiscovery()
   useUrlAutoLoad()
+  useUrlViewRestore()
   useEmbedInitialState(embedParams)
 
   // Initialize embed postMessage API when in embed mode
@@ -296,27 +357,50 @@ function App() {
 
 function Header() {
   const status = useSceneStore((s) => s.status)
-  const storeError = useSceneStore((s) => s.error)
+
   const availableSegments = useSceneStore((s) => s.availableSegments)
   const currentSegment = useSceneStore((s) => s.currentSegment)
   const segmentMetas = useSceneStore((s) => s.segmentMetas)
   const actions = useSceneStore((s) => s.actions)
+  const [shareCopied, setShareCopied] = useState<string | false>(false)
 
-  // Detect URL-loaded mode (single scene, loaded via query params)
-  const isUrlMode = typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).has('data')
+  const handleShare = useCallback(() => {
+    const s = useSceneStore.getState()
+    const src = getUrlSource()
+    const state: ShareableState = {
+      dataset: src?.dataset,
+      baseUrl: src?.baseUrl,
+      scene: s.currentSegment ?? undefined,
+      frame: s.currentFrameIndex,
+      colormap: s.colormapMode,
+      boxMode: s.boxMode,
+      worldMode: s.worldMode,
+      sensors: [...s.visibleSensors],
+      pointSize: s.pointSize,
+      pointShape: s.pointShape,
+      pointOpacity: s.pointOpacity,
+      activeCam: s.activeCam,
+      trailLength: s.trailLength,
+      lidarOverlay: s.showLidarOverlay,
+      keypoints3D: s.showKeypoints3D,
+      keypoints2D: s.showKeypoints2D,
+      cameraSeg: s.showCameraSeg,
+      speed: s.playbackSpeed,
+    }
+    const url = buildShareUrl(state)
 
-  let statusText: string
-  if (status === 'idle') {
-    statusText = availableSegments.length > 1 ? 'Select a segment' : 'No segment loaded'
-  } else if (status === 'loading') {
-    statusText = ''
-  } else if (status === 'error') {
-    statusText = `Error: ${storeError ?? 'Unknown'}`
-  } else {
-    // In URL mode, show the log/segment ID
-    statusText = isUrlMode && currentSegment ? currentSegment.slice(0, 16) : ''
-  }
+    // Build a human-readable summary of what's captured
+    const parts: string[] = [`Frame ${s.currentFrameIndex}`, s.colormapMode]
+    const overlayCount = [s.showLidarOverlay, s.showKeypoints3D, s.showKeypoints2D, s.showCameraSeg].filter(Boolean).length
+    if (overlayCount > 0) parts.push(`${overlayCount} overlay${overlayCount > 1 ? 's' : ''}`)
+    if (s.activeCam != null) parts.push('POV cam')
+    const summary = parts.join(' · ')
+
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(summary)
+      setTimeout(() => setShareCopied(false), 3000)
+    })
+  }, [])
 
   return (
     <header style={{
@@ -331,7 +415,6 @@ function Header() {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <h1
-          onClick={() => { window.location.href = window.location.pathname }}
           style={{
             margin: 0,
             fontSize: '15px',
@@ -339,11 +422,17 @@ function Header() {
             fontFamily: fonts.sans,
             letterSpacing: '-0.01em',
             color: colors.textPrimary,
-            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: '6px',
           }}
-          title="Back to home"
         >
-          EgoLens{status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: '12px', marginLeft: '6px' }}>{getManifest().name}</span>}
+          <span
+            onClick={() => { window.location.href = window.location.pathname }}
+            style={{ cursor: 'pointer' }}
+            title="Back to home"
+          >EgoLens</span>
+          {status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: '12px' }}>{getManifest().name}</span>}
         </h1>
       </div>
 
@@ -411,45 +500,46 @@ function Header() {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        {/* URL mode: "New Session" link to return to landing page */}
-        {isUrlMode && status === 'ready' && (
+        {/* Share View button — only in URL mode (local files can't be shared) */}
+        {status === 'ready' && hasUrlSource() && (
           <button
-            onClick={() => {
-              window.location.href = window.location.pathname
-            }}
+            onClick={handleShare}
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
               padding: '4px 10px',
               fontSize: '11px',
               fontFamily: fonts.sans,
-              color: colors.textDim,
+              color: shareCopied ? colors.accent : colors.textDim,
               backgroundColor: 'transparent',
-              border: `1px solid ${colors.border}`,
+              border: `1px solid ${shareCopied ? colors.accent : colors.border}`,
               borderRadius: radius.sm,
               cursor: 'pointer',
               transition: 'color 0.15s, border-color 0.15s',
               whiteSpace: 'nowrap',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = colors.textSecondary
-              e.currentTarget.style.borderColor = colors.textDim
+              if (!shareCopied) {
+                e.currentTarget.style.color = colors.textSecondary
+                e.currentTarget.style.borderColor = colors.textDim
+              }
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = colors.textDim
-              e.currentTarget.style.borderColor = colors.border
+              if (!shareCopied) {
+                e.currentTarget.style.color = colors.textDim
+                e.currentTarget.style.borderColor = colors.border
+              }
             }}
-            title="Return to landing page"
+            title="Copy link with current view state (frame, colormap, overlays, sensors…)"
           >
-            ← New Session
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            {shareCopied ? `Copied — ${shareCopied}` : 'Share View'}
           </button>
         )}
-        <div style={{
-          fontSize: '12px',
-          fontFamily: fonts.mono,
-          color: colors.textSecondary,
-          whiteSpace: 'nowrap',
-        }}>
-          {statusText}
-        </div>
         <a
           href="https://github.com/happyhj/egolens"
           target="_blank"

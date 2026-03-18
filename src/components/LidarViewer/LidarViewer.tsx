@@ -501,7 +501,6 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const toggleWorldMode = useSceneStore((s) => s.actions.toggleWorldMode)
   // Display settings
   const bgPreset = useSceneStore((s) => s.bgPreset)
-  const setBgPreset = useSceneStore((s) => s.actions.setBgPreset)
   const pointShape = useSceneStore((s) => s.pointShape)
   const setPointShape = useSceneStore((s) => s.actions.setPointShape)
   const pointSize = useSceneStore((s) => s.pointSize)
@@ -1257,31 +1256,6 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             padding: '2px 4px 2px',
           }}>
             Display
-          </div>
-
-          {/* Background color swatches */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px' }}>
-            <span style={{ fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-              BG
-            </span>
-            <div style={{ display: 'flex', gap: '3px' }}>
-              {BG_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  title={p.label}
-                  onClick={() => setBgPreset(p.id)}
-                  style={{
-                    width: 14, height: 14, borderRadius: '3px', padding: 0,
-                    border: bgPreset === p.id
-                      ? `2px solid ${colors.accentBlue}`
-                      : `1px solid ${p.color === '#ffffff' ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)'}`,
-                    backgroundColor: p.color,
-                    cursor: 'pointer',
-                    transition: 'border-color 0.15s',
-                  }}
-                />
-              ))}
-            </div>
           </div>
 
           {/* Point shape toggle */}

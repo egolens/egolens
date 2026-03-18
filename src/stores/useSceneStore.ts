@@ -73,6 +73,7 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
+import { setUrlSource, clearUrlSource, syncSegmentToUrl } from '../utils/urlState'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
@@ -828,6 +829,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
       if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
         await loadNuScenesScene(segmentId, set, get)
+        syncSegmentToUrl(segmentId)
         return
       }
 
@@ -855,6 +857,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (internal.av2Db) {
           await loadAV2Scene(segmentId, set, get)
+          syncSegmentToUrl(segmentId)
           return
         }
       }
@@ -865,6 +868,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // Pass File objects directly — workers can receive them via postMessage
         const sources = new Map<string, File | string>(fileMap)
         await get().actions.loadDataset(sources)
+        // No URL sync for local files (drag & drop has no URL source)
         return
       }
 
@@ -872,6 +876,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const waymoBase = internal.waymoBaseUrl || '/waymo_data/'
       const sources = buildWaymoSegmentUrls(waymoBase, segmentId)
       await get().actions.loadDataset(sources as Map<string, File | string>)
+
+      // Sync segment ID to URL bar (replaceState, no history pollution)
+      syncSegmentToUrl(segmentId)
     },
 
     toggleWorldMode: () => {
@@ -895,6 +902,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     setPointShape: (shape: PointShape) => set({ pointShape: shape }),
     setPointSize: (size: number) => set({ pointSize: size }),
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
+      // Local files — clear URL source so segment changes don't sync to URL bar
+      clearUrlSource()
+
       // Check for nuScenes sentinel key (produced by folder scanner)
       if (segments.has('__nuscenes__')) {
         const allFiles = segments.get('__nuscenes__')!
@@ -983,6 +993,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     loadFromUrl: async (dataset: string, baseUrl: string, initialScene?: string) => {
+      // Track URL source for auto-sync on segment change
+      setUrlSource(dataset, baseUrl)
+
       if (dataset === 'argoverse2') {
         set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
