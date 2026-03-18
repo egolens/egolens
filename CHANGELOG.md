@@ -19,7 +19,7 @@ First public release.
 - **Trajectory trails** — object movement history as fading polylines
 - **3D/2D human keypoints** — 14-joint skeleton per pedestrian (Waymo)
 - **Segmentation overlays** — LiDAR semantic (Waymo, nuScenes) and camera panoptic (Waymo)
-- **Timeline** — play/pause, speed control (0.5×–4×), frame scrubber, buffer bar
+- **Timeline** — play/pause, frame scrubber, buffer bar
 - **URL loading** — load data from S3 or any static file server with auto-discovery or direct segment access
 - **Share View** — copy a link that captures your exact view state (frame, colormap, sensors, overlays)
 - **Embed mode** — iframe embedding with postMessage API

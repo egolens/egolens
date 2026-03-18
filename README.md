@@ -33,7 +33,7 @@ One tool for the three most widely used AV datasets. Drop a folder or paste a UR
 - **Synchronized camera views** with POV switching — click a camera to jump into its viewpoint
 - **Trajectory trails** showing object movement over past frames
 - **Semantic segmentation** overlays (LiDAR and camera)
-- **Timeline** with play/pause, speed control (0.5x–4x), and buffer progress bars
+- **Timeline** with play/pause, frame scrubber, and buffer progress bars
 
 <table>
   <tr>
