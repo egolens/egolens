@@ -1,9 +1,8 @@
 <h1 align="center">EgoLens</h1>
 
 <p align="center">
-  Explore the most widely used autonomous driving datasets<br/>
-  — Waymo, nuScenes, and Argoverse 2 —<br/>
-  directly in your browser, straight from the original files.<br/>
+  Visualize point clouds, cameras, and 3D annotations in your browser<br/>
+  — straight from the most widely used autonomous driving datasets.<br/>
   No conversion, no preprocessing.
 </p>
 

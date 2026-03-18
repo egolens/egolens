@@ -776,8 +776,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           color: colors.textSecondary,
           lineHeight: 1.7,
         }}>
-          Explore the most widely used autonomous driving datasets<br />
-          directly in your browser, straight from the original files.<br />
+          Visualize point clouds, cameras, and 3D annotations in your browser<br />
+          — straight from the most widely used autonomous driving datasets.<br />
           No conversion, no preprocessing.
         </div>
         {/* Dataset badges — outlined, info only */}
