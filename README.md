@@ -97,6 +97,11 @@ The URL should point to a directory containing the dataset's standard folder str
 
 **Share what you see.** Click the Share View button and get a URL that captures your exact view — frame, colormap, camera angle, overlays, everything. Anyone with the same data can open the link and land on exactly what you were looking at.
 
+<p align="center">
+  <img src="assets/share_view.gif" alt="Share View — copy URL and restore exact camera angle in a new tab" width="720" />
+</p>
+<p align="center"><sub>Copy a Share View link and open it in a new tab — frame, camera angle, and all settings restored instantly.</sub></p>
+
 ## Dev Setup
 
 ```bash
