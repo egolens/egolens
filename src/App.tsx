@@ -11,6 +11,7 @@ import { normalizeBaseUrl } from './utils/urlValidation'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
+import SearchableSelect, { type SelectItem } from './components/SearchableSelect'
 
 
 // ---------------------------------------------------------------------------
@@ -371,54 +372,25 @@ function Header() {
           }}
           title="Previous segment"
         >&#9664;</button>
-        <select
-          value={currentSegment ?? ''}
-          onChange={(e) => {
-            if (e.target.value) actions.selectSegment(e.target.value)
-          }}
-          disabled={status === 'loading'}
-          title={currentSegment ?? ''}
-          style={{
-            flex: '0 1 auto',
-            minWidth: 0,
-            maxWidth: '360px',
-            padding: '6px 12px',
-            fontSize: '12px',
-            fontFamily: fonts.mono,
-            backgroundColor: colors.bgOverlay,
-            color: colors.textPrimary,
-            border: `1px solid ${colors.border}`,
-            borderRadius: radius.md,
-            cursor: status === 'loading' ? 'not-allowed' : 'pointer',
-            opacity: status === 'loading' ? 0.5 : 1,
-            outline: 'none',
-            boxShadow: `0 0 0 0px ${colors.accentGlow}`,
-            transition: 'box-shadow 0.2s, border-color 0.2s',
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = colors.accent
-            e.currentTarget.style.boxShadow = `0 0 8px ${colors.accentGlow}`
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = colors.border
-            e.currentTarget.style.boxShadow = 'none'
-          }}
-        >
-          <option value="">-- select segment --</option>
-          {availableSegments.map((seg, i) => {
+        <SearchableSelect
+          items={availableSegments.map((seg, i): SelectItem => {
             const meta = segmentMetas.get(seg)
-            const shortId = seg.slice(0, 7)
-            // Build label parts, filtering out empty values
-            const parts = [`#${i + 1}`, shortId]
+            // Show full ID always — SearchableSelect handles overflow with ellipsis
+            const displayId = seg
+            const parts = [`#${i + 1}`, displayId]
             if (meta) {
               const loc = LOCATION_LABELS[meta.location] ?? meta.location
               if (loc) parts.push(loc)
               if (meta.timeOfDay) parts.push(meta.timeOfDay)
             }
-            const label = parts.join(' · ')
-            return <option key={seg} value={seg}>{label}</option>
+            return { value: seg, label: parts.join(' · ') }
           })}
-        </select>
+          value={currentSegment}
+          onChange={(val) => actions.selectSegment(val)}
+          disabled={status === 'loading'}
+          placeholder="-- select segment --"
+          title={currentSegment ?? undefined}
+        />
         <button
           onClick={() => {
             const idx = availableSegments.indexOf(currentSegment ?? '')
