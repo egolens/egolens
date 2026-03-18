@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/ca5566ed-f2f2-42ad-8c13-b05d9150aacc" alt="EgoLens screenshot" width="720" />
+  <img src="assets/hero.png" alt="EgoLens screenshot" width="720" />
 </p>
 
 ## What It Does
