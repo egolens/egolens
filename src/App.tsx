@@ -425,6 +425,19 @@ function Header() {
   const actions = useSceneStore((s) => s.actions)
   const [shareCopied, setShareCopied] = useState<string | false>(false)
 
+  // Sync document title with active dataset + segment
+  useEffect(() => {
+    if (status === 'ready' && currentSegment) {
+      const datasetName = getManifest().name
+      const shortSeg = currentSegment.length > 20
+        ? `${currentSegment.slice(0, 8)}…${currentSegment.slice(-8)}`
+        : currentSegment
+      document.title = `${shortSeg} — ${datasetName} · EgoLens`
+    } else {
+      document.title = 'EgoLens'
+    }
+  }, [status, currentSegment])
+
   const handleShare = useCallback(() => {
     const s = useSceneStore.getState()
     const src = getUrlSource()

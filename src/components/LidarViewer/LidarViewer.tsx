@@ -503,11 +503,12 @@ function ResetViewController({
   orbitRef: React.RefObject<any>
   resetRequestedRef: React.MutableRefObject<boolean>
 }) {
-  const animating = useRef(false)
+  const animStartTime = useRef<number | null>(null)
+  const animFromPos = useRef(new THREE.Vector3())
+  const animFromTarget = useRef(new THREE.Vector3())
 
   useFrame(() => {
-    if (resetRequestedRef.current && !animating.current) {
-      animating.current = true
+    if (resetRequestedRef.current && animStartTime.current == null) {
       resetRequestedRef.current = false
 
       // Compute target position/target based on mode
@@ -522,21 +523,26 @@ function ResetViewController({
         _resetPos.copy(CHASE_CAM_POSITION)
         _resetTarget.copy(CHASE_CAM_TARGET)
       }
+
+      // Snapshot current state + start timed animation
+      animFromPos.current.copy(orbitRef.current.object.position)
+      animFromTarget.current.copy(orbitRef.current.target)
+      animStartTime.current = performance.now()
     }
 
-    if (!animating.current || !orbitRef.current) return
+    if (animStartTime.current == null || !orbitRef.current) return
+
+    const elapsed = performance.now() - animStartTime.current
+    const raw = Math.min(elapsed / POV_RETURN_DURATION, 1)
+    const t = smoothstep(raw)
 
     const cam = orbitRef.current.object
-    cam.position.lerp(_resetPos, LERP_SPEED)
-    orbitRef.current.target.lerp(_resetTarget, LERP_SPEED)
+    cam.position.lerpVectors(animFromPos.current, _resetPos, t)
+    orbitRef.current.target.lerpVectors(animFromTarget.current, _resetTarget, t)
     orbitRef.current.update()
 
-    const dist = cam.position.distanceTo(_resetPos)
-    if (dist < SNAP_THRESHOLD) {
-      cam.position.copy(_resetPos)
-      orbitRef.current.target.copy(_resetTarget)
-      orbitRef.current.update()
-      animating.current = false
+    if (raw >= 1) {
+      animStartTime.current = null
     }
   })
 
