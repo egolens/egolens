@@ -656,121 +656,6 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         </a>
       </div>
 
-      {/* ── Demo cards ── */}
-      <div style={{
-        width: '100%',
-        maxWidth: '520px',
-        display: 'flex',
-        gap: '10px',
-      }}>
-        {([
-          {
-            dataset: 'nuscenes',
-            label: 'nuScenes',
-            detail: 'mini split · 10 scenes',
-            url: 'https://data.egolens.org/nuscenes/',
-            source: 'Hosted by EgoLens',
-          },
-          {
-            dataset: 'argoverse2',
-            label: 'Argoverse 2',
-            detail: 'val split · 150 logs',
-            url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/',
-            source: 'via Argoverse S3',
-          },
-        ] as const).map((demo) => (
-          <button
-            key={demo.dataset}
-            onClick={() => {
-              if (urlLoading) return
-              setUrlDataset(demo.dataset)
-              setUrlInput(demo.url)
-              setUrlError(null)
-              // Trigger load directly
-              const baseUrl = normalizeBaseUrl(demo.url)
-              setUrlLoading(true)
-              loadFromUrl(demo.dataset, baseUrl).catch((err) => {
-                setUrlError(err instanceof Error ? err.message : String(err))
-                setUrlLoading(false)
-              })
-            }}
-            disabled={urlLoading}
-            style={{
-              flex: 1,
-              padding: '16px 14px',
-              borderRadius: radius.md,
-              border: `1px solid ${colors.border}`,
-              backgroundColor: colors.bgSurface,
-              cursor: urlLoading ? 'not-allowed' : 'pointer',
-              transition: 'all 0.15s',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
-              textAlign: 'left',
-            }}
-            onMouseEnter={(e) => {
-              if (!urlLoading) {
-                e.currentTarget.style.borderColor = colors.accent
-                e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.06)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = colors.border
-              e.currentTarget.style.backgroundColor = colors.bgSurface
-            }}
-          >
-            <span style={{
-              fontSize: '14px',
-              fontWeight: 600,
-              fontFamily: fonts.sans,
-              color: colors.textPrimary,
-            }}>{demo.label}</span>
-            <span style={{
-              fontSize: '11px',
-              fontFamily: fonts.sans,
-              color: colors.textSecondary,
-            }}>{demo.detail}</span>
-            <span style={{
-              fontSize: '10px',
-              fontFamily: fonts.sans,
-              color: colors.textDim,
-              marginTop: '2px',
-            }}>{demo.source}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Waymo notice */}
-      <div style={{
-        width: '100%',
-        maxWidth: '520px',
-        fontSize: '10px',
-        fontFamily: fonts.sans,
-        color: colors.textDim,
-        textAlign: 'center',
-        lineHeight: 1.5,
-      }}>
-        Waymo — redistribution prohibited. Host your own copy after accepting the{' '}
-        <a href="https://waymo.com/open/terms/" target="_blank" rel="noopener noreferrer"
-          style={{ color: colors.accent, textDecoration: 'underline' }}>license</a>.
-      </div>
-
-      {/* ── or divider ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '16px',
-        maxWidth: '520px',
-        width: '100%',
-        margin: '4px 0',
-      }}>
-        <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
-        <span style={{ fontSize: '11px', fontFamily: fonts.sans, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          or load manually
-        </span>
-        <div style={{ flex: 1, height: '1px', backgroundColor: colors.border }} />
-      </div>
-
       {/* URL input section */}
       <div style={{
         width: '100%',
@@ -924,6 +809,72 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           lineHeight: 1.6,
         }}>
           URL only: auto-discovers all segments. URL + ID: loads a specific segment directly.
+        </div>
+
+        {/* Preset examples */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <span style={{
+            fontSize: '11px',
+            fontFamily: fonts.sans,
+            color: colors.textDim,
+          }}>Try:</span>
+          {([
+            { dataset: 'nuscenes', label: 'nuScenes mini', url: 'https://data.egolens.org/nuscenes/', source: 'hosted by EgoLens' },
+            { dataset: 'argoverse2', label: 'Argoverse 2 val', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', source: 'via Argoverse S3' },
+          ] as const).map((preset) => {
+            const isActive = urlDataset === preset.dataset && urlInput === preset.url
+            return (
+              <button
+                key={preset.dataset}
+                onClick={() => {
+                  setUrlDataset(preset.dataset)
+                  setUrlInput(preset.url)
+                  setUrlSegment('')
+                  setUrlError(null)
+                }}
+                disabled={urlLoading}
+                title={preset.source}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontFamily: fonts.sans,
+                  fontWeight: 500,
+                  color: isActive ? colors.accent : colors.textSecondary,
+                  backgroundColor: isActive ? 'rgba(0, 232, 157, 0.1)' : colors.bgOverlay,
+                  border: `1px solid ${isActive ? colors.accent : colors.border}`,
+                  borderRadius: '14px',
+                  cursor: urlLoading ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                  opacity: urlLoading ? 0.5 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!urlLoading && !isActive) {
+                    e.currentTarget.style.borderColor = colors.textSecondary
+                    e.currentTarget.style.color = colors.textPrimary
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.borderColor = colors.border
+                    e.currentTarget.style.color = colors.textSecondary
+                  }
+                }}
+              >
+                {preset.label}
+                <span style={{
+                  fontSize: '9px',
+                  fontWeight: 400,
+                  opacity: 0.6,
+                  marginLeft: '4px',
+                }}>({preset.source})</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
