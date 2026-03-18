@@ -10,10 +10,11 @@
  * samples camera textures in fragment shader. Zero CPU overhead per frame.
  */
 
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useSceneStore } from '../../stores/useSceneStore'
+import type { FrameData } from '../../stores/useSceneStore'
 import { getManifest } from '../../adapters/registry'
 import { buildCameraProjectors, type CameraProjector } from '../../utils/lidarProjection'
 import {
@@ -109,8 +110,46 @@ export default function PointCloud() {
   }, [])
   const cameraMat = useMemo(() => createCameraColorMaterial(), [])
 
-  // Dirty flag — set synchronously by Zustand subscribe (no React timing dependency)
-  const dirtyRef = useRef(true)
+  // ---------------------------------------------------------------------------
+  // React subscriptions — commit-synced with WorldPoseSync & BoundingBoxes.
+  //
+  // Reading currentFrame via React subscription (not getState()) ensures
+  // PointCloud's position buffer updates in the SAME commit cycle as the
+  // scene group matrix. Without this, getState() races ahead of React,
+  // causing 1-frame position/matrix desync in world mode (same root cause
+  // as the box jitter documented in R3F_RENDER_SYNC.md §v3).
+  // ---------------------------------------------------------------------------
+  const currentFrame = useSceneStore((s) => s.currentFrame)
+  const visibleSensors = useSceneStore((s) => s.visibleSensors)
+  const colormapMode = useSceneStore((s) => s.colormapMode)
+  const worldMode = useSceneStore((s) => s.worldMode)
+  const pointOpacity = useSceneStore((s) => s.pointOpacity)
+  const pointSize = useSceneStore((s) => s.pointSize)
+
+  // Refs bridge React commit → useFrame (same pattern as WorldPoseSync)
+  const frameRef = useRef<FrameData | null>(currentFrame)
+  const sensorsRef = useRef(visibleSensors)
+  const cmapRef = useRef(colormapMode)
+  const worldRef = useRef(worldMode)
+  const opacityRef = useRef(pointOpacity)
+  const sizeRef = useRef(pointSize)
+  frameRef.current = currentFrame
+  sensorsRef.current = visibleSensors
+  cmapRef.current = colormapMode
+  worldRef.current = worldMode
+  opacityRef.current = pointOpacity
+  sizeRef.current = pointSize
+
+  // Track last-processed values for dirty detection in useFrame
+  const lastFrameRef = useRef<FrameData | null>(null)
+  const lastSensorsRef = useRef(visibleSensors)
+  const lastCmapRef = useRef(colormapMode)
+  const lastWorldRef = useRef(worldMode)
+  const lastOpacityRef = useRef(pointOpacity)
+  const lastSizeRef = useRef(pointSize)
+
+  /** Extra dirty flag for async events (bitmap decode, etc.) */
+  const extraDirtyRef = useRef(false)
 
   // ---------------------------------------------------------------------------
   // Camera shader state (replaces old CPU camera RGB pipeline)
@@ -126,7 +165,7 @@ export default function PointCloud() {
   const projectorsRef = useRef<Map<number, CameraProjector> | null>(null)
 
   /** Build ShaderCameraInfo[] from camera calibration (once per segment) */
-  function ensureShaderCameras(): ShaderCameraInfo[] | null {
+  const ensureShaderCameras = useCallback((): ShaderCameraInfo[] | null => {
     if (shaderCamerasRef.current) return shaderCamerasRef.current
     if (!projectorsRef.current) {
       const calRows = useSceneStore.getState().cameraCalibrations
@@ -152,27 +191,23 @@ export default function PointCloud() {
     }
     shaderCamerasRef.current = cameras
     return cameras
-  }
+  }, [])
 
   /** Trigger async bitmap decode for camera textures (non-blocking) */
-  function triggerBitmapDecode(timestamp: bigint, cameraImages: Map<number, ArrayBuffer>) {
+  const triggerBitmapDecode = useCallback((timestamp: bigint, cameraImages: Map<number, ArrayBuffer>) => {
     if (bitmapCacheRef.current?.timestamp === timestamp) return  // already cached
     if (bitmapPendingRef.current === timestamp) return            // already in flight
     if (cameraImages.size === 0) return
 
     bitmapPendingRef.current = timestamp
     decodeCameraTextures(cameraImages).then(bitmaps => {
-      // Only apply if still the current frame (user may have scrubbed past)
-      const curTs = useSceneStore.getState().currentFrame?.timestamp
-      if (curTs === timestamp) {
-        bitmapCacheRef.current = { timestamp, bitmaps }
-        dirtyRef.current = true
-      }
+      bitmapCacheRef.current = { timestamp, bitmaps }
+      extraDirtyRef.current = true
       bitmapPendingRef.current = null
     }).catch(() => {
       bitmapPendingRef.current = null
     })
-  }
+  }, [])
 
   // Reset shader state on segment switch
   useEffect(() => {
@@ -183,38 +218,6 @@ export default function PointCloud() {
         bitmapCacheRef.current = null
         bitmapPendingRef.current = null
         disposeCameraTextures()
-      }
-    })
-  }, [])
-
-  useEffect(() => {
-    // Track previous values to detect relevant changes only
-    const s0 = useSceneStore.getState()
-    const prev = {
-      frame: s0.currentFrame,
-      sensors: s0.visibleSensors,
-      cmap: s0.colormapMode,
-      world: s0.worldMode,
-      cam: s0.activeCam,
-      opacity: s0.pointOpacity,
-      size: s0.pointSize,
-    }
-    return useSceneStore.subscribe((state) => {
-      if (state.currentFrame !== prev.frame ||
-          state.visibleSensors !== prev.sensors ||
-          state.colormapMode !== prev.cmap ||
-          state.worldMode !== prev.world ||
-          state.activeCam !== prev.cam ||
-          state.pointOpacity !== prev.opacity ||
-          state.pointSize !== prev.size) {
-        dirtyRef.current = true
-        prev.frame = state.currentFrame
-        prev.sensors = state.visibleSensors
-        prev.cmap = state.colormapMode
-        prev.world = state.worldMode
-        prev.cam = state.activeCam
-        prev.opacity = state.pointOpacity
-        prev.size = state.pointSize
       }
     })
   }, [])
@@ -230,14 +233,26 @@ export default function PointCloud() {
 
   // Apply buffer updates inside the Three.js render loop
   useFrame(() => {
-    if (!dirtyRef.current) return
-    dirtyRef.current = false
+    // Dirty detection: compare React-committed refs with last-processed values.
+    // This replaces the old Zustand subscriber approach, keeping PointCloud's
+    // data reads in sync with WorldPoseSync's React subscription cycle.
+    const curFrame = frameRef.current
+    const visSensors = sensorsRef.current
+    const cmap = cmapRef.current
+    const wmode = worldRef.current
+    const pOpacity = opacityRef.current
+    const pSize = sizeRef.current
 
-    // Always read latest state from store (no stale closure)
-    const { currentFrame: curFrame, visibleSensors: visSensors,
-            colormapMode: cmap, worldMode: wmode, pointOpacity,
-            pointSize } =
-      useSceneStore.getState()
+    const dirty = curFrame !== lastFrameRef.current
+      || visSensors !== lastSensorsRef.current
+      || cmap !== lastCmapRef.current
+      || wmode !== lastWorldRef.current
+      || pOpacity !== lastOpacityRef.current
+      || pSize !== lastSizeRef.current
+      || extraDirtyRef.current
+
+    if (!dirty) return
+    extraDirtyRef.current = false
 
     const geom = geometryRef.current
     const radarGeom = radarGeometryRef.current
@@ -263,15 +278,15 @@ export default function PointCloud() {
     if (pts) {
       if (isCameraMode) {
         if (pts.material !== cameraMat) pts.material = cameraMat
-        cameraMat.uniforms.uOpacity.value = pointOpacity
+        cameraMat.uniforms.uOpacity.value = pOpacity
         cameraMat.uniforms.uCircle.value = 1.0
         // Size attenuation: compute scale from canvas height
         const canvasH = gl.domElement.height || 1080
-        cameraMat.uniforms.uPointSize.value = pointSize * canvasH * 0.5
+        cameraMat.uniforms.uPointSize.value = pSize * canvasH * 0.5
       } else {
         if (pts.material !== normalMat) pts.material = normalMat
-        normalMat.opacity = pointOpacity
-        normalMat.size = pointSize
+        normalMat.opacity = pOpacity
+        normalMat.size = pSize
         // Circle shape: always on
         const circleU = (normalMat as unknown as Record<string, unknown>)._circleUniform as { value: number } | undefined
         if (circleU) circleU.value = 1.0
@@ -279,10 +294,17 @@ export default function PointCloud() {
     }
 
     // ---------------------------------------------------------------------------
-    // Camera shader: decode textures + update uniforms (async, non-blocking)
-    // Anti-flicker: positions update instantly; textures carry over from the
-    // previous frame until the new decode completes.  Adjacent frames have
-    // nearly identical camera images, so stale textures look natural.
+    // Camera shader: decode textures + position/texture sync gate
+    //
+    // Camera textures are decoded asynchronously (2-5ms). If we update point
+    // positions before the matching textures are ready, the vertex shader
+    // projects new ego-frame positions into UV coords that don't match the
+    // old texture content — causing visible color vibration.
+    //
+    // Fix: in camera mode, defer position buffer updates until textures for
+    // the current frame are decoded. The old consistent frame (positions +
+    // textures from the same timestamp) stays visible during decode, which
+    // is imperceptible at ~2-5ms.
     // ---------------------------------------------------------------------------
     if (isCameraMode) {
       const cameras = ensureShaderCameras()
@@ -290,11 +312,15 @@ export default function PointCloud() {
         // Always kick off decode for the current frame
         triggerBitmapDecode(curFrame.timestamp, curFrame.cameraImages)
 
-        // Apply textures if ready (otherwise shader keeps previous frame's textures)
         const cached = bitmapCacheRef.current
-        if (cached) {
-          updateCameraUniforms(cameraMat, cameras, cached.bitmaps)
+        if (!cached || cached.timestamp !== curFrame.timestamp) {
+          // Textures not ready for this frame — keep showing the previous
+          // consistent frame (old positions + old textures). Skip position
+          // buffer update and retry next useFrame tick.
+          extraDirtyRef.current = true
+          return
         }
+        updateCameraUniforms(cameraMat, cameras, cached.bitmaps)
       }
     }
 
@@ -407,6 +433,14 @@ export default function PointCloud() {
       radarGeom.setDrawRange(0, radarTotal)
       radarGeom.computeBoundingSphere()
     }
+
+    // Mark this state as processed (for dirty detection on next tick)
+    lastFrameRef.current = curFrame
+    lastSensorsRef.current = visSensors
+    lastCmapRef.current = cmap
+    lastWorldRef.current = wmode
+    lastOpacityRef.current = pOpacity
+    lastSizeRef.current = pSize
   })
 
   return (

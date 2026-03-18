@@ -45,9 +45,6 @@ const _resetPoseMat = new THREE.Matrix4()
 // POV Camera Controller — animates the camera to a Waymo camera's viewpoint
 // ---------------------------------------------------------------------------
 
-/** Lerp speed — higher = faster snap (0..1 per frame) */
-const LERP_SPEED = 0.08
-
 /**
  * Flip from optical camera convention (+Z forward, -Y up) to
  * Three.js camera convention (-Z forward, +Y up): 180° around X.
@@ -57,8 +54,16 @@ const OPTICAL_TO_THREEJS_CAM = new THREE.Quaternion().setFromAxisAngle(
   Math.PI,
 )
 
-/** Distance threshold to consider the return animation "done" */
-const SNAP_THRESHOLD = 0.05
+/** Animation durations (ms) — tuned for snappy-but-smooth transitions */
+const POV_ENTER_DURATION = 500   // orbital → first POV entry
+const POV_SWITCH_DURATION = 300  // camera → camera switch
+const POV_RETURN_DURATION = 500  // POV → orbital return
+
+/** Smooth-step easing: accelerates then decelerates (hermite interpolation) */
+function smoothstep(t: number): number {
+  const c = Math.max(0, Math.min(1, t))
+  return c * c * (3 - 2 * c)
+}
 
 /** Reusable temp objects for PovController world-mode transform (avoids allocation in useFrame) */
 const _povPoseMat = new THREE.Matrix4()
@@ -67,8 +72,10 @@ const _povPoseQuat = new THREE.Quaternion()
 const _povWorldQuat = new THREE.Quaternion()
 const _povVehicleQuat = new THREE.Quaternion()
 
-/** Temp vector for return animation direction */
+/** Temp vectors for animation start snapshots */
 const _returnDir = new THREE.Vector3()
+const _animStartPos = new THREE.Vector3()
+const _animStartQuat = new THREE.Quaternion()
 
 function PovController({
   targetCalib,
@@ -86,10 +93,28 @@ function PovController({
   const returnTarget = useRef<{ pos: THREE.Vector3; fov: number; target: THREE.Vector3 } | null>(null)
   /** Intermediate lookAt point — lerped each frame for smooth orientation */
   const returnLookAt = useRef<THREE.Vector3 | null>(null)
-  /** True while entry/camera-switch animation is running (not on frame changes) */
-  const enteringPov = useRef(false)
+
   /** Track which camera ID is active to detect camera switches vs frame changes */
   const prevCameraId = useRef<number | null>(null)
+
+  // ---- Time-based animation state ----
+  /** Animation start time (performance.now()) — null when not animating */
+  const animStartTime = useRef<number | null>(null)
+  /** Animation duration for current transition */
+  const animDuration = useRef(POV_ENTER_DURATION)
+  /** Snapshot of camera state at animation start */
+  const animFromPos = useRef(new THREE.Vector3())
+  const animFromQuat = useRef(new THREE.Quaternion())
+  const animFromFov = useRef(60)
+
+  /** Start a timed entry/switch animation from the camera's current state */
+  const startEntryAnimation = (durationMs: number) => {
+    animStartTime.current = performance.now()
+    animDuration.current = durationMs
+    animFromPos.current.copy(camera.position)
+    animFromQuat.current.copy(camera.quaternion)
+    animFromFov.current = (camera as THREE.PerspectiveCamera).fov
+  }
 
   // Save orbital camera state when entering POV
   useEffect(() => {
@@ -102,18 +127,21 @@ function PovController({
         returnLookAt.current = null
         returningRef.current = false
       }
+
+      const isFirstEntry = !savedState.current
       // First POV entry — save current orbital camera state
-      if (!savedState.current) {
+      if (isFirstEntry) {
         savedState.current = {
           pos: camera.position.clone(),
           fov: (camera as THREE.PerspectiveCamera).fov,
           target: orbitRef.current?.target?.clone() ?? new THREE.Vector3(),
         }
       }
-      // Animate only on initial entry or camera switch (not frame changes)
+
+      // Animate on initial entry or camera switch (not frame changes)
       const cameraChanged = prevCameraId.current !== targetCalib.cameraName
       if (cameraChanged) {
-        enteringPov.current = true
+        startEntryAnimation(isFirstEntry ? POV_ENTER_DURATION : POV_SWITCH_DURATION)
       }
       prevCameraId.current = targetCalib.cameraName
     } else {
@@ -147,6 +175,8 @@ function PovController({
       const dist = returnTarget.current.pos.distanceTo(returnTarget.current.target)
       returnLookAt.current = camera.position.clone().add(_returnDir.multiplyScalar(Math.max(dist, 5)))
 
+      // Start timed return animation
+      startEntryAnimation(POV_RETURN_DURATION)
       returningRef.current = true
       savedState.current = null
     }
@@ -155,17 +185,25 @@ function PovController({
   // Animate: either toward POV target or back to orbital view
   useFrame(() => {
     const pc = camera as THREE.PerspectiveCamera
+    const now = performance.now()
 
     // Keep OrbitControls disabled during POV & return animation
     if (orbitRef.current && (targetCalib || returnTarget.current)) {
       orbitRef.current.enabled = false
     }
 
+    // Compute eased progress (0→1) for time-based animation
+    const isAnimating = animStartTime.current != null
+    let t = 1 // default: animation done
+    if (isAnimating) {
+      const elapsed = now - animStartTime.current!
+      const raw = Math.min(elapsed / animDuration.current, 1)
+      t = smoothstep(raw)
+      if (raw >= 1) animStartTime.current = null // animation complete
+    }
+
     if (targetCalib) {
       // ---- Entering / holding POV ----
-      // Calibration position/quaternion are in vehicle frame.
-      // In world mode, transform them to world frame so the camera
-      // matches the scene group's world-transformed frustum position.
       _povVehicleQuat.copy(targetCalib.quaternion).multiply(OPTICAL_TO_THREEJS_CAM)
 
       const { worldMode, currentFrame } = useSceneStore.getState()
@@ -188,17 +226,15 @@ function PovController({
 
       const targetFov = THREE.MathUtils.radToDeg(targetCalib.vFov)
 
-      if (enteringPov.current) {
-        // Smooth entry animation
-        camera.position.lerp(targetPos, LERP_SPEED)
-        camera.quaternion.slerp(targetQuat, LERP_SPEED)
-        pc.fov = THREE.MathUtils.lerp(pc.fov, targetFov, LERP_SPEED)
-        // Snap once close enough
-        if (camera.position.distanceTo(targetPos) < SNAP_THRESHOLD) {
-          enteringPov.current = false
-        }
+      if (isAnimating && t < 1) {
+        // Time-based smoothstep animation
+        _animStartPos.copy(animFromPos.current).lerp(targetPos, t)
+        _animStartQuat.copy(animFromQuat.current).slerp(targetQuat, t)
+        camera.position.copy(_animStartPos)
+        camera.quaternion.copy(_animStartQuat)
+        pc.fov = THREE.MathUtils.lerp(animFromFov.current, targetFov, t)
       } else {
-        // Locked to camera — instant follow
+        // Locked to camera — instant follow (animation done or frame update)
         camera.position.copy(targetPos)
         camera.quaternion.copy(targetQuat)
         pc.fov = targetFov
@@ -221,18 +257,18 @@ function PovController({
         rt.target.copy(CHASE_CAM_TARGET).applyMatrix4(_povPoseMat)
       }
 
-      camera.position.lerp(rt.pos, LERP_SPEED)
-      pc.fov = THREE.MathUtils.lerp(pc.fov, rt.fov, LERP_SPEED)
-      pc.updateProjectionMatrix()
+      if (isAnimating && t < 1) {
+        // Time-based smoothstep return
+        _animStartPos.copy(animFromPos.current).lerp(rt.pos, t)
+        camera.position.copy(_animStartPos)
+        pc.fov = THREE.MathUtils.lerp(animFromFov.current, rt.fov, t)
+        pc.updateProjectionMatrix()
 
-      // Lerp the intermediate lookAt toward the final orbit target, then
-      // orient the camera via lookAt — smooth and gimbal-lock-free.
-      returnLookAt.current.lerp(rt.target, LERP_SPEED)
-      camera.lookAt(returnLookAt.current)
-
-      // Check if close enough to snap and finish
-      const dist = camera.position.distanceTo(rt.pos)
-      if (dist < SNAP_THRESHOLD) {
+        // Lerp lookAt target for smooth orientation transition
+        const lookTarget = returnLookAt.current.clone().lerp(rt.target, t)
+        camera.lookAt(lookTarget)
+      } else {
+        // Snap to final state
         camera.position.copy(rt.pos)
         camera.lookAt(rt.target)
         pc.fov = rt.fov

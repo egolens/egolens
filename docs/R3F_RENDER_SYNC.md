@@ -311,3 +311,112 @@ useFrame(() => {
 ```
 
 This pattern guarantees that imperative Three.js updates in `useFrame` always reference the same data version that React has committed to sibling components.
+
+---
+
+### v4: PointCloud sync — getState() race + async texture desync
+
+v3 fixed WorldPoseSync, WorldFollowCamera, and BoundingBoxes, but **PointCloud** still used `getState()` in its `useFrame` — the exact anti-pattern documented above. This caused two distinct issues:
+
+#### Issue 1: Position/matrix desync (all colormaps, world mode)
+
+**Root cause:** PointCloud read `currentFrame` via `getState()` in `useFrame`, while WorldPoseSync read `vehiclePose` via React subscription + ref. `getState()` returns the latest store value immediately, but React subscriptions only update after commit. During rapid scrubbing:
+
+1. `set()` fires → `getState()` returns frame N+1
+2. React hasn't committed → WorldPoseSync ref still holds frame N's pose
+3. `useFrame`: PointCloud writes N+1 positions, but group matrix applies pose N
+4. Render: `pose_N × positions_N+1` = wrong world positions (1-frame spatial jitter)
+
+```
+Zustand set()        PointCloud useFrame                 WorldPoseSync useFrame
+─────────────        ────────────────────                ────────────────────────
+currentFrame=N+1     getState() → positions_N+1          ref still pose_N
+                     ↑ races ahead of React commit        ↑ waiting for React commit
+                     → pose_N × positions_N+1 = JITTER
+```
+
+**Fix:** Replace `getState()` with React subscriptions + refs for all state consumed by PointCloud (`currentFrame`, `visibleSensors`, `colormapMode`, `worldMode`, `pointOpacity`, `pointSize`). Dirty detection moved from Zustand subscriber to ref comparison in `useFrame`:
+
+```tsx
+// React subscriptions — commit-synced with WorldPoseSync
+const currentFrame = useSceneStore((s) => s.currentFrame)
+const frameRef = useRef(currentFrame)
+frameRef.current = currentFrame  // updated during React render
+
+// Track last-processed for dirty detection
+const lastFrameRef = useRef(currentFrame)
+
+useFrame(() => {
+  const curFrame = frameRef.current
+  if (curFrame === lastFrameRef.current && !extraDirtyRef.current) return
+  // ... update buffers using curFrame (matches WorldPoseSync's pose)
+  lastFrameRef.current = curFrame
+})
+```
+
+#### Issue 2: Camera colormap color vibration (camera mode only)
+
+**Symptom:** In camera colormap mode, colors appeared to "vibrate" or flicker on every frame change — subtle during playback, pronounced during scrubbing.
+
+**Root cause:** Camera textures are decoded asynchronously via `decodeCameraTextures()` (2-5ms). Point positions update synchronously in `useFrame`. During the decode window:
+
+1. Frame N displayed: positions_N + textures_N ✓ (consistent)
+2. Frame N+1 arrives → positions immediately update to N+1
+3. Textures still from frame N (decode in flight)
+4. Vertex shader projects N+1 ego-frame positions → UV coords for frame N+1
+5. Fragment shader samples frame N's texture at those UVs → **wrong colors**
+6. Frame N+1 textures arrive → colors correct
+
+```
+Frame change        useFrame (immediate)           Async decode (2-5ms later)
+────────────        ────────────────────           ──────────────────────────
+N+1 arrives         positions → N+1                textures still N
+                    shader: project(pos_N+1) →     sample(tex_N) = WRONG COLORS
+                    UV_N+1 into tex_N
+                                                   textures → N+1 (finally correct)
+```
+
+The original design comment said "adjacent frames have nearly identical camera images, so stale textures look natural." This is true for the image content, but the UV coordinates change because the ego vehicle has moved — points that were at one UV in frame N now project to different UVs in frame N+1, causing visible color shifts especially near object edges.
+
+**Fix:** Position/texture sync gate — defer position buffer updates in camera mode until matching textures are decoded:
+
+```tsx
+if (isCameraMode) {
+  const cameras = ensureShaderCameras()
+  if (cameras && cameras.length > 0) {
+    triggerBitmapDecode(curFrame.timestamp, curFrame.cameraImages)
+
+    const cached = bitmapCacheRef.current
+    if (!cached || cached.timestamp !== curFrame.timestamp) {
+      // Textures not ready — keep showing previous consistent frame
+      // (old positions + old textures). Retry next useFrame tick.
+      extraDirtyRef.current = true
+      return  // skip position buffer update
+    }
+    updateCameraUniforms(cameraMat, cameras, cached.bitmaps)
+  }
+}
+```
+
+The old consistent frame (positions_N + textures_N) stays visible for 2-5ms while the new textures decode — imperceptible to the user. Once textures arrive, positions and textures update atomically.
+
+### v3 → v4 Component Sync Summary
+
+All scene-affecting components now use the React subscription + ref pattern:
+
+| Component | State read mechanism | Synced with |
+|-----------|---------------------|-------------|
+| WorldPoseSync | React sub + ref (v3) | group matrix |
+| BoundingBoxes | React sub (JSX props) | box positions |
+| WorldFollowCamera | React sub + ref (v3) | camera follow |
+| **PointCloud** | **React sub + ref (v4)** | **position buffer** |
+
+Plus the camera-mode-specific texture sync gate ensures GPU shader inputs (positions + textures) are always from the same frame timestamp.
+
+## Verification (v4)
+
+- Camera colormap scrub: smooth colors, no vibration
+- Camera colormap play: no regression, no flicker
+- Non-camera colormaps (world mode scrub): smooth, no position jitter
+- All previous fixes preserved (Follow ON/OFF, arrow keys, playback)
+- Build: clean (`npx tsc --noEmit` + `npm test` 526 pass)
