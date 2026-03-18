@@ -114,7 +114,7 @@ With SyncLane, React flushes the commit synchronously during the event handler. 
 
 The subscribe approach eliminates this timing dependency entirely — the matrix is always updated before React touches anything.
 
-## Verification
+## Verification (v2)
 
 - World mode scrub (ArrowRight/ArrowLeft): smooth movement, no jitter
 - Play mode: no regression, behavior unchanged
@@ -122,40 +122,192 @@ The subscribe approach eliminates this timing dependency entirely — the matrix
 - INP: 58ms (processing: 0.1ms)
 - Build: clean (`npm run build` + `npm test` pass)
 
+---
+
+### v3: React subscription + ref (final fix)
+
+v2 fixed arrow-key jitter but introduced two separate desync issues, both rooted in the same cause: `getState()` racing ahead of React's commit cycle.
+
+#### Issue 1: Box/model jitter with Follow Camera OFF
+
+**Symptom:** Timeline scrubbing in world mode with Follow Camera OFF caused boxes/models to vibrate — rendering briefly in the wrong orientation then snapping back on every frame change.
+
+**Key observation:** The jitter was invisible with Follow Camera ON, because the camera moves with the ego vehicle, making the relative box positions appear correct despite the absolute desync. With Follow Camera OFF the camera is fixed in world space, exposing the absolute position error.
+
+**Root cause:** The subscribe callback and `useFrame` both used `getState()` to read `vehiclePose`. `getState()` always returns the **latest** Zustand store value — but BoundingBoxes receives `currentFrame?.boxes` via a **React subscription**, which only updates after React commits. During rapid scrubbing:
+
+1. `set()` fires → subscriber updates matrix to **frame N's pose** (via `getState()`)
+2. React has NOT yet committed → BoundingBoxes still renders **frame N-1's box positions**
+3. THREE.js renders: `pose_N × boxes_N-1` = wrong world positions (1-frame jitter)
+4. React commits → BoundingBoxes updates to `boxes_N`
+5. Next render: `pose_N × boxes_N` = correct
+
+```
+Zustand set()        subscribe callback       React commit (pending)     THREE.js render
+─────────────        ──────────────────       ─────────────────────      ──────────────
+currentFrame=N+1     group.matrix=pose_N+1    (not yet committed)        pose_N+1 × boxes_N ← WRONG!
+                     ↑ reads getState()        BoundingBoxes=boxes_N     ↑ one-frame jitter
+                       which is already N+1    (still old)
+```
+
+**Fix (WorldPoseSync):** Replace `getState()` reads with **React subscriptions** for both `worldMode` and `vehiclePose`, stored in refs for `useFrame` access:
+
+```tsx
+function WorldPoseSync({ groupRef }) {
+  // React subscriptions — update in the SAME commit cycle as BoundingBoxes
+  const worldMode = useSceneStore((s) => s.worldMode)
+  const vehiclePose = useSceneStore((s) => s.currentFrame?.vehiclePose ?? null)
+  const poseRef = useRef(vehiclePose)
+  const worldModeRef = useRef(worldMode)
+  poseRef.current = vehiclePose
+  worldModeRef.current = worldMode
+
+  useFrame(() => {
+    const group = groupRef.current
+    if (!group) return
+    if (worldModeRef.current && poseRef.current) {
+      _poseMatrix.fromArray(poseRef.current).transpose()
+      group.matrix.copy(_poseMatrix)
+    } else {
+      group.matrix.identity()
+    }
+    group.matrixWorldNeedsUpdate = true
+  })
+
+  return null
+}
+```
+
+#### Issue 2: Environment jitter with Follow Camera ON
+
+**Symptom:** After fixing Issue 1, Follow Camera ON revealed a previously masked jitter — the surrounding environment (point cloud, boxes, road) appeared to shift first, then the camera caught up one frame later, producing a "double render" shake on every frame change.
+
+**Root cause:** `WorldFollowCamera` still used a Zustand subscriber to move the camera. The subscriber fired synchronously during `set()`, moving the camera to the new position immediately. But with the v3 fix, scene content (matrix, boxes) now only updates after React commits + useFrame. This created the inverse desync:
+
+1. `set()` fires → `WorldFollowCamera` subscriber moves camera to frame N's position
+2. React hasn't committed → scene still shows frame N-1 content
+3. THREE.js renders: **new camera position** looking at **old scene** = environment appears to lurch
+4. React commits + useFrame → scene updates to frame N
+5. Next render: camera and scene both at frame N = correct
+
+```
+Zustand set()        WFC subscriber           React commit (pending)     THREE.js render
+─────────────        ──────────────────       ─────────────────────      ──────────────
+currentFrame=N+1     camera → pos_N+1         (not yet committed)        camera_N+1 looking at scene_N ← LURCH!
+                     ↑ fires immediately       scene still at N           ↑ environment jitters
+```
+
+**Why this was invisible before v3:** In v2, both the scene matrix (subscriber) and camera (subscriber) updated simultaneously during `set()`. They were both "too early" relative to React, but at least they were in sync with *each other*. v3 fixed the scene timing but left the camera on the old subscriber path, splitting them apart.
+
+**Fix (WorldFollowCamera):** Same pattern — replace Zustand subscribers with React subscriptions + refs, move camera update logic into `useFrame`:
+
+```tsx
+function WorldFollowCamera({ orbitRef, enabled, returningRef }) {
+  // React subscriptions — commit-synced with WorldPoseSync and BoundingBoxes
+  const frameIndex = useSceneStore((s) => s.currentFrameIndex)
+  const vehiclePose = useSceneStore((s) => s.currentFrame?.vehiclePose ?? null)
+  const worldMode = useSceneStore((s) => s.worldMode)
+  const activeCam = useSceneStore((s) => s.activeCam)
+
+  // Refs bridge React commit → useFrame
+  const frameIndexRef = useRef(frameIndex)
+  const vehiclePoseRef = useRef(vehiclePose)
+  // ... (other refs)
+
+  const prevFrameIndexRef = useRef(frameIndex)
+
+  useFrame(() => {
+    const fi = frameIndexRef.current
+    if (fi === prevFrameIndexRef.current) return  // no frame change
+    prevFrameIndexRef.current = fi
+
+    // ... camera delta logic (same as before, but reading from refs)
+  })
+
+  return null
+}
+```
+
+### Why This Works
+
+All three consumers now read from the same React commit cycle:
+
+```
+Zustand set()     React commit (atomic)                             useFrame (single tick)
+─────────────     ──────────────────────                            ──────────────────────
+currentFrame=N+1  WorldPoseSync: poseRef=pose_N+1                   1. matrix=pose_N+1
+                  BoundingBoxes: boxes=boxes_N+1                    2. camera += delta_N+1
+                  WorldFollowCamera: vehiclePoseRef=pose_N+1        3. THREE.js render
+                  ↑ all committed atomically                        ↑ all read from same refs
+                                                                    → scene + camera ALWAYS IN SYNC
+```
+
+The ref acts as a bridge between React's commit timing and R3F's imperative render loop. No subscriber, no `getState()` race — all scene-affecting updates are gated on the same React commit.
+
+### v2 vs v3 Comparison
+
+| Aspect | v2 (subscribe + useFrame) | v3 (React subscription + ref) |
+|--------|---------------------------|-------------------------------|
+| Pose read mechanism | `getState()` (always latest) | React subscription (commit-synced) |
+| Sync guarantee | Matrix precedes React commit | Matrix matches React commit |
+| Camera follow mechanism | Zustand subscriber (immediate) | useFrame (commit-synced) |
+| Failure mode | scene vs boxes desync; camera vs scene desync | None — atomic commit |
+| Complexity | 3 layers (subscribe × 2 + useFrame) | 1 layer (useFrame only, fed by refs) |
+| Follow Camera OFF scrub | Jitters | Smooth |
+| Follow Camera ON scrub | Masked jitter (camera + scene split) | Smooth |
+
+## Verification (v3)
+
+- World mode scrub with Follow OFF: smooth, no jitter
+- World mode scrub with Follow ON: smooth, no double-render shake
+- Play mode: no regression
+- Vehicle mode: no regression (matrix is identity)
+- Build: clean (`npx tsc --noEmit` + `npm test` 526 pass)
+
 ## General Lessons
 
-### 1. useEffect vs useFrame vs subscribe
+### 1. useEffect vs useFrame vs subscribe vs React subscription
 
 | Mechanism | When it fires | Use for |
 |-----------|--------------|---------|
 | `useEffect` | After React commit, after paint | DOM side effects, subscriptions, cleanup |
-| `useFrame` | During R3F render loop (next rAF) | Per-frame animations, buffer writes |
-| `store.subscribe()` | Synchronously during `set()` | Imperative updates that must precede React reconciliation |
+| `useFrame` | During R3F render loop (rAF) | Per-frame animations, buffer writes |
+| `store.subscribe()` | Synchronously during `set()` | Imperative updates that must precede React — **but risks racing ahead of sibling React subscriptions** |
+| React subscription + ref | During React commit | Syncing imperative code (useFrame) with React-rendered siblings |
 
-### 2. React Lanes Matter for R3F
+### 2. getState() vs React Subscription: The Core Tradeoff
 
-Synchronous event handlers (keydown, click) can cause React to flush renders immediately via SyncLane. If your Three.js scene has mixed update strategies (some React JSX, some `useFrame`), SyncLane will expose the desync. The subscribe pattern avoids this by running before React's scheduler.
+`getState()` gives you the **latest** store value — always fresh, never stale. But if **other parts of the scene** consume the same data through React subscriptions, `getState()` can race ahead of them. The result: parent transform and child positions reference different frames.
 
-### 3. Pattern: Zustand Subscribe for Imperative Three.js Updates
+**Rule of thumb:** When a parent transform and child positions must be in sync, read both through the same mechanism. If children use React subscriptions, the parent transform should too.
+
+### 3. React Lanes Still Matter — But Differently
+
+v2's insight about SyncLane vs DefaultLane remains valid — but v3 sidesteps the issue entirely. By reading pose through React subscriptions, the matrix update is always gated on React's commit, regardless of which lane triggered the update. The ref-in-useFrame pattern works correctly under both SyncLane (arrow keys) and DefaultLane (playback).
+
+### 4. Pattern: React Subscription + Ref for Synced Imperative Updates
 
 ```tsx
-// BAD: useFrame-only — desync with SyncLane React commits
+// BAD: getState() in useFrame — races ahead of React siblings
 useFrame(() => {
   const pose = useSceneStore.getState().currentFrame?.vehiclePose
-  applyPose(pose)
+  applyPose(pose) // may not match what BoundingBoxes has rendered
 })
 
-// GOOD: subscribe (pre-React) + useFrame (safety-net)
+// BAD: subscribe — also races ahead of React siblings
 useEffect(() => {
-  return useSceneStore.subscribe((state, prev) => {
-    if (state.relevantData !== prev.relevantData) {
-      applyToThreeJsObject(state.relevantData)
-    }
+  return useSceneStore.subscribe((state) => {
+    applyToThreeJsObject(state.data) // fires before React commit
   })
 }, [])
+
+// GOOD: React subscription + ref — synced with sibling components
+const data = useSceneStore((s) => s.data)        // commits with siblings
+const dataRef = useRef(data)
+dataRef.current = data                            // bridge to imperative world
 useFrame(() => {
-  applyToThreeJsObject(useSceneStore.getState().relevantData)
+  applyToThreeJsObject(dataRef.current)           // always matches siblings
 })
 ```
 
-This two-layer approach guarantees correctness regardless of React's scheduling behavior.
+This pattern guarantees that imperative Three.js updates in `useFrame` always reference the same data version that React has committed to sibling components.

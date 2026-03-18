@@ -274,42 +274,24 @@ const _poseMatrix = new THREE.Matrix4()
  * See docs/R3F_RENDER_SYNC.md for the full analysis.
  */
 function WorldPoseSync({ groupRef }: { groupRef: React.RefObject<THREE.Group | null> }) {
-  // Synchronous matrix update via store subscription.
-  // Fires BEFORE React reconciles BoundingBoxes, eliminating the
-  // one-frame desync between box positions and group transform.
-  useEffect(() => {
-    const applyPose = (wm: boolean, pose: number[] | null) => {
-      const group = groupRef.current
-      if (!group) return
-      if (wm && pose) {
-        _poseMatrix.fromArray(pose).transpose() // Waymo row-major → Three.js column-major
-        group.matrix.copy(_poseMatrix)
-      } else {
-        group.matrix.identity()
-      }
-      group.matrixWorldNeedsUpdate = true
-    }
+  // Read pose via React subscription — NOT getState().
+  // This ensures the pose ref updates in the same React commit cycle that
+  // reconciles BoundingBoxes' position/rotation props.  useFrame then reads
+  // from this ref, guaranteeing matrix and child positions always correspond
+  // to the same frame.  Using getState() would return the latest store value
+  // which may race ahead of React reconciliation during rapid scrubbing.
+  const worldMode = useSceneStore((s) => s.worldMode)
+  const vehiclePose = useSceneStore((s) => s.currentFrame?.vehiclePose ?? null)
+  const poseRef = useRef<number[] | null>(vehiclePose)
+  const worldModeRef = useRef(worldMode)
+  poseRef.current = vehiclePose
+  worldModeRef.current = worldMode
 
-    // Apply current state immediately (handles initial mount)
-    const s = useSceneStore.getState()
-    applyPose(s.worldMode, s.currentFrame?.vehiclePose ?? null)
-
-    // Subscribe — fires synchronously during set(), before React re-render
-    return useSceneStore.subscribe((state, prev) => {
-      if (state.currentFrame !== prev.currentFrame || state.worldMode !== prev.worldMode) {
-        applyPose(state.worldMode, state.currentFrame?.vehiclePose ?? null)
-      }
-    })
-  }, [groupRef])
-
-  // Safety-net: re-apply in useFrame for continuous correctness
   useFrame(() => {
     const group = groupRef.current
     if (!group) return
-    const { worldMode, currentFrame } = useSceneStore.getState()
-    const pose = currentFrame?.vehiclePose ?? null
-    if (worldMode && pose) {
-      _poseMatrix.fromArray(pose).transpose()
+    if (worldModeRef.current && poseRef.current) {
+      _poseMatrix.fromArray(poseRef.current).transpose() // Waymo row-major → Three.js column-major
       group.matrix.copy(_poseMatrix)
     } else {
       group.matrix.identity()
@@ -355,56 +337,78 @@ function WorldFollowCamera({ orbitRef, enabled, returningRef }: {
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
 
-  useEffect(() => {
-    return useSceneStore.subscribe((state, prev) => {
-      // Only act on frame changes
-      if (state.currentFrameIndex === prev.currentFrameIndex) return
-      // Skip during POV mode
-      if (state.activeCam !== null) return
-      // Skip during POV return animation (PovController still owns the camera)
-      if (returningRef.current) return
-      // Only in world mode
-      if (!state.worldMode) return
+  // React subscriptions — commit-synced with WorldPoseSync and BoundingBoxes.
+  // Camera movement happens in useFrame alongside the matrix update, so the
+  // camera and scene content always update in the same render frame.
+  const frameIndex = useSceneStore((s) => s.currentFrameIndex)
+  const vehiclePose = useSceneStore((s) => s.currentFrame?.vehiclePose ?? null)
+  const worldMode = useSceneStore((s) => s.worldMode)
+  const activeCam = useSceneStore((s) => s.activeCam)
 
-      const pose = state.currentFrame?.vehiclePose ?? null
-      if (!pose) return
+  const frameIndexRef = useRef(frameIndex)
+  const vehiclePoseRef = useRef(vehiclePose)
+  const worldModeRef = useRef(worldMode)
+  const activeCamRef = useRef(activeCam)
 
-      _followCurrPos.set(pose[3], pose[7], pose[11])
+  // Track previous frame index to detect frame changes inside useFrame
+  const prevFrameIndexRef = useRef(frameIndex)
 
-      if (enabledRef.current && prevPos.current && orbitRef.current) {
-        _followDelta.copy(_followCurrPos).sub(prevPos.current)
-
-        // Large jump (rewind, scrub, segment switch) → snap to chase-cam.
-        // Normal driving delta is <2m/frame; threshold 100 = 10m squared.
-        if (_followDelta.lengthSq() > 100) {
-          _resetPoseMat.fromArray(pose).transpose()
-          _resetPos.copy(CHASE_CAM_POSITION).applyMatrix4(_resetPoseMat)
-          _resetTarget.copy(CHASE_CAM_TARGET).applyMatrix4(_resetPoseMat)
-          orbitRef.current.object.position.copy(_resetPos)
-          orbitRef.current.target.copy(_resetTarget)
-        } else {
-          orbitRef.current.object.position.add(_followDelta)
-          orbitRef.current.target.add(_followDelta)
-        }
-        orbitRef.current.update()
-      }
-
-      if (!prevPos.current) prevPos.current = new THREE.Vector3()
-      prevPos.current.copy(_followCurrPos)
-    })
-  }, [orbitRef, returningRef])
+  // Update refs during React commit (same cycle as siblings)
+  frameIndexRef.current = frameIndex
+  vehiclePoseRef.current = vehiclePose
+  worldModeRef.current = worldMode
+  activeCamRef.current = activeCam
 
   // Reset tracking when leaving world mode or exiting POV
-  useEffect(() => {
-    return useSceneStore.subscribe((state, prev) => {
-      if (state.worldMode !== prev.worldMode && !state.worldMode) {
-        prevPos.current = null
+  const prevWorldMode = useRef(worldMode)
+  const prevActiveCam = useRef(activeCam)
+  if (worldMode !== prevWorldMode.current && !worldMode) {
+    prevPos.current = null
+  }
+  if (activeCam !== prevActiveCam.current && activeCam === null) {
+    prevPos.current = null
+  }
+  prevWorldMode.current = worldMode
+  prevActiveCam.current = activeCam
+
+  useFrame(() => {
+    // Detect frame change since last useFrame tick
+    const fi = frameIndexRef.current
+    if (fi === prevFrameIndexRef.current) return
+    prevFrameIndexRef.current = fi
+
+    // Skip during POV mode or POV return animation
+    if (activeCamRef.current !== null) return
+    if (returningRef.current) return
+    // Only in world mode
+    if (!worldModeRef.current) return
+
+    const pose = vehiclePoseRef.current
+    if (!pose) return
+
+    _followCurrPos.set(pose[3], pose[7], pose[11])
+
+    if (enabledRef.current && prevPos.current && orbitRef.current) {
+      _followDelta.copy(_followCurrPos).sub(prevPos.current)
+
+      // Large jump (rewind, scrub, segment switch) → snap to chase-cam.
+      // Normal driving delta is <2m/frame; threshold 100 = 10m squared.
+      if (_followDelta.lengthSq() > 100) {
+        _resetPoseMat.fromArray(pose).transpose()
+        _resetPos.copy(CHASE_CAM_POSITION).applyMatrix4(_resetPoseMat)
+        _resetTarget.copy(CHASE_CAM_TARGET).applyMatrix4(_resetPoseMat)
+        orbitRef.current.object.position.copy(_resetPos)
+        orbitRef.current.target.copy(_resetTarget)
+      } else {
+        orbitRef.current.object.position.add(_followDelta)
+        orbitRef.current.target.add(_followDelta)
       }
-      if (state.activeCam !== prev.activeCam && state.activeCam === null) {
-        prevPos.current = null
-      }
-    })
-  }, [])
+      orbitRef.current.update()
+    }
+
+    if (!prevPos.current) prevPos.current = new THREE.Vector3()
+    prevPos.current.copy(_followCurrPos)
+  })
 
   return null
 }
