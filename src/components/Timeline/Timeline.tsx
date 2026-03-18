@@ -70,14 +70,11 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const disabled = status !== 'ready'
   const maxFrame = Math.max(totalFrames - 1, 0)
 
-  // Clamp slider to the highest cached frame — prevent jumping to unloaded area
-  const maxCached = cachedFrames.length > 0 ? cachedFrames[cachedFrames.length - 1] : 0
 
   const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    // Clamp to the highest cached frame — user can drag anywhere but we won't jump past loaded data
-    const target = Math.min(parseInt(e.target.value, 10), maxCached)
+    const target = parseInt(e.target.value, 10)
     actions.seekFrame(target)
-  }, [actions, maxCached])
+  }, [actions])
 
   // Build active annotation lanes (only visible features)
   interface AnnotationLane { key: string; color: string; frames: Set<number> }
@@ -134,68 +131,71 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
       {/* Custom slider with buffer bar + annotation lanes */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {/* Main track area */}
+        {/* Main track area — outer container keeps full width for hit area */}
         <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
-          {/* Track background */}
-          <div style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            height: '6px',
-            backgroundColor: colors.bgOverlay,
-            borderRadius: radius.pill,
-            pointerEvents: 'none',
-          }} />
-
-          {/* Buffer segments — loaded frames */}
-          {bufferSegments.map((seg, i) => {
-            const left = (seg.start / maxFrame) * 100
-            const width = ((seg.end - seg.start + 1) / maxFrame) * 100
-            return (
-              <div
-                key={i}
-                style={{
-                  position: 'absolute',
-                  left: `${left}%`,
-                  width: `${width}%`,
-                  height: '6px',
-                  backgroundColor: colors.accentDim,
-                  borderRadius: radius.pill,
-                  pointerEvents: 'none',
-                }}
-              />
-            )
-          })}
-
-          {/* Played progress (gradient bar) */}
-          <div style={{
-            position: 'absolute',
-            left: 0,
-            width: `${maxFrame > 0 ? (currentFrameIndex / maxFrame) * 100 : 0}%`,
-            height: '6px',
-            background: gradients.accent,
-            borderRadius: radius.pill,
-            pointerEvents: 'none',
-            boxShadow: `0 0 8px ${colors.accentGlow}`,
-          }} />
-
-          {/* Playhead dot */}
-          {maxFrame > 0 && (
+          {/* Inset track container — padded by dot radius so playhead fits at 0% and 100% */}
+          <div style={{ position: 'absolute', left: 6, right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center' }}>
+            {/* Track background */}
             <div style={{
               position: 'absolute',
-              left: `${(currentFrameIndex / maxFrame) * 100}%`,
-              top: '50%',
-              width: '12px',
-              height: '12px',
-              borderRadius: '50%',
-              backgroundColor: colors.accent,
-              transform: 'translate(-50%, -50%)',
-              boxShadow: `0 0 6px ${colors.accentDim}`,
+              left: 0,
+              right: 0,
+              height: '6px',
+              backgroundColor: colors.bgOverlay,
+              borderRadius: radius.pill,
               pointerEvents: 'none',
             }} />
-          )}
 
-          {/* Invisible range input on top */}
+            {/* Buffer segments — loaded frames */}
+            {bufferSegments.map((seg, i) => {
+              const left = maxFrame > 0 ? (seg.start / maxFrame) * 100 : 0
+              const width = maxFrame > 0 ? ((seg.end - seg.start + 1) / maxFrame) * 100 : 0
+              return (
+                <div
+                  key={i}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}%`,
+                    width: `${Math.min(width, 100 - left)}%`,
+                    height: '6px',
+                    backgroundColor: colors.accentDim,
+                    borderRadius: radius.pill,
+                    pointerEvents: 'none',
+                  }}
+                />
+              )
+            })}
+
+            {/* Played progress (gradient bar) */}
+            <div style={{
+              position: 'absolute',
+              left: 0,
+              width: `${maxFrame > 0 ? (currentFrameIndex / maxFrame) * 100 : 0}%`,
+              height: '6px',
+              background: gradients.accent,
+              borderRadius: radius.pill,
+              pointerEvents: 'none',
+              boxShadow: `0 0 8px ${colors.accentGlow}`,
+            }} />
+
+            {/* Playhead dot — at 0% center is at left edge, at 100% center is at right edge */}
+            {maxFrame > 0 && (
+              <div style={{
+                position: 'absolute',
+                left: `${(currentFrameIndex / maxFrame) * 100}%`,
+                top: '50%',
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: colors.accent,
+                transform: 'translate(-50%, -50%)',
+                boxShadow: `0 0 6px ${colors.accentDim}`,
+                pointerEvents: 'none',
+              }} />
+            )}
+          </div>
+
+          {/* Invisible range input — matches inset track area */}
           <input
             type="range"
             min={0}
@@ -205,9 +205,9 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
             disabled={disabled}
             style={{
               position: 'absolute',
-              left: 0,
-              right: 0,
-              width: '100%',
+              left: 6,
+              right: 6,
+              width: 'calc(100% - 12px)',
               height: '24px',
               opacity: 0,
               cursor: disabled ? 'default' : 'pointer',
@@ -218,17 +218,17 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
         {/* Camera buffer lane — shown while camera loading lags behind LiDAR */}
         {!minimal && showCameraBuffer && (
-          <div style={{ position: 'relative', height: '3px', marginTop: '2px' }}>
+          <div style={{ position: 'relative', height: '3px', marginTop: '2px', marginLeft: 6, marginRight: 6 }}>
             {cameraBufferSegments.map((seg, i) => {
-              const left = (seg.start / maxFrame) * 100
-              const width = ((seg.end - seg.start + 1) / maxFrame) * 100
+              const left = maxFrame > 0 ? (seg.start / maxFrame) * 100 : 0
+              const width = maxFrame > 0 ? ((seg.end - seg.start + 1) / maxFrame) * 100 : 0
               return (
                 <div
                   key={i}
                   style={{
                     position: 'absolute',
                     left: `${left}%`,
-                    width: `${width}%`,
+                    width: `${Math.min(width, 100 - left)}%`,
                     height: '3px',
                     backgroundColor: '#FF9E00',
                     opacity: 0.6,
@@ -243,7 +243,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
         {/* Annotation lanes — each active feature gets its own thin lane (hidden in minimal mode) */}
         {!minimal && activeLanes.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', paddingTop: '2px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', paddingTop: '2px', marginLeft: 6, marginRight: 6 }}>
             {activeLanes.map(({ key, color, frames }) => (
               <div key={key} style={{ position: 'relative', height: '3px' }}>
                 {maxFrame > 0 && [...frames].map((fi) => (
@@ -273,7 +273,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
         minWidth: '64px',
         textAlign: 'right',
       }}>
-        {currentFrameIndex} / {maxFrame}
+        {currentFrameIndex + 1} / {totalFrames}
       </span>
     </div>
   )
