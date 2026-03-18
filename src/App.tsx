@@ -219,6 +219,38 @@ function App() {
           segmentMetas: new Map(),
         })
         clearUrlSource()
+        // Reset guards so forward-navigation can re-trigger auto-load
+        urlAutoLoadStarted = false
+        urlViewRestoreApplied = false
+      } else {
+        // Forward navigation — URL has data params, re-trigger load
+        const { status: st } = useSceneStore.getState()
+        if (st === 'idle' || st === 'ready') {
+          // Reset state + guards, then re-load from URL
+          if (st === 'ready') {
+            const store = useSceneStore.getState()
+            store.actions.reset()
+            useSceneStore.setState({
+              availableSegments: [],
+              currentSegment: null,
+              segmentMetas: new Map(),
+            })
+          }
+          urlAutoLoadStarted = false
+          urlViewRestoreApplied = false
+          const dataset = params.get('dataset')!
+          const dataUrl = params.get('data')!
+          const scene = params.get('scene') || undefined
+          if (SUPPORTED_URL_DATASETS.includes(dataset as UrlDataset)) {
+            urlAutoLoadStarted = true
+            try {
+              const baseUrl = normalizeBaseUrl(dataUrl)
+              useSceneStore.getState().actions.loadFromUrl(dataset, baseUrl, scene)
+            } catch {
+              urlAutoLoadStarted = false
+            }
+          }
+        }
       }
     }
     window.addEventListener('popstate', onPopState)
