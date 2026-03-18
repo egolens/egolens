@@ -206,3 +206,8 @@ export function parseViewParams(search?: string): Partial<ShareableState> {
 
   return state
 }
+
+/** True when the initial URL contained view params (i.e. opened via Share link) */
+export function isShareView(): boolean {
+  return Object.keys(parseViewParams(initialSearch ?? undefined)).length > 0
+}

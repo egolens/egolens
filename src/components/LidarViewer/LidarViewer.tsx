@@ -25,6 +25,7 @@ import type { ColormapMode } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
 import { colors, fonts, radius } from '../../theme'
 import { getManifest } from '../../adapters/registry'
+import { isShareView } from '../../utils/urlState'
 
 // ---------------------------------------------------------------------------
 // Chase-cam defaults + reusable temp objects
@@ -543,7 +544,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const [bevZoom, setBevZoom] = useState(1)
   const followCam = useSceneStore((s) => s.followCam)
   const setFollowCam = useSceneStore((s) => s.actions.setFollowCam)
-  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelOpen, setPanelOpen] = useState(() => !isShareView())
   const [opDragging, setOpDragging] = useState(false)
   const [szDragging, setSzDragging] = useState(false)
 

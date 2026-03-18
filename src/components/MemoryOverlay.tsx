@@ -16,6 +16,9 @@ export default function MemoryOverlay() {
   const [visible, setVisible] = useState(false)
   const [stats, setStats] = useState<MemoryStats | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Track whether the user has explicitly dismissed the overlay via M key.
+  // Once dismissed, auto-show won't re-enable it — only another M press will.
+  const userDismissedRef = useRef(false)
 
   // Check if memory logging is enabled
   const isEnabled = useCallback(() => {
@@ -30,16 +33,20 @@ export default function MemoryOverlay() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'm' || e.key === 'M') {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-        setVisible((v) => !v)
+        setVisible((v) => {
+          const next = !v
+          userDismissedRef.current = !next // dismissed when turning OFF
+          return next
+        })
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Auto-show if logging enabled
+  // Auto-show if logging enabled — but respect explicit user dismissal
   useEffect(() => {
-    if (isEnabled()) setVisible(true)
+    if (isEnabled() && !userDismissedRef.current) setVisible(true)
   }, [isEnabled])
 
   // Poll memory stats
