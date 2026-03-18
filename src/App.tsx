@@ -479,114 +479,6 @@ function Header() {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Download Guide — collapsible shell script
-// ---------------------------------------------------------------------------
-
-const DOWNLOAD_SCRIPT = `# Install Google Cloud CLI: https://cloud.google.com/sdk/docs/install
-gcloud auth login
-
-BUCKET="gs://waymo_open_dataset_v_2_0_1/training"
-COMPONENTS="vehicle_pose lidar_calibration camera_calibration lidar_box lidar camera_image lidar_segmentation camera_segmentation lidar_hkp camera_hkp"
-N=1  # Number of segments to download (~500 MB each)
-
-SEGMENTS=$(gsutil ls "$BUCKET/vehicle_pose/*.parquet" | head -$N | xargs -I{} basename {} .parquet)
-
-for SEG in $SEGMENTS; do
-  echo "Downloading $SEG"
-  for C in $COMPONENTS; do
-    mkdir -p waymo_data/$C
-    gsutil -m cp "$BUCKET/$C/$SEG.parquet" "waymo_data/$C/"
-  done
-done`
-
-function DownloadGuide() {
-  const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(DOWNLOAD_SCRIPT).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }, [])
-
-  return (
-    <div style={{ maxWidth: '520px', width: '100%' }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '6px',
-          width: '100%',
-          padding: '8px',
-          fontSize: '12px',
-          fontFamily: fonts.sans,
-          color: colors.textDim,
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          transition: 'color 0.15s',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = colors.textSecondary }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim }}
-      >
-        <span style={{
-          display: 'inline-block',
-          transition: 'transform 0.2s',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          fontSize: '10px',
-        }}>▶</span>
-        Need data? Download script for Waymo Open Dataset v2.0.1
-      </button>
-
-      {open && (
-        <div style={{
-          position: 'relative',
-          marginTop: '4px',
-          borderRadius: radius.md,
-          border: `1px solid ${colors.border}`,
-          backgroundColor: colors.bgDeep,
-          overflow: 'hidden',
-        }}>
-          <button
-            onClick={handleCopy}
-            style={{
-              position: 'absolute',
-              top: '6px',
-              right: '6px',
-              padding: '3px 8px',
-              fontSize: '10px',
-              fontFamily: fonts.mono,
-              color: copied ? colors.accent : colors.textDim,
-              backgroundColor: colors.bgOverlay,
-              border: `1px solid ${colors.border}`,
-              borderRadius: radius.sm,
-              cursor: 'pointer',
-              zIndex: 1,
-            }}
-          >
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-          <pre style={{
-            margin: 0,
-            padding: '14px 16px',
-            fontSize: '11px',
-            fontFamily: fonts.mono,
-            color: colors.textSecondary,
-            lineHeight: 1.6,
-            overflowX: 'auto',
-            whiteSpace: 'pre',
-          }}>
-            {DOWNLOAD_SCRIPT}
-          </pre>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Drop Zone — shown when no data is loaded
@@ -814,7 +706,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 color: colors.textPrimary,
                 marginBottom: '8px',
               }}>
-                Drop dataset folder here
+                Drop a dataset folder here
               </div>
               <div style={{
                 fontSize: '13px',
@@ -822,7 +714,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 color: colors.textSecondary,
                 lineHeight: 1.5,
               }}>
-                Or use the button below to select the folder
+                Waymo, nuScenes, or Argoverse 2 — auto-detected
               </div>
             </div>
 
@@ -867,22 +759,44 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               </div>
             )}
 
-            {/* Hint */}
+            {/* Hint — expected folder structures */}
             <div style={{
-              fontSize: '11px',
+              fontSize: '10px',
               fontFamily: fonts.mono,
               color: colors.textDim,
-              textAlign: 'center',
-              lineHeight: 1.6,
+              textAlign: 'left',
+              lineHeight: 1.5,
+              display: 'flex',
+              gap: '24px',
+              justifyContent: 'center',
+              flexWrap: 'wrap',
             }}>
-              Expected: waymo_data/{'{'} vehicle_pose, lidar, camera_image, … {'}'}/{'{'}segment_id{'}'}.parquet
+              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
+`Waymo (drop this) 📂
+├── vehicle_pose/
+├── lidar/
+├── camera_image/
+└── …/*.parquet`
+              }</pre>
+              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
+`nuScenes (drop this) 📂
+├── v1.0-{mini,trainval,test}/
+├── samples/
+├── sweeps/
+└── lidarseg/`
+              }</pre>
+              <pre style={{ margin: 0, fontFamily: 'inherit' }}>{
+`AV2 log (drop this) 📂
+├── sensors/
+├── calibration/
+├── city_SE3_egovehicle…
+└── annotations.feather`
+              }</pre>
             </div>
           </>
         )}
       </div>
 
-      {/* Data download guide — collapsible */}
-      <DownloadGuide />
 
       {/* ── or divider ── */}
       <div style={{
