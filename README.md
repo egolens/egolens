@@ -1,32 +1,35 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Perception Studio" width="720" />
+  <img src="assets/banner.png" alt="EgoLens" width="720" />
 </p>
 
 <p align="center">
-  Browser-native 3D perception explorer for Waymo Open Dataset v2.0 Perception<br/>
+  Browser-native 3D perception explorer for autonomous driving datasets<br/>
+  <strong>Waymo · nuScenes · Argoverse 2</strong><br/>
   No install. No server. Your data never leaves your browser.
 </p>
 
 <p align="center">
-  <a href="https://happyhj.github.io/waymo-perception-studio"><strong>✦ Live Demo</strong></a>
+  <a href="https://happyhj.github.io/egolens"><strong>Live Demo</strong></a> ·
+  <a href="#url-loading">URL Loading</a> ·
+  <a href="#dev-setup">Dev Setup</a>
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/ca5566ed-f2f2-42ad-8c13-b05d9150aacc" alt="Perception Studio screenshot" width="720" />
+  <img src="https://github.com/user-attachments/assets/ca5566ed-f2f2-42ad-8c13-b05d9150aacc" alt="EgoLens screenshot" width="720" />
 </p>
 
-## The Problem
+## What It Does
 
-[Waymo Open Dataset](https://waymo.com/open/) is one of the richest public self-driving datasets out there, but actually looking at the data is painful. The [official tools](https://github.com/waymo-research/waymo-open-dataset) need Python + TensorFlow. Jupyter gives you static plots. [Foxglove](https://foxglove.dev/) is paid. And you can't even use the raw Parquet files without preprocessing scripts.
+Drop in a dataset folder (or provide a URL) and instantly explore autonomous driving scenes in 3D — no Python, no preprocessing, no uploads.
 
-You just want to drop in the files and see what's inside.
-
-## What's Inside
-
-- **See what the car sees**: explore real self-driving scenes in 3D with LiDAR point clouds and 5 synchronized camera views
-- **3D object models**: vehicles, pedestrians, and cyclists rendered as 3D models with color-coded tracking
-- **Camera POV mode**: click a camera to jump into its viewpoint in 3D, compare what the sensor sees side by side
-- **Cross-modal linking**: hover over a camera detection and its 3D counterpart lights up, and vice versa
+- **LiDAR point clouds** from up to 5 sensors with 6 colormap modes (intensity, height, range, elongation, semantic segmentation, camera projection)
+- **3D bounding boxes** rendered as wireframes or 3D models (vehicle, pedestrian, cyclist) with color-coded tracking
+- **5 synchronized camera views** with POV switching — click a camera to jump into its viewpoint
+- **Cross-modal hover linking** — hover a 2D camera box and its 3D counterpart highlights, and vice versa
+- **Trajectory trails** showing object movement over past frames
+- **Human keypoints** — 14-joint 3D skeleton per pedestrian, with 2D camera overlay
+- **Semantic segmentation** — LiDAR (23-class) and camera panoptic (29-class) overlays
+- **Timeline** with play/pause, speed control (0.5x–4x), and buffer progress bars
 
 <table>
   <tr>
@@ -35,59 +38,68 @@ You just want to drop in the files and see what's inside.
   </tr>
 </table>
 
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/a6361d24-00a6-4e24-9365-210f9a94277c" autoplay loop muted playsinline width="720"></video>
-</p>
+## Supported Datasets
 
-## 🚀 Try It With Your Waymo Data
+| Dataset | Local (drag & drop) | URL loading |
+|---------|:------------------:|:-----------:|
+| [Waymo Open Dataset v2.0](https://waymo.com/open/) | ✓ | ✓ |
+| [nuScenes](https://www.nuscenes.org/) | ✓ | ✓ |
+| [Argoverse 2](https://www.argoverse.org/) | ✓ | ✓ |
 
-**Already have Waymo Open Dataset v2.0 Perception downloaded?** Just open the [live demo](https://happyhj.github.io/waymo-perception-studio), drop your files, and go.
+Dataset format is auto-detected from folder structure.
 
-**Don't have the data yet?** It's free with a Google account.
+## Quick Start
 
-<details>
-<summary><strong>Download script</strong></summary>
+### Local files (drag & drop)
 
-```bash
-# Install Google Cloud CLI: https://cloud.google.com/sdk/docs/install
-gcloud auth login
+1. Open the [live demo](https://happyhj.github.io/egolens)
+2. Drag & drop your dataset folder into the browser
+3. Done — browse frames, toggle sensors, play the timeline
 
-BUCKET="gs://waymo_open_dataset_v_2_0_1/training"
-COMPONENTS="vehicle_pose lidar_calibration camera_calibration lidar_box lidar lidar_camera_projection camera_image"
-N=1  # Number of segments to download (~500 MB each)
+### URL Loading
 
-SEGMENTS=$(gsutil ls "$BUCKET/vehicle_pose/*.parquet" | head -$N | xargs -I{} basename {} .parquet)
+Provide a URL to load data directly from S3 or any HTTP server.
 
-for SEG in $SEGMENTS; do
-  echo "Downloading $SEG"
-  for C in $COMPONENTS; do
-    mkdir -p waymo_data/$C
-    gsutil -m cp "$BUCKET/$C/$SEG.parquet" "waymo_data/$C/"
-  done
-done
+**Two modes:**
+
+- **URL only** — auto-discovers all segments/scenes in the directory
+- **URL + Segment ID** — loads a specific segment directly (works with any static file server)
+
+```
+https://happyhj.github.io/egolens/?dataset=argoverse2&data=https://your-bucket.s3.amazonaws.com/av2/sensor/val/
+https://happyhj.github.io/egolens/?dataset=nuscenes&data=https://data.egolens.org/nuscenes/
+https://happyhj.github.io/egolens/?dataset=waymo&data=https://your-server.com/waymo_data/&scene=SEGMENT_ID
 ```
 
-</details>
-
-Then drag & drop the `waymo_data/` folder into the app.
+> **Note:** Waymo's license prohibits data redistribution, so no hosted demo data is available. You'll need to host your own copy after accepting the [Waymo Open Dataset License](https://waymo.com/open/terms/).
 
 ## Dev Setup
 
 ```bash
-git clone https://github.com/heejaekim/waymo-perception-studio.git
-cd waymo-perception-studio
+git clone https://github.com/happyhj/egolens.git
+cd egolens
 npm install
 npm run dev
 ```
 
+```bash
+npm run build   # Type-check + production build
+npm run lint    # ESLint
+npm test        # Vitest
+```
+
 ## Built With
 
-React 19 · TypeScript · Three.js · R3F · Vite · Zustand · hyparquet · Web Workers
+React 19 · TypeScript · Three.js · React Three Fiber · Vite · Zustand · hyparquet · Web Workers
 
 ## Browser Support
 
 Chrome / Edge recommended (folder drag & drop + folder picker). Firefox / Safari support folder drag & drop only.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
-MIT
+[MIT](LICENSE) · Built by [Heejae Kim](https://github.com/happyhj)
