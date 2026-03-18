@@ -1,6 +1,6 @@
-# Perception Studio for Waymo Open Dataset
+# EgoLens
 
-Browser-based 3D visualization tool for Waymo Open Dataset v2.0.
+Browser-based 3D perception explorer for autonomous driving datasets (Waymo, nuScenes, Argoverse 2).
 
 ## Quick Context
 - **Detailed technical plan**: `docs/TECHNICAL_PLAN.md` (read for architecture decisions, data schemas, reasoning)

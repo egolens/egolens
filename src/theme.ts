@@ -1,10 +1,9 @@
 /**
- * Waymo-inspired design tokens
+ * EgoLens design tokens
  *
- * Color palette derived from Waymo's brand language:
- * - Caribbean Green teal-to-blue gradient
+ * Color palette: teal accent on dark blue backgrounds
  * - Dark backgrounds with subtle blue undertones
- * - "Pure, flow, balance, contrast" design principles
+ * - High-contrast teal accent for interactive elements
  */
 
 // ---------------------------------------------------------------------------
@@ -12,12 +11,12 @@
 // ---------------------------------------------------------------------------
 
 export const colors = {
-  /** Primary accent — Waymo teal */
+  /** Primary accent — teal */
   accent: '#00E89D',
   accentDim: 'rgba(0, 232, 157, 0.3)',
   accentGlow: 'rgba(0, 232, 157, 0.15)',
 
-  /** Secondary accent — Waymo blue */
+  /** Secondary accent — blue */
   accentBlue: '#00C9DB',
 
   /** Background tiers */

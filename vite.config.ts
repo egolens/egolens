@@ -70,8 +70,8 @@ function serveWaymoData(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
-  base: '/waymo-perception-studio/',
+export default defineConfig(({ command }) => ({
+  base: command === 'serve' ? '/' : '/egolens/',
   plugins: [react(), serveWaymoData()],
   resolve: {
     alias: {
@@ -98,4 +98,4 @@ export default defineConfig({
   // CSP headers for production (static hosting should also set these):
   // Content-Security-Policy: frame-ancestors 'self' https:;
   // This allows the page to be embedded in any HTTPS iframe while blocking HTTP.
-})
+}))

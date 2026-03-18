@@ -285,7 +285,7 @@ function App() {
             LinkedIn
           </a>
           <span style={{ opacity: 0.4 }}>·</span>
-          <a href="https://github.com/happyhj/waymo-perception-studio" target="_blank" rel="noopener noreferrer"
+          <a href="https://github.com/happyhj/egolens" target="_blank" rel="noopener noreferrer"
             style={{ color: colors.accent, textDecoration: 'none', transition: 'color 0.15s, opacity 0.15s', opacity: 0.7 }}
             onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
             onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7' }}
@@ -338,15 +338,20 @@ function Header() {
       gap: '16px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <h1 style={{
-          margin: 0,
-          fontSize: '15px',
-          fontWeight: 600,
-          fontFamily: fonts.sans,
-          letterSpacing: '-0.01em',
-          color: colors.textPrimary,
-        }}>
-          Perception Studio <span style={{ fontWeight: 400, opacity: 0.5, fontSize: '12px' }}>for {getManifest().name}</span>
+        <h1
+          onClick={() => { window.location.href = window.location.pathname }}
+          style={{
+            margin: 0,
+            fontSize: '15px',
+            fontWeight: 600,
+            fontFamily: fonts.sans,
+            letterSpacing: '-0.01em',
+            color: colors.textPrimary,
+            cursor: 'pointer',
+          }}
+          title="Back to home"
+        >
+          EgoLens{status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: '12px', marginLeft: '6px' }}>{getManifest().name}</span>}
         </h1>
       </div>
 
@@ -454,7 +459,7 @@ function Header() {
           {statusText}
         </div>
         <a
-          href="https://github.com/happyhj/waymo-perception-studio"
+          href="https://github.com/happyhj/egolens"
           target="_blank"
           rel="noopener noreferrer"
           title="View on GitHub"
@@ -725,28 +730,26 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           fontFamily: fonts.sans,
           color: colors.textPrimary,
         }}>
-          Perception Studio
+          EgoLens
         </div>
         <div style={{
           fontSize: '13px',
           fontFamily: fonts.sans,
           color: colors.textSecondary,
-          lineHeight: 1.6,
+          lineHeight: 1.7,
         }}>
-          Browser-native 3D perception explorer for{' '}
-          <a
-            href="https://waymo.com/open/"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: colors.accent, textDecoration: 'none' }}
-          >
-            Waymo Open Dataset v2.0 Perception
-          </a>.
+          Browser-based 3D perception explorer for{' '}
+          <a href="https://waymo.com/open/" target="_blank" rel="noopener noreferrer"
+            style={{ color: colors.accent, textDecoration: 'none' }}>Waymo</a>,{' '}
+          <a href="https://www.nuscenes.org/" target="_blank" rel="noopener noreferrer"
+            style={{ color: colors.accent, textDecoration: 'none' }}>nuScenes</a>, and{' '}
+          <a href="https://www.argoverse.org/av2.html" target="_blank" rel="noopener noreferrer"
+            style={{ color: colors.accent, textDecoration: 'none' }}>Argoverse 2</a>.
           <br />
-          No install. No server. Your data never leaves your browser.
+          Drop local files or paste an S3 / public URL — no install, no server required.
         </div>
         <a
-          href="https://github.com/happyhj/waymo-perception-studio"
+          href="https://github.com/happyhj/egolens"
           target="_blank"
           rel="noopener noreferrer"
           style={{

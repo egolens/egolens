@@ -1,5 +1,5 @@
 /**
- * Scene store — Zustand-based central state for Perception Studio.
+ * Scene store — Zustand-based central state for EgoLens.
  *
  * Heavy work (Parquet I/O + BROTLI decompress + LiDAR conversion) runs in
  * a pool of N Data Workers — main thread stays free for 60fps rendering.
@@ -171,6 +171,8 @@ export interface SceneState {
   // Prefetch progress (for YouTube-style buffer bar)
   /** Sorted array of cached frame indices */
   cachedFrames: number[]
+  /** Sorted frame indices where camera images are cached */
+  cameraCachedFrames: number[]
   /** Number of camera row groups loaded so far */
   cameraLoadedCount: number
   /** Total camera row groups to load */
@@ -264,6 +266,8 @@ const internal = {
    *  Stored independently so camera data is never lost due to lidar timing. */
   cameraImageCache: new Map<number, Map<number, ArrayBuffer>>(),
   playIntervalId: null as ReturnType<typeof setInterval> | null,
+  /** Camera refresh interval — polls for late-arriving camera data during playback */
+  cameraRefreshId: null as ReturnType<typeof setInterval> | null,
   /** Worker pool for parallel batch loading (lidar) */
   workerPool: null as WorkerPool<Record<string, unknown>, LidarBatchResult> | null,
   numBatches: 0,
@@ -339,6 +343,10 @@ function resetInternal() {
   if (internal.playIntervalId !== null) {
     clearInterval(internal.playIntervalId)
     internal.playIntervalId = null
+  }
+  if (internal.cameraRefreshId !== null) {
+    clearInterval(internal.cameraRefreshId)
+    internal.cameraRefreshId = null
   }
   if (internal.workerPool) {
     internal.workerPool.terminate()
@@ -486,6 +494,12 @@ function syncCachedFrames(set: (partial: Partial<SceneState>) => void) {
   set({ cachedFrames: indices })
 }
 
+/** Update the cameraCachedFrames state for the camera buffer lane UI */
+function syncCameraCachedFrames(set: (partial: Partial<SceneState>) => void) {
+  const indices = [...internal.cameraImageCache.keys()].sort((a, b) => a - b)
+  set({ cameraCachedFrames: indices })
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -506,6 +520,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   lastFrameLoadMs: 0,
   lastConvertMs: 0,
   cachedFrames: [],
+  cameraCachedFrames: [],
   cameraLoadedCount: 0,
   cameraTotalCount: 0,
   visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
@@ -550,6 +565,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         loadProgress: 0,
         loadStep: 'opening' as LoadStep,
         cachedFrames: [],
+        cameraCachedFrames: [],
       })
 
       try {
@@ -653,6 +669,26 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
         await get().actions.loadFrame(next)
       }, intervalMs)
+
+      // Secondary interval: refresh current frame's camera images when they arrive late.
+      // Camera workers may finish after LiDAR, so the displayed frame can have stale
+      // (empty) camera data. This polls at ~4Hz and patches currentFrame if new images
+      // are available in cameraImageCache.
+      internal.cameraRefreshId = setInterval(() => {
+        const fi = get().currentFrameIndex
+        const currentFrame = get().currentFrame
+        if (!currentFrame) return
+        const camData = internal.cameraImageCache.get(fi)
+        if (!camData || camData.size === 0) return
+        // Skip if camera count hasn't changed (already up-to-date)
+        if (currentFrame.cameraImages.size === camData.size) return
+        set({
+          currentFrame: {
+            ...currentFrame,
+            cameraImages: new Map(camData),
+          },
+        })
+      }, 250)
     },
 
     pause: () => {
@@ -660,6 +696,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (internal.playIntervalId !== null) {
         clearInterval(internal.playIntervalId)
         internal.playIntervalId = null
+      }
+      if (internal.cameraRefreshId !== null) {
+        clearInterval(internal.cameraRefreshId)
+        internal.cameraRefreshId = null
       }
       set({ isPlaying: false })
     },
@@ -1154,6 +1194,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         lastFrameLoadMs: 0,
         lastConvertMs: 0,
         cachedFrames: [],
+        cameraCachedFrames: [],
         cameraLoadedCount: 0,
         cameraTotalCount: 0,
         // Preserve user's UI preferences across segment switches
@@ -1809,7 +1850,8 @@ async function loadAndCacheCameraRowGroup(
     const result = await internal.cameraPool!.requestRowGroup(rgIndex)
     cacheCameraRowGroupFrames(result)
 
-    // Update camera loading progress
+    // Update camera loading progress + buffer bar
+    syncCameraCachedFrames(set)
     set({ cameraLoadedCount: internal.cameraLoadedRowGroups.size })
 
     // Force re-render of current frame with new camera data

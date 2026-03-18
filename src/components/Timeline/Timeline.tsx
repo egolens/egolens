@@ -53,6 +53,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const totalFrames = useSceneStore((s) => s.totalFrames)
   const isPlaying = useSceneStore((s) => s.isPlaying)
   const cachedFrames = useSceneStore((s) => s.cachedFrames)
+  const cameraCachedFrames = useSceneStore((s) => s.cameraCachedFrames)
   const actions = useSceneStore((s) => s.actions)
 
   // Annotation frame markers
@@ -73,10 +74,9 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const maxCached = cachedFrames.length > 0 ? cachedFrames[cachedFrames.length - 1] : 0
 
   const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const target = parseInt(e.target.value, 10)
-    if (target <= maxCached) {
-      actions.seekFrame(target)
-    }
+    // Clamp to the highest cached frame — user can drag anywhere but we won't jump past loaded data
+    const target = Math.min(parseInt(e.target.value, 10), maxCached)
+    actions.seekFrame(target)
   }, [actions, maxCached])
 
   // Build active annotation lanes (only visible features)
@@ -99,6 +99,15 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     () => computeBufferSegments(cachedFrames, totalFrames),
     [cachedFrames, totalFrames],
   )
+
+  // Camera buffer segments (may lag behind LiDAR)
+  const cameraBufferSegments = useMemo(
+    () => computeBufferSegments(cameraCachedFrames, totalFrames),
+    [cameraCachedFrames, totalFrames],
+  )
+
+  // Show camera lane only when camera is loading behind lidar
+  const showCameraBuffer = cameraCachedFrames.length > 0 && cameraCachedFrames.length < cachedFrames.length
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '13px' }}>
@@ -190,7 +199,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
           <input
             type="range"
             min={0}
-            max={maxCached}
+            max={maxFrame}
             value={currentFrameIndex}
             onChange={handleSliderChange}
             disabled={disabled}
@@ -206,6 +215,31 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
             }}
           />
         </div>
+
+        {/* Camera buffer lane — shown while camera loading lags behind LiDAR */}
+        {!minimal && showCameraBuffer && (
+          <div style={{ position: 'relative', height: '3px', marginTop: '2px' }}>
+            {cameraBufferSegments.map((seg, i) => {
+              const left = (seg.start / maxFrame) * 100
+              const width = ((seg.end - seg.start + 1) / maxFrame) * 100
+              return (
+                <div
+                  key={i}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}%`,
+                    width: `${width}%`,
+                    height: '3px',
+                    backgroundColor: '#FF9E00',
+                    opacity: 0.6,
+                    borderRadius: '1px',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )
+            })}
+          </div>
+        )}
 
         {/* Annotation lanes — each active feature gets its own thin lane (hidden in minimal mode) */}
         {!minimal && activeLanes.length > 0 && (
