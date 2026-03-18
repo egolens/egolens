@@ -1,7 +1,24 @@
 node_modules/
 dist/
-waymo_data/
 .env
 .DS_Store
 *.local
 .git-rewrite/
+
+# Dataset folders
+waymo_data/
+waymo_data_/
+nuscenes/
+v1.0-mini/
+argo/
+
+# Test / debug artifacts
+coverage/
+traces/
+
+# Scratch files
+*.mov
+*.mp4
+commits.txt
+upng-spike*.mjs
+egjs-view360-stargazers.xlsx
