@@ -644,7 +644,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const [bevZoom, setBevZoom] = useState(1)
   const followCam = useSceneStore((s) => s.followCam)
   const setFollowCam = useSceneStore((s) => s.actions.setFollowCam)
-  const [panelOpen, setPanelOpen] = useState(() => !isShareView())
+  const [panelOpen, setPanelOpen] = useState(() => !isShareView() && window.innerWidth >= 600)
   const [opDragging, setOpDragging] = useState(false)
   const [szDragging, setSzDragging] = useState(false)
 

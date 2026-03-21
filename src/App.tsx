@@ -418,6 +418,7 @@ function App() {
 
 function Header() {
   const status = useSceneStore((s) => s.status)
+  const isMobile = useIsMobile()
 
   const availableSegments = useSceneStore((s) => s.availableSegments)
   const currentSegment = useSceneStore((s) => s.currentSegment)
@@ -512,13 +513,13 @@ function Header() {
             style={{ cursor: 'pointer' }}
             title="Back to home"
           >EgoLens</span>
-          {status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: '12px' }}>{getManifest().name}</span>}
+          {status === 'ready' && !isMobile && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: '12px' }}>{getManifest().name}</span>}
         </h1>
       </div>
 
       {/* Segment selector — only shown when multiple segments available */}
       {availableSegments.length > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
         <button
           onClick={() => {
             const idx = availableSegments.indexOf(currentSegment ?? '')
@@ -617,10 +618,10 @@ function Header() {
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
             </svg>
-            {shareCopied ? `Copied — ${shareCopied}` : 'Share View'}
+            {shareCopied ? (isMobile ? 'Copied' : `Copied — ${shareCopied}`) : (isMobile ? '' : 'Share View')}
           </button>
         )}
-        <a
+        {!isMobile && <a
           href="https://github.com/egolens/egolens"
           target="_blank"
           rel="noopener noreferrer"
@@ -646,7 +647,7 @@ function Header() {
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
           Star on GitHub
-        </a>
+        </a>}
       </div>
     </header>
   )
@@ -654,7 +655,7 @@ function Header() {
 
 
 // ---------------------------------------------------------------------------
-// Drop Zone — shown when no data is loaded
+// Responsive hook — shared across Header, DropZone, etc.
 // ---------------------------------------------------------------------------
 
 function useIsMobile(breakpoint = 600) {
@@ -668,6 +669,10 @@ function useIsMobile(breakpoint = 600) {
   }, [breakpoint])
   return isMobile
 }
+
+// ---------------------------------------------------------------------------
+// Drop Zone — shown when no data is loaded
+// ---------------------------------------------------------------------------
 
 function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map<string, File>>) => Promise<void> }) {
   const [dragging, setDragging] = useState(false)
@@ -1481,7 +1486,7 @@ function ShortcutHints() {
     return () => clearTimeout(timer)
   }, [fading])
 
-  if (!visible) return null
+  if (!visible || window.innerWidth < 600) return null
 
   const keys = [
     { key: '← →', desc: 'frame' },

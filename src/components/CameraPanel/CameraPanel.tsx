@@ -24,6 +24,19 @@ import CameraSegOverlay from './CameraSegOverlay'
 
 /** Height of the camera strip in pixels */
 const STRIP_HEIGHT = 160
+const STRIP_HEIGHT_MOBILE = 100
+
+function useIsMobile(breakpoint = 600) {
+  const [m, setM] = useState(() => window.innerWidth < breakpoint)
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`)
+    const h = (e: MediaQueryListEvent) => setM(e.matches)
+    mq.addEventListener('change', h)
+    setM(mq.matches)
+    return () => mq.removeEventListener('change', h)
+  }, [breakpoint])
+  return m
+}
 
 export default function CameraPanel() {
   const cameraImages = useSceneStore((s) => s.currentFrame?.cameraImages)
@@ -50,6 +63,67 @@ export default function CameraPanel() {
     return map
   }, [cameraBoxes, boxMode])
 
+  const isMobile = useIsMobile()
+  const cameras = getManifest().cameraSensors
+
+  // Mobile: two rows — FRONT-labeled cameras on top, everything else on bottom
+  // Top row: only cameras with "FRONT" in the label (FL, F, FR)
+  // Bottom row: SIDE + BACK/REAR cameras
+  // Within each row: LEFT → center → RIGHT
+  // If no bottom row cameras (shouldn't happen), fall back to single row
+  if (isMobile) {
+    const isFront = (l: string) => l.includes('FRONT')
+    const sortLR = (a: typeof cameras[0], b: typeof cameras[0]) => {
+      // BACK/REAR on outer edges, SIDE in middle: RL · SL · SR · RR
+      const order = (l: string) => {
+        if (l.includes('REAR L') || l.includes('BACK L')) return 0
+        if (l.includes('LEFT')) return 1
+        if (l.includes('REAR R') || l.includes('BACK R')) return 4
+        if (l.includes('RIGHT')) return 3
+        return 2
+      }
+      return order(a.label) - order(b.label)
+    }
+    const topRow = cameras.filter(c => isFront(c.label)).sort(sortLR)
+    const bottomRow = cameras.filter(c => !isFront(c.label)).sort(sortLR)
+    const twoRows = bottomRow.length > 0
+    const rows = twoRows ? [topRow, bottomRow] : [topRow]
+    const rowHeight = STRIP_HEIGHT_MOBILE
+
+    return (
+      <div style={{
+        height: twoRows ? rowHeight * 2 + 4 : rowHeight + 6,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '3px',
+        padding: '3px 4px',
+        backgroundColor: colors.bgDeep,
+        borderTop: `1px solid ${colors.borderSubtle}`,
+        overflow: 'hidden',
+      }}>
+        {rows.map((row, ri) => (
+          <div key={ri} style={{ display: 'flex', gap: '3px', flex: 1, minHeight: 0 }}>
+            {row.map(({ id, label }) => (
+              <CameraView
+                key={id}
+                cameraName={id}
+                label={label}
+                imageBuffer={cameraImages?.get(id) ?? null}
+                boxes={boxesByCamera.get(id) ?? EMPTY_BOXES}
+                boxMode={boxMode}
+                showLidarOverlay={showLidarOverlay}
+                active={activeCam === id}
+                onTogglePov={toggleActiveCam}
+                onHover={setHoveredCam}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div style={{
       height: STRIP_HEIGHT,
@@ -61,7 +135,7 @@ export default function CameraPanel() {
       borderTop: `1px solid ${colors.borderSubtle}`,
       overflow: 'hidden',
     }}>
-      {getManifest().cameraSensors.map(({ id, label }) => (
+      {cameras.map(({ id, label }) => (
         <CameraView
           key={id}
           cameraName={id}
@@ -219,23 +293,26 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
         <KeypointOverlay cameraName={cameraName} />
       )}
 
-      {/* Label overlay */}
+      {/* Label overlay — abbreviate on mobile to avoid two-line wrap */}
       <div style={{
         position: 'absolute',
-        bottom: 6,
-        left: 8,
+        bottom: 4,
+        left: 4,
         fontSize: '9px',
         fontFamily: fonts.sans,
         fontWeight: 500,
         color: 'rgba(255, 255, 255, 0.75)',
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        padding: '2px 6px',
+        padding: '2px 5px',
         borderRadius: radius.sm,
         pointerEvents: 'none',
         letterSpacing: '0.5px',
         textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
       }}>
-        {label}
+        {window.innerWidth < 600
+          ? (label.includes(' ') ? label.split(' ').map(w => w[0]).join('') : label)
+          : label}
       </div>
 
       {/* Active dot indicator */}

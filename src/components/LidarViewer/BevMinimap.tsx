@@ -17,7 +17,7 @@ import { useSceneStore, BG_PRESETS } from '../../stores/useSceneStore'
 import { colors } from '../../theme'
 
 /** CSS size of the minimap (matches the overlay div) */
-export const BEV_SIZE = 200
+export const BEV_SIZE = window.innerWidth < 600 ? 120 : 200
 const DPR = Math.min(window.devicePixelRatio, 2)
 
 /** Zoom levels in meters — click to cycle */
