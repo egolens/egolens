@@ -1032,7 +1032,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                   onPointerDown={() => setOpDragging(true)}
                   onPointerUp={() => setOpDragging(false)}
                   onPointerLeave={() => setOpDragging(false)}
-                  style={{ flex: 1, minWidth: 0, height: 2, accentColor: colors.accent }}
+                  style={{ flex: 1, minWidth: 0 }}
                 />
                 <span style={{ fontSize: '10px', color: colors.border }}>·</span>
                 <span title="Point Size" style={{
@@ -1050,7 +1050,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                   onPointerDown={() => setSzDragging(true)}
                   onPointerUp={() => setSzDragging(false)}
                   onPointerLeave={() => setSzDragging(false)}
-                  style={{ flex: 1, minWidth: 0, height: 2, accentColor: colors.accent }}
+                  style={{ flex: 1, minWidth: 0 }}
                 />
               </div>
             </>
@@ -1401,9 +1401,10 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                   </span>
                   <input
                     type="range" min={0} max={50}
+                    className="trail-slider"
                     value={trailLength}
                     onChange={(e) => setTrailLength(Number(e.target.value))}
-                    style={{ width: 52, height: 2, accentColor: colors.accentBlue }}
+                    style={{ width: 52 }}
                   />
                   <span style={{
                     fontSize: '10px', fontFamily: fonts.mono, color: colors.textPrimary,

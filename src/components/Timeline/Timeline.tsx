@@ -126,7 +126,16 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
           transition: 'color 0.15s',
         }}
       >
-        {isPlaying ? '⏸' : '▶'}
+        {isPlaying ? (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+            <rect x="1" y="1" width="4" height="12" rx="1" />
+            <rect x="9" y="1" width="4" height="12" rx="1" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+            <path d="M2.5 1.2a1 1 0 0 1 1.5-.86l9 5.5a1 1 0 0 1 0 1.72l-9 5.5A1 1 0 0 1 2.5 12.2V1.2z" />
+          </svg>
+        )}
       </button>
 
       {/* Custom slider with buffer bar + annotation lanes */}
@@ -212,6 +221,8 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
               opacity: 0,
               cursor: disabled ? 'default' : 'pointer',
               margin: 0,
+              WebkitAppearance: 'none',
+              appearance: 'none' as React.CSSProperties['appearance'],
             }}
           />
         </div>

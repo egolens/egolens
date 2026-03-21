@@ -16,6 +16,53 @@
         client_id: Math.random().toString(36).slice(2) + Date.now().toString(36),
       });
     </script>
+    <style>
+      /* Cross-browser range slider — teal accent on dark track */
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 2px;
+        background: #232940;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 4px;
+        border-radius: 2px;
+        background: #232940;
+        border: none;
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #00E89D;
+        border: 2px solid #111628;
+        margin-top: -5px;
+        box-shadow: 0 0 4px rgba(0,232,157,0.4);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #00E89D;
+        border: 2px solid #111628;
+        box-shadow: 0 0 4px rgba(0,232,157,0.4);
+      }
+      /* Blue accent variant for trail slider */
+      input[type="range"].trail-slider::-webkit-slider-thumb {
+        background: #00C9DB;
+        box-shadow: 0 0 4px rgba(0,201,219,0.4);
+      }
+      input[type="range"].trail-slider::-moz-range-thumb {
+        background: #00C9DB;
+        box-shadow: 0 0 4px rgba(0,201,219,0.4);
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
