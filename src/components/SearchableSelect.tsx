@@ -111,9 +111,9 @@ export default function SearchableSelect({
     }
   }, [open])
 
-  // Lock body scroll when modal is open on mobile
+  // Lock body scroll when modal is open
   useEffect(() => {
-    if (!isMobile || !open) return
+    if (!open) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
@@ -393,30 +393,74 @@ export default function SearchableSelect({
         </div>
       )}
 
-      {/* ── Desktop: dropdown panel ── */}
+      {/* ── Desktop: centered modal ── */}
       {open && !isMobile && (
         <div
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            left: 0,
-            right: 0,
-            minWidth: '100%',
-            width: 'max-content',
-            maxHeight: '320px',
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
             display: 'flex',
-            flexDirection: 'column',
-            background: 'rgba(26, 31, 53, 0.95)',
-            backdropFilter: 'blur(12px)',
-            border: `1px solid ${colors.border}`,
-            borderRadius: radius.lg,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-            zIndex: 1000,
-            overflow: 'hidden',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.5)',
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setOpen(false)
+              setQuery('')
+            }
           }}
         >
-          {renderSearch()}
-          {renderList()}
+          <div
+            style={{
+              width: '480px',
+              maxWidth: '90vw',
+              maxHeight: '70vh',
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'rgba(26, 31, 53, 0.97)',
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.lg,
+              boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderBottom: `1px solid ${colors.borderSubtle}`,
+            }}>
+              <span style={{
+                fontSize: '14px',
+                fontFamily: fonts.sans,
+                fontWeight: 600,
+                color: colors.textPrimary,
+              }}>
+                Select Scene
+              </span>
+              <button
+                onClick={() => { setOpen(false); setQuery('') }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: colors.textDim,
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            {renderSearch()}
+            {renderList()}
+          </div>
         </div>
       )}
     </div>
