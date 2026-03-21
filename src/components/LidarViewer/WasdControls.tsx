@@ -22,9 +22,11 @@
  *   Shift — 3× speed boost while held
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
+import { trackCameraSettle } from '../../utils/analytics'
+import { useSceneStore } from '../../stores/useSceneStore'
 
 // Reusable vectors (allocated once, never GC'd)
 const _forward = new THREE.Vector3()
@@ -55,11 +57,29 @@ interface WasdControlsProps {
   onMoveStart?: () => void
 }
 
+/** Settle timeout: log camera position after 2s idle */
+const SETTLE_MS = 2000
+
 export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: WasdControlsProps) {
   const { camera } = useThree()
   const keys = useRef<Set<string>>(new Set())
   const onMoveStartRef = useRef(onMoveStart)
   onMoveStartRef.current = onMoveStart
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wasMoving = useRef(false)
+
+  const fireSettle = useCallback(() => {
+    const oc = orbitRef.current
+    if (!oc) return
+    const { worldMode, currentSegmentId, currentFrameIndex } = useSceneStore.getState()
+    trackCameraSettle({
+      px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+      tx: oc.target.x, ty: oc.target.y, tz: oc.target.z,
+      worldMode,
+      segment: currentSegmentId ?? '',
+      frame: currentFrameIndex,
+    })
+  }, [camera, orbitRef])
 
   // Track pressed keys by physical code
   useEffect(() => {
@@ -90,7 +110,15 @@ export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: 
   }, [])
 
   useFrame((_, dt) => {
-    if (!enabled || keys.current.size === 0) return
+    // Check settle even when no keys pressed (user just released)
+    if (!enabled || keys.current.size === 0) {
+      if (wasMoving.current) {
+        wasMoving.current = false
+        if (settleTimer.current) clearTimeout(settleTimer.current)
+        settleTimer.current = setTimeout(fireSettle, SETTLE_MS)
+      }
+      return
+    }
     const oc = orbitRef.current
     if (!oc) return
 
@@ -164,12 +192,21 @@ export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: 
       camera.position.copy(oc.target).add(_offset)
     }
 
-    if (!moved) return
+    if (moved) {
+      // Notify parent (e.g. to disable follow-cam)
+      onMoveStartRef.current?.()
+      oc.update()
 
-    // Notify parent (e.g. to disable follow-cam)
-    onMoveStartRef.current?.()
-
-    oc.update()
+      // Reset settle timer — user is still moving
+      wasMoving.current = true
+      if (settleTimer.current) clearTimeout(settleTimer.current)
+      settleTimer.current = null
+    } else if (wasMoving.current) {
+      // Movement just stopped — start settle countdown
+      wasMoving.current = false
+      if (settleTimer.current) clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(fireSettle, SETTLE_MS)
+    }
   })
 
   return null

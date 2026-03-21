@@ -14,6 +14,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { colors, fonts, radius } from '../theme'
+import { trackKeyboardShortcut } from '../utils/analytics'
 
 /** Thin dark scrollbar styles injected once per component instance */
 const SCROLLBAR_CSS = `
@@ -118,6 +119,23 @@ export default function SearchableSelect({
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [open])
+
+  // / key opens selector (GitHub/YouTube convention)
+  useEffect(() => {
+    if (disabled) return
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key === '/' && !open) {
+        e.preventDefault()
+        setOpen(true)
+        setQuery('')
+        trackKeyboardShortcut('/')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [disabled, open])
 
   const handleSelect = useCallback(
     (val: string) => {

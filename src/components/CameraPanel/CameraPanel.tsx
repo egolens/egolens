@@ -21,6 +21,7 @@ import LidarProjectionOverlay from './LidarProjectionOverlay'
 import BoxProjectionOverlay from './BoxProjectionOverlay'
 import KeypointOverlay from './KeypointOverlay'
 import CameraSegOverlay from './CameraSegOverlay'
+import { trackKeyboardShortcut } from '../../utils/analytics'
 
 /** Height of the camera strip in pixels */
 const STRIP_HEIGHT = 160
@@ -79,6 +80,7 @@ export default function CameraPanel() {
       if (idx < cameras.length) {
         e.preventDefault()
         toggleActiveCam(cameras[idx].id)
+        trackKeyboardShortcut(`${idx + 1}`)
       }
     }
     window.addEventListener('keydown', onKey)

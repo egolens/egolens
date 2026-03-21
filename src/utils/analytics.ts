@@ -64,3 +64,29 @@ export function trackStarClick(source: 'mobile' | 'desktop') {
 export function trackStarDismiss(source: 'mobile' | 'desktop') {
   track('star_dismiss', { source })
 }
+
+/** Camera settled after WASD/IJKL movement (2s idle) */
+export function trackCameraSettle(params: {
+  px: number; py: number; pz: number
+  tx: number; ty: number; tz: number
+  worldMode: boolean
+  segment: string
+  frame: number
+}) {
+  track('camera_settle', {
+    px: Math.round(params.px * 10) / 10,
+    py: Math.round(params.py * 10) / 10,
+    pz: Math.round(params.pz * 10) / 10,
+    tx: Math.round(params.tx * 10) / 10,
+    ty: Math.round(params.ty * 10) / 10,
+    tz: Math.round(params.tz * 10) / 10,
+    world_mode: params.worldMode,
+    segment: params.segment,
+    frame: params.frame,
+  })
+}
+
+/** User pressed a keyboard shortcut */
+export function trackKeyboardShortcut(key: string) {
+  track('keyboard_shortcut', { key })
+}

@@ -10,7 +10,7 @@ import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils
 import { normalizeBaseUrl } from './utils/urlValidation'
 import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
-import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss } from './utils/analytics'
+import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -288,8 +288,8 @@ function App() {
         const { availableSegments: segs, currentSegment: cur, status: st } = useSceneStore.getState()
         if (st === 'loading' || !cur || segs.length <= 1) return
         const idx = segs.indexOf(cur)
-        if (e.code === 'ArrowLeft' && idx > 0) selectSegment(segs[idx - 1])
-        if (e.code === 'ArrowRight' && idx < segs.length - 1) selectSegment(segs[idx + 1])
+        if (e.code === 'ArrowLeft' && idx > 0) { selectSegment(segs[idx - 1]); trackKeyboardShortcut('Shift+Left') }
+        if (e.code === 'ArrowRight' && idx < segs.length - 1) { selectSegment(segs[idx + 1]); trackKeyboardShortcut('Shift+Right') }
         return
       }
 
@@ -299,25 +299,30 @@ function App() {
         case 'Space':
           e.preventDefault()
           togglePlayback()
+          trackKeyboardShortcut('Space')
           break
         case 'ArrowRight':
           e.preventDefault()
           nextFrame()
+          trackKeyboardShortcut('Right')
           break
         case 'ArrowLeft':
           e.preventDefault()
           prevFrame()
+          trackKeyboardShortcut('Left')
           break
         case 'BracketRight': {
           e.preventDefault()
           const { currentFrameIndex: ci1, totalFrames: tf1 } = useSceneStore.getState()
           seekFrame(Math.min(ci1 + 10, tf1 - 1))
+          trackKeyboardShortcut(']')
           break
         }
         case 'BracketLeft': {
           e.preventDefault()
           const { currentFrameIndex: ci2 } = useSceneStore.getState()
           seekFrame(Math.max(ci2 - 10, 0))
+          trackKeyboardShortcut('[')
           break
         }
       }

@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei'
 import * as THREE from 'three'
@@ -27,6 +28,7 @@ import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCal
 import { colors, fonts, radius } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
+import { trackKeyboardShortcut } from '../../utils/analytics'
 
 // ---------------------------------------------------------------------------
 // Chase-cam defaults + reusable temp objects
@@ -650,6 +652,8 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const [szDragging, setSzDragging] = useState(false)
   const [showKeyHints, setShowKeyHints] = useState(false)
   const keyHintsRef = useRef<HTMLDivElement>(null)
+  const keysBtnRef = useRef<HTMLButtonElement>(null)
+  const [keysPopupPos, setKeysPopupPos] = useState<{ left: number; bottom: number } | null>(null)
 
   // Close key hints on outside click
   useEffect(() => {
@@ -670,19 +674,31 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === '?') {
         e.preventDefault()
-        setShowKeyHints((v) => !v)
+        setShowKeyHints((v) => {
+          if (!v && keysBtnRef.current) {
+            const r = keysBtnRef.current.getBoundingClientRect()
+            setKeysPopupPos({ left: r.right + 8, bottom: window.innerHeight - r.bottom })
+          }
+          return !v
+        })
+        trackKeyboardShortcut('?')
+      }
+      if (e.key === '/') {
+        setShowKeyHints(false)
       }
       if (e.code === 'KeyR' && activeCam === null) {
         resetRequestedRef.current = true
+        trackKeyboardShortcut('R')
       }
       if (e.code === 'KeyF' && worldMode && activeCam === null) {
         const next = !followCam
         setFollowCam(next)
         if (next) resetRequestedRef.current = true
+        trackKeyboardShortcut('F')
       }
       if (e.code === 'KeyC' && activeCam === null) {
         toggleWorldMode()
-        resetRequestedRef.current = true
+        trackKeyboardShortcut('C')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -699,7 +715,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   // ESC to exit POV
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Escape' && activeCam !== null) setActiveCam(null)
+      if (e.code === 'Escape' && activeCam !== null) { setActiveCam(null); trackKeyboardShortcut('Esc') }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -906,7 +922,16 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
           {/* Keyboard shortcuts hint */}
           <div ref={keyHintsRef} style={{ position: 'relative' }}>
             <button
-              onClick={() => setShowKeyHints((v) => !v)}
+              ref={keysBtnRef}
+              onClick={() => {
+                setShowKeyHints((v) => {
+                  if (!v && keysBtnRef.current) {
+                    const r = keysBtnRef.current.getBoundingClientRect()
+                    setKeysPopupPos({ left: r.right + 8, bottom: window.innerHeight - r.bottom })
+                  }
+                  return !v
+                })
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -946,12 +971,13 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
               </span>
             </button>
 
-            {showKeyHints && (
+            {showKeyHints && keysPopupPos && createPortal(
               <div style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 'calc(100% + 8px)',
+                position: 'fixed',
+                bottom: keysPopupPos.bottom,
+                left: keysPopupPos.left,
                 padding: '8px 10px',
+                zIndex: 10000,
                 backgroundColor: 'rgba(26, 31, 53, 0.95)',
                 backdropFilter: 'blur(12px)',
                 border: `1px solid ${colors.border}`,
@@ -961,6 +987,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                 fontFamily: fonts.mono,
                 color: colors.textSecondary,
                 lineHeight: 1.8,
+                pointerEvents: 'auto',
               }}>
                 <div><span style={{ color: colors.accent }}>WASD</span> move</div>
                 <div><span style={{ color: colors.accent }}>Q E</span>{' '}  down / up</div>
@@ -974,8 +1001,10 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                   <div><span style={{ color: colors.textPrimary }}>← →</span>{' '} ±1 frame</div>
                   <div><span style={{ color: colors.textPrimary }}>[ ]</span>{' '}  ±10 frames</div>
                   <div><span style={{ color: colors.textPrimary }}>Space</span> play/pause</div>
+                  <div><span style={{ color: colors.textPrimary }}>/</span>{' '}     search scene</div>
                 </div>
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         </div>
