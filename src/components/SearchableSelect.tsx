@@ -9,6 +9,7 @@
  *   - Click outside to close
  *   - Frosted glass styling matching app theme
  *   - Works fine with small lists too (nuScenes 10 scenes)
+ *   - Mobile: fullscreen modal with centered layout
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -36,6 +37,20 @@ interface Props {
   disabled?: boolean
   /** Full value shown on hover */
   title?: string
+  /** Short label shown on mobile trigger button (e.g. "#1 / 10") */
+  mobileLabel?: string
+}
+
+function useIsMobile(bp = 600) {
+  const [m, setM] = useState(() => window.innerWidth < bp)
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${bp - 1}px)`)
+    const h = (e: MediaQueryListEvent) => setM(e.matches)
+    mq.addEventListener('change', h)
+    setM(mq.matches)
+    return () => mq.removeEventListener('change', h)
+  }, [bp])
+  return m
 }
 
 export default function SearchableSelect({
@@ -45,7 +60,9 @@ export default function SearchableSelect({
   placeholder = '-- select --',
   disabled = false,
   title,
+  mobileLabel,
 }: Props) {
+  const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlightIdx, setHighlightIdx] = useState(0)
@@ -74,9 +91,9 @@ export default function SearchableSelect({
     el?.scrollIntoView({ block: 'nearest' })
   }, [highlightIdx, open])
 
-  // Close on outside click
+  // Close on outside click (desktop only)
   useEffect(() => {
-    if (!open) return
+    if (!open || isMobile) return
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false)
@@ -90,9 +107,16 @@ export default function SearchableSelect({
   // Auto-focus input when opened
   useEffect(() => {
     if (open) {
-      // Small delay so the DOM is painted
       requestAnimationFrame(() => inputRef.current?.focus())
     }
+  }, [open])
+
+  // Lock body scroll when modal is open on mobile
+  useEffect(() => {
+    if (!isMobile || !open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
   }, [open])
 
   const handleSelect = useCallback(
@@ -134,10 +158,128 @@ export default function SearchableSelect({
         ? `${items.length} items`
         : null
 
+  // ── Shared item list renderer ──
+  const renderList = () => (
+    <div
+      ref={listRef}
+      className="ss-list"
+      style={{
+        flex: 1,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        padding: '4px 0',
+      }}
+    >
+      {filtered.length === 0 ? (
+        <div
+          style={{
+            padding: '12px 16px',
+            fontSize: '12px',
+            fontFamily: fonts.sans,
+            color: colors.textDim,
+            textAlign: 'center',
+          }}
+        >
+          No matches
+        </div>
+      ) : (
+        filtered.map((item, idx) => {
+          const isSelected = item.value === value
+          const isHighlighted = idx === highlightIdx
+          return (
+            <div
+              key={item.value}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                handleSelect(item.value)
+              }}
+              onMouseEnter={() => setHighlightIdx(idx)}
+              style={{
+                padding: isMobile ? '10px 16px' : '5px 12px',
+                fontSize: isMobile ? '12px' : '12px',
+                fontFamily: fonts.mono,
+                color: isSelected ? colors.accent : colors.textPrimary,
+                backgroundColor: isHighlighted ? colors.bgHover : 'transparent',
+                cursor: 'pointer',
+                whiteSpace: isMobile ? 'normal' : 'nowrap',
+                wordBreak: isMobile ? 'break-all' : undefined,
+                lineHeight: isMobile ? 1.4 : undefined,
+                transition: 'background-color 0.1s',
+              }}
+              title={item.value}
+            >
+              {isSelected && (
+                <span style={{ marginRight: '6px', fontSize: '10px' }}>●</span>
+              )}
+              {item.label}
+            </div>
+          )
+        })
+      )}
+    </div>
+  )
+
+  // ── Shared search input renderer ──
+  const renderSearch = () => (
+    <div style={{ padding: isMobile ? '12px 16px 8px' : '8px 8px 4px', borderBottom: `1px solid ${colors.borderSubtle}` }}>
+      <div style={{ position: 'relative' }}>
+        <span
+          style={{
+            position: 'absolute',
+            left: '8px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            fontSize: '11px',
+            color: colors.textDim,
+            pointerEvents: 'none',
+          }}
+        >
+          ⌕
+        </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Filter..."
+          style={{
+            width: '100%',
+            padding: isMobile ? '10px 8px 10px 26px' : '6px 8px 6px 26px',
+            fontSize: isMobile ? '16px' : '12px',
+            fontFamily: fonts.mono,
+            backgroundColor: colors.bgDeep,
+            color: colors.textPrimary,
+            border: `1px solid ${colors.borderSubtle}`,
+            borderRadius: radius.sm,
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        {countLabel && (
+          <span
+            style={{
+              position: 'absolute',
+              right: '8px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '10px',
+              fontFamily: fonts.mono,
+              color: colors.textDim,
+              pointerEvents: 'none',
+            }}
+          >
+            {countLabel}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+
   return (
     <div ref={containerRef} style={{ position: 'relative', flex: '0 1 auto', minWidth: 0 }}>
       <style>{SCROLLBAR_CSS}</style>
-      {/* Trigger button (looks like a select) */}
+      {/* Trigger button */}
       <button
         type="button"
         onClick={() => {
@@ -163,7 +305,7 @@ export default function SearchableSelect({
           transition: 'box-shadow 0.2s, border-color 0.2s',
         }}
       >
-        {selectedLabel}
+        {isMobile && mobileLabel ? mobileLabel : selectedLabel}
         {/* Chevron */}
         <span
           style={{
@@ -181,8 +323,78 @@ export default function SearchableSelect({
         </span>
       </button>
 
-      {/* Dropdown panel */}
-      {open && (
+      {/* ── Mobile: fullscreen modal ── */}
+      {open && isMobile && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={(e) => {
+            // Close on backdrop click
+            if (e.target === e.currentTarget) {
+              setOpen(false)
+              setQuery('')
+            }
+          }}
+        >
+          <div
+            style={{
+              margin: '48px 16px 16px',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'rgba(26, 31, 53, 0.97)',
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.lg,
+              overflow: 'hidden',
+              maxHeight: 'calc(100dvh - 64px)',
+            }}
+          >
+            {/* Modal header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderBottom: `1px solid ${colors.borderSubtle}`,
+            }}>
+              <span style={{
+                fontSize: '14px',
+                fontFamily: fonts.sans,
+                fontWeight: 600,
+                color: colors.textPrimary,
+              }}>
+                Select Scene
+              </span>
+              <button
+                onClick={() => { setOpen(false); setQuery('') }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: colors.textDim,
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            {renderSearch()}
+            {renderList()}
+          </div>
+        </div>
+      )}
+
+      {/* ── Desktop: dropdown panel ── */}
+      {open && !isMobile && (
         <div
           style={{
             position: 'absolute',
@@ -203,119 +415,8 @@ export default function SearchableSelect({
             overflow: 'hidden',
           }}
         >
-          {/* Search input */}
-          <div style={{ padding: '8px 8px 4px', borderBottom: `1px solid ${colors.borderSubtle}` }}>
-            <div style={{ position: 'relative' }}>
-              {/* Search icon */}
-              <span
-                style={{
-                  position: 'absolute',
-                  left: '8px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  fontSize: '11px',
-                  color: colors.textDim,
-                  pointerEvents: 'none',
-                }}
-              >
-                ⌕
-              </span>
-              <input
-                ref={inputRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Filter..."
-                style={{
-                  width: '100%',
-                  padding: '6px 8px 6px 26px',
-                  fontSize: '12px',
-                  fontFamily: fonts.mono,
-                  backgroundColor: colors.bgDeep,
-                  color: colors.textPrimary,
-                  border: `1px solid ${colors.borderSubtle}`,
-                  borderRadius: radius.sm,
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-              {/* Count badge */}
-              {countLabel && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    right: '8px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    fontSize: '10px',
-                    fontFamily: fonts.mono,
-                    color: colors.textDim,
-                    pointerEvents: 'none',
-                  }}
-                >
-                  {countLabel}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Item list */}
-          <div
-            ref={listRef}
-            className="ss-list"
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              padding: '4px 0',
-            }}
-          >
-            {filtered.length === 0 ? (
-              <div
-                style={{
-                  padding: '12px 16px',
-                  fontSize: '12px',
-                  fontFamily: fonts.sans,
-                  color: colors.textDim,
-                  textAlign: 'center',
-                }}
-              >
-                No matches
-              </div>
-            ) : (
-              filtered.map((item, idx) => {
-                const isSelected = item.value === value
-                const isHighlighted = idx === highlightIdx
-                return (
-                  <div
-                    key={item.value}
-                    onMouseDown={(e) => {
-                      e.preventDefault() // keep input focused
-                      handleSelect(item.value)
-                    }}
-                    onMouseEnter={() => setHighlightIdx(idx)}
-                    style={{
-                      padding: '5px 12px',
-                      fontSize: '12px',
-                      fontFamily: fonts.mono,
-                      color: isSelected ? colors.accent : colors.textPrimary,
-                      backgroundColor: isHighlighted ? colors.bgHover : 'transparent',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      transition: 'background-color 0.1s',
-                    }}
-                    title={item.value}
-                  >
-                    {isSelected && (
-                      <span style={{ marginRight: '6px', fontSize: '10px' }}>●</span>
-                    )}
-                    {item.label}
-                  </div>
-                )
-              })
-            )}
-          </div>
+          {renderSearch()}
+          {renderList()}
         </div>
       )}
     </div>

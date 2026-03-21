@@ -49,3 +49,18 @@ export function trackPovSwitch(camera: string) {
 export function trackOverlayToggle(overlay: string, enabled: boolean) {
   track('overlay_toggle', { overlay, enabled })
 }
+
+/** User opened the GitHub star modal */
+export function trackStarModalOpen(source: 'mobile' | 'desktop') {
+  track('star_modal_open', { source })
+}
+
+/** User clicked "Star us on GitHub" in the modal */
+export function trackStarClick(source: 'mobile' | 'desktop') {
+  track('star_click', { source })
+}
+
+/** User dismissed the star modal without clicking */
+export function trackStarDismiss(source: 'mobile' | 'desktop') {
+  track('star_dismiss', { source })
+}

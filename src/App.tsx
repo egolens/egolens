@@ -10,7 +10,7 @@ import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils
 import { normalizeBaseUrl } from './utils/urlValidation'
 import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
-import { trackDatasetLoad, trackShareView, trackPresetClick } from './utils/analytics'
+import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import MemoryOverlay from './components/MemoryOverlay'
@@ -425,6 +425,7 @@ function Header() {
   const segmentMetas = useSceneStore((s) => s.segmentMetas)
   const actions = useSceneStore((s) => s.actions)
   const [shareCopied, setShareCopied] = useState<string | false>(false)
+  const [showStarModal, setShowStarModal] = useState(false)
 
   // Sync document title with active dataset + segment
   useEffect(() => {
@@ -470,7 +471,7 @@ function Header() {
     const url = buildShareUrl(state)
 
     // Build a human-readable summary of what's captured
-    const parts: string[] = [`Frame ${s.currentFrameIndex}`, s.colormapMode]
+    const parts: string[] = [`Frame ${s.currentFrameIndex + 1}`, s.colormapMode]
     const overlayCount = [s.showLidarOverlay, s.showKeypoints3D, s.showKeypoints2D, s.showCameraSeg].filter(Boolean).length
     if (overlayCount > 0) parts.push(`${overlayCount} overlay${overlayCount > 1 ? 's' : ''}`)
     if (s.activeCam != null) parts.push('POV cam')
@@ -504,16 +505,17 @@ function Header() {
             letterSpacing: '-0.01em',
             color: colors.textPrimary,
             display: 'flex',
-            alignItems: 'baseline',
-            gap: '6px',
+            flexDirection: isMobile ? 'column' : 'row',
+            alignItems: isMobile ? 'flex-start' : 'baseline',
+            gap: isMobile ? '1px' : '6px',
           }}
         >
           <span
             onClick={() => { window.location.href = window.location.pathname }}
-            style={{ cursor: 'pointer' }}
+            style={{ cursor: 'pointer', lineHeight: 1 }}
             title="Back to home"
           >EgoLens</span>
-          {status === 'ready' && !isMobile && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: '12px' }}>{getManifest().name}</span>}
+          {status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: isMobile ? '10px' : '12px', lineHeight: 1 }}>{getManifest().name}</span>}
         </h1>
       </div>
 
@@ -542,7 +544,6 @@ function Header() {
         <SearchableSelect
           items={availableSegments.map((seg, i): SelectItem => {
             const meta = segmentMetas.get(seg)
-            // Show full ID always — SearchableSelect handles overflow with ellipsis
             const displayId = seg
             const parts = [`#${i + 1}`, displayId]
             if (meta) {
@@ -557,6 +558,7 @@ function Header() {
           disabled={status === 'loading'}
           placeholder="-- select segment --"
           title={currentSegment ?? undefined}
+          mobileLabel={currentSegment ? `#${availableSegments.indexOf(currentSegment) + 1} / ${availableSegments.length} · ${currentSegment.slice(0, 7)}` : undefined}
         />
         <button
           onClick={() => {
@@ -583,62 +585,85 @@ function Header() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Share View button — only in URL mode (local files can't be shared) */}
         {status === 'ready' && hasUrlSource() && (
-          <button
-            onClick={handleShare}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '4px 10px',
-              fontSize: '11px',
-              fontFamily: fonts.sans,
-              color: shareCopied ? colors.accent : colors.textDim,
-              backgroundColor: 'transparent',
-              border: `1px solid ${shareCopied ? colors.accent : colors.border}`,
-              borderRadius: radius.sm,
-              cursor: 'pointer',
-              transition: 'color 0.15s, border-color 0.15s',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={(e) => {
-              if (!shareCopied) {
-                e.currentTarget.style.color = colors.textSecondary
-                e.currentTarget.style.borderColor = colors.textDim
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!shareCopied) {
-                e.currentTarget.style.color = colors.textDim
-                e.currentTarget.style.borderColor = colors.border
-              }
-            }}
-            title="Copy link with current view state (frame, colormap, overlays, sensors…)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            {shareCopied ? (isMobile ? 'Copied' : `Copied — ${shareCopied}`) : (isMobile ? '' : 'Share View')}
-          </button>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <button
+              onClick={handleShare}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: isMobile ? '6px' : '4px 10px',
+                fontSize: '11px',
+                fontFamily: fonts.sans,
+                color: shareCopied ? colors.accent : colors.textDim,
+                backgroundColor: 'transparent',
+                border: `1px solid ${shareCopied ? colors.accent : colors.border}`,
+                borderRadius: radius.sm,
+                cursor: 'pointer',
+                transition: 'color 0.15s, border-color 0.15s',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => {
+                if (!shareCopied) {
+                  e.currentTarget.style.color = colors.textSecondary
+                  e.currentTarget.style.borderColor = colors.textDim
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!shareCopied) {
+                  e.currentTarget.style.color = colors.textDim
+                  e.currentTarget.style.borderColor = colors.border
+                }
+              }}
+              title="Copy link with current view state (frame, colormap, overlays, sensors…)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+              {isMobile ? null : (shareCopied ? `Copied — ${shareCopied}` : 'Share View')}
+            </button>
+            {/* Mobile toast — appears below the button */}
+            {isMobile && shareCopied && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                right: 0,
+                padding: '5px 10px',
+                fontSize: '10px',
+                fontFamily: fonts.sans,
+                color: colors.accent,
+                backgroundColor: 'rgba(26, 31, 53, 0.95)',
+                border: `1px solid ${colors.accent}`,
+                borderRadius: radius.sm,
+                whiteSpace: 'nowrap',
+                zIndex: 100,
+                animation: 'shareToastIn 0.2s ease-out',
+              }}>
+                <style>{`@keyframes shareToastIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+                Copied — {shareCopied}
+              </div>
+            )}
+          </div>
         )}
-        {!isMobile && <a
-          href="https://github.com/egolens/egolens"
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          onClick={() => { setShowStarModal(true); trackStarModalOpen(isMobile ? 'mobile' : 'desktop') }}
           title="Star on GitHub"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            padding: '4px 10px',
+            padding: isMobile ? '6px' : '4px 10px',
             fontSize: '11px',
             fontFamily: fonts.sans,
             fontWeight: 500,
             color: colors.textDim,
+            backgroundColor: 'transparent',
             border: `1px solid ${colors.border}`,
             borderRadius: radius.sm,
-            textDecoration: 'none',
+            cursor: 'pointer',
             transition: 'all 0.15s',
+            flexShrink: 0,
           }}
           onMouseEnter={(e) => { e.currentTarget.style.color = '#FFD43B'; e.currentTarget.style.borderColor = 'rgba(255, 212, 59, 0.4)' }}
           onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim; e.currentTarget.style.borderColor = colors.border }}
@@ -646,9 +671,104 @@ function Header() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="#FFD43B" stroke="#FFD43B" strokeWidth="1">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
-          Star on GitHub
-        </a>}
+          {!isMobile && 'Star on GitHub'}
+        </button>
       </div>
+
+      {/* ── Star modal (mobile) ── */}
+      {showStarModal && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowStarModal(false); trackStarDismiss(isMobile ? 'mobile' : 'desktop') } }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(4px)',
+            padding: '24px',
+          }}
+        >
+          <div style={{
+            maxWidth: '340px',
+            width: '100%',
+            padding: '28px 24px',
+            backgroundColor: 'rgba(26, 31, 53, 0.97)',
+            border: `1px solid ${colors.border}`,
+            borderRadius: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '16px',
+            textAlign: 'center',
+          }}>
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="#FFD43B" stroke="#FFD43B" strokeWidth="0.5">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            <div style={{
+              fontSize: '15px',
+              fontFamily: fonts.sans,
+              fontWeight: 600,
+              color: colors.textPrimary,
+              lineHeight: 1.5,
+            }}>
+              Help us keep EgoLens going
+            </div>
+            <div style={{
+              fontSize: '13px',
+              fontFamily: fonts.sans,
+              color: colors.textSecondary,
+              lineHeight: 1.6,
+            }}>
+              Let's make AV datasets more accessible together. A star helps others discover this project!
+            </div>
+            <a
+              href="https://github.com/egolens/egolens"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => { setShowStarModal(false); trackStarClick(isMobile ? 'mobile' : 'desktop') }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                width: '100%',
+                padding: '12px',
+                fontSize: '14px',
+                fontFamily: fonts.sans,
+                fontWeight: 600,
+                color: '#000',
+                backgroundColor: '#FFD43B',
+                border: 'none',
+                borderRadius: radius.md,
+                textDecoration: 'none',
+                transition: 'opacity 0.15s',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+              Star us on GitHub
+            </a>
+            <button
+              onClick={() => { setShowStarModal(false); trackStarDismiss(isMobile ? 'mobile' : 'desktop') }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: colors.textDim,
+                fontSize: '12px',
+                fontFamily: fonts.sans,
+                cursor: 'pointer',
+                padding: '4px',
+              }}
+            >
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
     </header>
   )
 }
