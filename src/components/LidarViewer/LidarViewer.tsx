@@ -35,12 +35,25 @@ import { trackKeyboardShortcut } from '../../utils/analytics'
 // ---------------------------------------------------------------------------
 const CHASE_CAM_POSITION = new THREE.Vector3(-15, 0, 12)
 const CHASE_CAM_TARGET = new THREE.Vector3(5, 0, 0)
+/** Bird's-eye view: ~120m above, looking straight down */
+const BEV_CAM_POSITION = new THREE.Vector3(0, 0, 120)
+const BEV_CAM_TARGET = new THREE.Vector3(0, 0, 0)
+/** Module-level snapshot: survives Canvas unmount/remount. PinCameraSync writes, InitialCameraSetup reads. */
+let _pinnedSnapshot: { position: [number, number, number]; target: [number, number, number] } | null = null
 // Temp objects for follow/reset (avoid allocation in hot path)
 const _followCurrPos = new THREE.Vector3()
 const _followDelta = new THREE.Vector3()
 const _resetPos = new THREE.Vector3()
 const _resetTarget = new THREE.Vector3()
 const _resetPoseMat = new THREE.Matrix4()
+const _bevTarget = new THREE.Vector3()
+const _bevPoseMat = new THREE.Matrix4()
+const _bevStartDir = new THREE.Vector3()
+const _bevEndDir = new THREE.Vector3()
+const _bevQStart = new THREE.Quaternion()
+const _bevQEnd = new THREE.Quaternion()
+const _bevQCurrent = new THREE.Quaternion()
+const _bevRefDir = new THREE.Vector3(0, 0, 1)  // reference direction for quaternion mapping
 
 /** Sensor info — read dynamically inside components via getManifest().lidarSensors */
 
@@ -345,10 +358,9 @@ function WorldPoseSync({ groupRef }: { groupRef: React.RefObject<THREE.Group | n
 // ---------------------------------------------------------------------------
 // InitialCameraSetup — one-time orbit target setup for chase-cam
 // ---------------------------------------------------------------------------
-function InitialCameraSetup({ orbitRef }: { orbitRef: React.RefObject<any> }) {
-  const initialized = useRef(false)
+function InitialCameraSetup({ orbitRef, initializedRef }: { orbitRef: React.RefObject<any>; initializedRef: React.MutableRefObject<boolean> }) {
   useFrame(() => {
-    if (!initialized.current && orbitRef.current) {
+    if (!initializedRef.current && orbitRef.current) {
       if (_pendingCameraPose) {
         // Restore camera pose from Share URL
         const { position, target, azimuth, distance } = _pendingCameraPose
@@ -391,10 +403,17 @@ function InitialCameraSetup({ orbitRef }: { orbitRef: React.RefObject<any> }) {
         }
         _pendingCameraPose = null
       } else {
-        orbitRef.current.target.copy(CHASE_CAM_TARGET)
+        // Check for pinned camera pose (preserved across segment switches)
+        const pinned = useSceneStore.getState().pinCamera
+        if (pinned && _pinnedSnapshot) {
+          orbitRef.current.object.position.set(..._pinnedSnapshot.position)
+          orbitRef.current.target.set(..._pinnedSnapshot.target)
+        } else {
+          orbitRef.current.target.copy(CHASE_CAM_TARGET)
+        }
       }
       orbitRef.current.update()
-      initialized.current = true
+      initializedRef.current = true
     }
   })
   return null
@@ -553,6 +572,108 @@ function ResetViewController({
 }
 
 // ---------------------------------------------------------------------------
+// BevViewController — smoothly animates camera to bird's-eye view
+// ---------------------------------------------------------------------------
+function BevViewController({
+  orbitRef,
+  bevRequestedRef,
+}: {
+  orbitRef: React.RefObject<any>
+  bevRequestedRef: React.MutableRefObject<boolean>
+}) {
+  const animStartTime = useRef<number | null>(null)
+  const animFromTarget = useRef(new THREE.Vector3())
+  const startRadius = useRef(0)
+  const endRadius = useRef(0)
+
+  useFrame(() => {
+    if (bevRequestedRef.current && animStartTime.current == null) {
+      bevRequestedRef.current = false
+
+      // Compute BEV target based on mode (look at vehicle position)
+      const { worldMode, currentFrame } = useSceneStore.getState()
+      const pose = currentFrame?.vehiclePose ?? null
+
+      if (worldMode && pose) {
+        _bevPoseMat.fromArray(pose).transpose()
+        _bevTarget.set(0, 0, 0).applyMatrix4(_bevPoseMat)
+        _bevTarget.z = 0
+      } else {
+        _bevTarget.copy(BEV_CAM_TARGET)
+      }
+
+      // Start: offset direction from current target → quaternion
+      animFromTarget.current.copy(orbitRef.current.target)
+      _bevStartDir.copy(orbitRef.current.object.position).sub(orbitRef.current.target)
+      startRadius.current = _bevStartDir.length()
+      _bevStartDir.normalize()
+      _bevQStart.setFromUnitVectors(_bevRefDir, _bevStartDir)
+
+      // End: nearly straight up, but tilted slightly toward current azimuth.
+      // This prevents OrbitControls from snapping azimuth to 0 at the pole
+      // (atan2(0,0) degeneracy when offset is exactly (0,0,1)).
+      endRadius.current = BEV_CAM_POSITION.z  // 120
+      const tilt = 0.01  // ~0.6° off vertical — imperceptible but stabilizes azimuth
+      _bevEndDir.set(_bevStartDir.x, _bevStartDir.y, 0)  // horizontal component of start dir
+      const hLen = _bevEndDir.length()
+      if (hLen > 1e-6) {
+        _bevEndDir.multiplyScalar(tilt / hLen)  // scale to tiny horizontal offset
+      } else {
+        _bevEndDir.set(tilt, 0, 0)  // fallback if already at pole
+      }
+      _bevEndDir.z = 1
+      _bevEndDir.normalize()
+      _bevQEnd.setFromUnitVectors(_bevRefDir, _bevEndDir)
+
+      animStartTime.current = performance.now()
+    }
+
+    if (animStartTime.current == null || !orbitRef.current) return
+
+    const elapsed = performance.now() - animStartTime.current
+    const raw = Math.min(elapsed / POV_RETURN_DURATION, 1)
+    const t = smoothstep(raw)
+
+    // Slerp quaternion for offset direction — gimbal-lock free
+    _bevQCurrent.copy(_bevQStart).slerp(_bevQEnd, t)
+
+    // Lerp radius
+    const r = startRadius.current + (endRadius.current - startRadius.current) * t
+
+    // Reconstruct camera position: target + rotated offset direction * radius
+    const dir = _bevStartDir.copy(_bevRefDir).applyQuaternion(_bevQCurrent)
+    orbitRef.current.target.lerpVectors(animFromTarget.current, _bevTarget, t)
+    orbitRef.current.object.position.copy(orbitRef.current.target).addScaledVector(dir, r)
+    orbitRef.current.update()
+
+    if (raw >= 1) {
+      animStartTime.current = null
+    }
+  })
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// PinCameraSync — saves camera pose to store every frame when pinCamera is on
+// ---------------------------------------------------------------------------
+function PinCameraSync({ orbitRef, initialized }: { orbitRef: React.RefObject<any>; initialized: React.RefObject<boolean> }) {
+  const pinCamera = useSceneStore((s) => s.pinCamera)
+  useFrame(() => {
+    // Don't save until InitialCameraSetup has finished — otherwise we'd
+    // overwrite _pinnedSnapshot with the Canvas default position.
+    if (!pinCamera || !orbitRef.current || !initialized.current) return
+    const cam = orbitRef.current.object
+    const t = orbitRef.current.target
+    _pinnedSnapshot = {
+      position: [cam.position.x, cam.position.y, cam.position.z],
+      target: [t.x, t.y, t.z],
+    }
+  })
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // BgColorSync — updates Canvas clear color when bgPreset changes
 // ---------------------------------------------------------------------------
 
@@ -643,10 +764,15 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const sceneGroupRef = useRef<THREE.Group>(null)
   const returningRef = useRef(false)
   const resetRequestedRef = useRef(false)
+  const bevRequestedRef = useRef(false)
+  const cameraInitializedRef = useRef(false)
   const bevCanvasRef = useRef<HTMLCanvasElement>(null)
   const [bevZoom, setBevZoom] = useState(1)
   const followCam = useSceneStore((s) => s.followCam)
   const setFollowCam = useSceneStore((s) => s.actions.setFollowCam)
+  const pinCamera = useSceneStore((s) => s.pinCamera)
+  const setPinCamera = useSceneStore((s) => s.actions.setPinCamera)
+  const currentSegment = useSceneStore((s) => s.currentSegment)
   const [panelOpen, setPanelOpen] = useState(() => !isShareView() && window.innerWidth >= 600)
   const [opDragging, setOpDragging] = useState(false)
   const [szDragging, setSzDragging] = useState(false)
@@ -693,17 +819,47 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
       if (e.code === 'KeyF' && worldMode && activeCam === null) {
         const next = !followCam
         setFollowCam(next)
-        if (next) resetRequestedRef.current = true
+        if (next) {
+          resetRequestedRef.current = true
+          setPinCamera(false)  // Follow and Pin are mutually exclusive
+        }
         trackKeyboardShortcut('F')
       }
       if (e.code === 'KeyC' && activeCam === null) {
+        const goingToWorld = !worldMode
         toggleWorldMode()
+        if (goingToWorld) {
+          bevRequestedRef.current = true
+          if (followCam) setFollowCam(false)
+        } else {
+          resetRequestedRef.current = true
+        }
         trackKeyboardShortcut('C')
+      }
+      if (e.code === 'KeyP' && !followCam) {
+        setPinCamera(!pinCamera)
+        trackKeyboardShortcut('P')
+      }
+      if (e.code === 'KeyB' && activeCam === null) {
+        bevRequestedRef.current = true
+        if (followCam) setFollowCam(false)
+        trackKeyboardShortcut('B')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeCam, worldMode, followCam, setFollowCam, toggleWorldMode])
+  }, [activeCam, worldMode, followCam, setFollowCam, toggleWorldMode, pinCamera, setPinCamera])
+
+  // Reset camera on segment change (unless pinned)
+  const prevSegmentRef = useRef(currentSegment)
+  useEffect(() => {
+    if (currentSegment && currentSegment !== prevSegmentRef.current) {
+      if (!pinCamera) {
+        resetRequestedRef.current = true
+      }
+    }
+    prevSegmentRef.current = currentSegment
+  }, [currentSegment, pinCamera])
 
   // Parse calibrations once
   const calibMap = useMemo(
@@ -739,6 +895,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
         }}
       >
         <BgColorSync />
+        <PinCameraSync orbitRef={orbitRef} initialized={cameraInitializedRef} />
         <ambientLight intensity={0.3} />
         <directionalLight position={[50, -30, 80]} intensity={1.0} />
         <directionalLight position={[-30, 40, 20]} intensity={0.4} />
@@ -766,9 +923,10 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
         <PovController targetCalib={activeCalib} orbitRef={orbitRef} returningRef={returningRef} />
 
         {/* Chase-cam initial setup + world follow + reset */}
-        <InitialCameraSetup orbitRef={orbitRef} />
+        <InitialCameraSetup orbitRef={orbitRef} initializedRef={cameraInitializedRef} />
         <WorldFollowCamera orbitRef={orbitRef} enabled={followCam} returningRef={returningRef} />
         <ResetViewController orbitRef={orbitRef} resetRequestedRef={resetRequestedRef} />
+        <BevViewController orbitRef={orbitRef} bevRequestedRef={bevRequestedRef} />
 
         {/* Ground grid (XY plane, Z=0) — stays at world origin */}
         <gridHelper
@@ -852,7 +1010,10 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
               onClick={() => {
                 const next = !followCam
                 setFollowCam(next)
-                if (next) resetRequestedRef.current = true
+                if (next) {
+                  resetRequestedRef.current = true
+                  setPinCamera(false)  // Follow and Pin are mutually exclusive
+                }
               }}
               style={{
                 display: 'flex',
@@ -889,9 +1050,9 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             </button>
           )}
 
-          {/* Reset View */}
+          {/* BEV (bird's-eye view) */}
           <button
-            onClick={() => { resetRequestedRef.current = true }}
+            onClick={() => { bevRequestedRef.current = true; if (followCam) setFollowCam(false) }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -904,10 +1065,12 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             }}
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M2 8a6 6 0 0 1 10.24-4.24L14 2v5h-5l1.76-1.76A4 4 0 1 0 12 8h2a6 6 0 0 1-12 0z"
-                fill={colors.textSecondary}
-              />
+              <circle cx="8" cy="8" r="5.5" stroke={colors.textSecondary} strokeWidth="1.2" />
+              <circle cx="8" cy="8" r="1.5" fill={colors.textSecondary} />
+              <line x1="8" y1="2" x2="8" y2="4" stroke={colors.textSecondary} strokeWidth="1" />
+              <line x1="8" y1="12" x2="8" y2="14" stroke={colors.textSecondary} strokeWidth="1" />
+              <line x1="2" y1="8" x2="4" y2="8" stroke={colors.textSecondary} strokeWidth="1" />
+              <line x1="12" y1="8" x2="14" y2="8" stroke={colors.textSecondary} strokeWidth="1" />
             </svg>
             <span style={{
               fontSize: '10px',
@@ -915,7 +1078,46 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
               fontWeight: 500,
               color: colors.textSecondary,
             }}>
-              Reset
+              BEV
+            </span>
+          </button>
+
+          {/* Pin Camera — preserve camera across segment switches (disabled when Follow is on) */}
+          <button
+            onClick={() => {
+              if (followCam) return
+              setPinCamera(!pinCamera)
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 8px',
+              border: 'none',
+              borderRadius: radius.sm,
+              cursor: followCam ? 'default' : 'pointer',
+              backgroundColor: pinCamera && !followCam ? 'rgba(0, 232, 157, 0.12)' : 'transparent',
+              transition: 'background-color 0.15s',
+              opacity: followCam ? 0.35 : 1,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 1.5l1.5 4.5h4l-3.2 2.5 1.2 4.5L8 10l-3.5 3 1.2-4.5L2.5 6h4z"
+                fill={pinCamera && !followCam ? colors.accent : 'none'}
+                stroke={pinCamera && !followCam ? colors.accent : colors.textDim}
+                strokeWidth="1.2"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span style={{
+              fontSize: '10px',
+              fontFamily: fonts.sans,
+              fontWeight: 500,
+              color: pinCamera && !followCam ? colors.accent : colors.textDim,
+              transition: 'color 0.15s',
+            }}>
+              Pin
             </span>
           </button>
 
@@ -993,9 +1195,11 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                 <div><span style={{ color: colors.accent }}>Q E</span>{' '}  down / up</div>
                 <div><span style={{ color: colors.accent }}>IJKL</span> rotate</div>
                 <div><span style={{ color: colors.accent }}>Shift</span> fast</div>
-                <div><span style={{ color: colors.accent }}>R</span>{' '}    reset view</div>
+                <div><span style={{ color: colors.accent }}>R</span>{' '}    chase cam</div>
+                <div><span style={{ color: colors.accent }}>B</span>{' '}    BEV</div>
                 <div><span style={{ color: colors.accent }}>F</span>{' '}    follow cam</div>
-                <div><span style={{ color: colors.accent }}>C</span>{' '}    world / vehicle</div>
+                <div><span style={{ color: colors.accent }}>C</span>{' '}    vehicle / world</div>
+                <div><span style={{ color: colors.accent }}>P</span>{' '}    pin camera</div>
                 <div><span style={{ color: colors.accent }}>1–9</span>{' '}  camera POV</div>
                 <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: 4, paddingTop: 4 }}>
                   <div><span style={{ color: colors.textPrimary }}>← →</span>{' '} ±1 frame</div>
@@ -1103,12 +1307,22 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             overflow: 'hidden',
             backgroundColor: 'rgba(255,255,255,0.04)',
           }}>
-            {([true, false] as const).map((isWorld) => {
+            {([false, true] as const).map((isWorld) => {
               const active = worldMode === isWorld
               return (
                 <button
                   key={isWorld ? 'world' : 'vehicle'}
-                  onClick={active ? undefined : () => { toggleWorldMode(); resetRequestedRef.current = true }}
+                  onClick={active ? undefined : () => {
+                    toggleWorldMode()
+                    if (isWorld) {
+                      // Switching TO world → BEV
+                      bevRequestedRef.current = true
+                      if (followCam) setFollowCam(false)
+                    } else {
+                      // Switching TO vehicle → chase cam
+                      resetRequestedRef.current = true
+                    }
+                  }}
                   style={{
                     flex: 1, padding: '4px 0', fontSize: '10px',
                     fontFamily: fonts.sans, fontWeight: active ? 600 : 400,

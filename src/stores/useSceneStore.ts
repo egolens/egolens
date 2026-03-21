@@ -145,6 +145,7 @@ interface SceneActions {
   setPointShape: (shape: PointShape) => void
   setPointSize: (size: number) => void
   setFollowCam: (follow: boolean) => void
+  setPinCamera: (pin: boolean) => void
   reset: () => void
 }
 
@@ -244,6 +245,10 @@ export interface SceneState {
   pointSize: number
   /** Whether camera follows ego vehicle in world mode */
   followCam: boolean
+  /** Pin camera position across segment switches */
+  pinCamera: boolean
+  /** Saved camera pose for pin restore after remount */
+  pinnedCameraPose: { position: [number, number, number]; target: [number, number, number] } | null
 
   /** All discovered segment IDs */
   availableSegments: string[]
@@ -548,7 +553,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   highlightedCameraBoxIds: new Set<string>(),
   highlightedLaserBoxId: null,
   showLidarOverlay: false,
-  worldMode: true,
+  worldMode: false,
   // Segmentation & keypoint state
   hasSegmentation: false,
   hasKeypoints: false,
@@ -564,7 +569,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   bgPreset: 'dark' as BgPresetId,
   pointShape: 'circle' as PointShape,
   pointSize: 0.08,
-  followCam: true,
+  followCam: false,
+  pinCamera: false,
+  pinnedCameraPose: null,
   availableSegments: [],
   segmentMetas: new Map(),
   currentSegment: null,
@@ -919,6 +926,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     setPointShape: (shape: PointShape) => set({ pointShape: shape }),
     setPointSize: (size: number) => set({ pointSize: size }),
     setFollowCam: (follow: boolean) => set({ followCam: follow }),
+    setPinCamera: (pin: boolean) => set({ pinCamera: pin }),
     loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
       // Local files — clear URL source so segment changes don't sync to URL bar
       clearUrlSource()

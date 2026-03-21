@@ -71,12 +71,12 @@ export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: 
   const fireSettle = useCallback(() => {
     const oc = orbitRef.current
     if (!oc) return
-    const { worldMode, currentSegmentId, currentFrameIndex } = useSceneStore.getState()
+    const { worldMode, currentSegment, currentFrameIndex } = useSceneStore.getState()
     trackCameraSettle({
       px: camera.position.x, py: camera.position.y, pz: camera.position.z,
       tx: oc.target.x, ty: oc.target.y, tz: oc.target.z,
       worldMode,
-      segment: currentSegmentId ?? '',
+      segment: currentSegment ?? '',
       frame: currentFrameIndex,
     })
   }, [camera, orbitRef])
