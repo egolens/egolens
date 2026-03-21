@@ -114,12 +114,15 @@ export function useThumbnailCache(resolver: ThumbnailResolverFn | null) {
   resolverRef.current = resolver
 
   // Subscribe to cache changes (triggers re-render on thumbnail load)
-  useSyncExternalStore(subscribe, getSnapshot)
+  // The returned revision value is used as a dependency signal for react-window
+  // rowProps so that rows re-render when thumbnails finish loading.
+  const cacheRevision = useSyncExternalStore(subscribe, getSnapshot)
 
   /** Get current thumbnail state for a segment */
   const getThumbnail = useCallback((segmentId: string): ThumbnailEntry => {
     return cache.get(segmentId) ?? { status: 'idle', url: null }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheRevision])
 
   /**
    * Request thumbnail loading for a segment (called when row enters viewport).
