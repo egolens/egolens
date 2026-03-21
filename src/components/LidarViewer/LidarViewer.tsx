@@ -18,6 +18,7 @@ import { LIDARSEG_PALETTE, LIDARSEG_LABELS } from '../../utils/colormaps'
 import BoundingBoxes, { TrajectoryTrails } from './BoundingBoxes'
 import KeypointSkeleton from './KeypointSkeleton'
 import CameraFrustums from './CameraFrustums'
+import WasdControls from './WasdControls'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
 import { useSceneStore, BG_PRESETS } from '../../stores/useSceneStore'
@@ -647,6 +648,46 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const [panelOpen, setPanelOpen] = useState(() => !isShareView() && window.innerWidth >= 600)
   const [opDragging, setOpDragging] = useState(false)
   const [szDragging, setSzDragging] = useState(false)
+  const [showKeyHints, setShowKeyHints] = useState(false)
+  const keyHintsRef = useRef<HTMLDivElement>(null)
+
+  // Close key hints on outside click
+  useEffect(() => {
+    if (!showKeyHints) return
+    const handler = (e: MouseEvent) => {
+      if (keyHintsRef.current && !keyHintsRef.current.contains(e.target as Node)) {
+        setShowKeyHints(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showKeyHints])
+
+  // ? key toggles key hints; R = reset; F = follow; C = coordinate toggle
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key === '?') {
+        e.preventDefault()
+        setShowKeyHints((v) => !v)
+      }
+      if (e.code === 'KeyR' && activeCam === null) {
+        resetRequestedRef.current = true
+      }
+      if (e.code === 'KeyF' && worldMode && activeCam === null) {
+        const next = !followCam
+        setFollowCam(next)
+        if (next) resetRequestedRef.current = true
+      }
+      if (e.code === 'KeyC' && activeCam === null) {
+        toggleWorldMode()
+        resetRequestedRef.current = true
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activeCam, worldMode, followCam, setFollowCam, toggleWorldMode])
 
   // Parse calibrations once
   const calibMap = useMemo(
@@ -658,7 +699,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   // ESC to exit POV
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeCam !== null) setActiveCam(null)
+      if (e.code === 'Escape' && activeCam !== null) setActiveCam(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -741,6 +782,16 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
             }
           }}
           /* enabled is controlled imperatively by PovController via orbitRef */
+        />
+
+        {/* WASD keyboard camera movement — disabled during POV only */}
+        <WasdControls
+          orbitRef={orbitRef}
+          enabled={activeCam === null}
+          onMoveStart={() => {
+            // Auto-disable follow-cam when user starts WASD movement
+            if (followCam) setFollowCam(false)
+          }}
         />
 
         <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
@@ -851,6 +902,82 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
               Reset
             </span>
           </button>
+
+          {/* Keyboard shortcuts hint */}
+          <div ref={keyHintsRef} style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowKeyHints((v) => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 8px',
+                border: 'none',
+                borderRadius: radius.sm,
+                cursor: 'pointer',
+                backgroundColor: showKeyHints ? 'rgba(0, 232, 157, 0.12)' : 'transparent',
+                transition: 'background-color 0.15s',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <rect x="1" y="4" width="14" height="9" rx="1.5" stroke={showKeyHints ? colors.accent : colors.textDim} strokeWidth="1.2" />
+                <rect x="3" y="6" width="2" height="1.5" rx="0.3" fill={showKeyHints ? colors.accent : colors.textDim} />
+                <rect x="6" y="6" width="2" height="1.5" rx="0.3" fill={showKeyHints ? colors.accent : colors.textDim} />
+                <rect x="9" y="6" width="2" height="1.5" rx="0.3" fill={showKeyHints ? colors.accent : colors.textDim} />
+                <rect x="12" y="6" width="1.5" height="1.5" rx="0.3" fill={showKeyHints ? colors.accent : colors.textDim} />
+                <rect x="4" y="9" width="8" height="1.5" rx="0.3" fill={showKeyHints ? colors.accent : colors.textDim} />
+              </svg>
+              <span style={{
+                fontSize: '10px',
+                fontFamily: fonts.sans,
+                fontWeight: 500,
+                color: showKeyHints ? colors.accent : colors.textDim,
+                transition: 'color 0.15s',
+              }}>
+                Keys
+              </span>
+              <span style={{
+                fontSize: '9px',
+                fontFamily: fonts.mono,
+                color: showKeyHints ? colors.accent : colors.textDim,
+                opacity: 0.5,
+              }}>
+                ?
+              </span>
+            </button>
+
+            {showKeyHints && (
+              <div style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 'calc(100% + 8px)',
+                padding: '8px 10px',
+                backgroundColor: 'rgba(26, 31, 53, 0.95)',
+                backdropFilter: 'blur(12px)',
+                border: `1px solid ${colors.border}`,
+                borderRadius: radius.md,
+                whiteSpace: 'nowrap',
+                fontSize: '10px',
+                fontFamily: fonts.mono,
+                color: colors.textSecondary,
+                lineHeight: 1.8,
+              }}>
+                <div><span style={{ color: colors.accent }}>WASD</span> move</div>
+                <div><span style={{ color: colors.accent }}>Q E</span>{' '}  down / up</div>
+                <div><span style={{ color: colors.accent }}>IJKL</span> rotate</div>
+                <div><span style={{ color: colors.accent }}>Shift</span> fast</div>
+                <div><span style={{ color: colors.accent }}>R</span>{' '}    reset view</div>
+                <div><span style={{ color: colors.accent }}>F</span>{' '}    follow cam</div>
+                <div><span style={{ color: colors.accent }}>C</span>{' '}    world / vehicle</div>
+                <div><span style={{ color: colors.accent }}>1–9</span>{' '}  camera POV</div>
+                <div style={{ borderTop: `1px solid ${colors.border}`, marginTop: 4, paddingTop: 4 }}>
+                  <div><span style={{ color: colors.textPrimary }}>← →</span>{' '} ±1 frame</div>
+                  <div><span style={{ color: colors.textPrimary }}>[ ]</span>{' '}  ±10 frames</div>
+                  <div><span style={{ color: colors.textPrimary }}>Space</span> play/pause</div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

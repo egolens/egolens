@@ -66,6 +66,25 @@ export default function CameraPanel() {
   const isMobile = useIsMobile()
   const cameras = getManifest().cameraSensors
 
+  // Number key shortcuts: 1–9 toggle camera POV
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      // Digit1..Digit9 → index 0..8
+      const match = e.code.match(/^Digit([1-9])$/)
+      if (!match) return
+      const idx = parseInt(match[1], 10) - 1
+      if (idx < cameras.length) {
+        e.preventDefault()
+        toggleActiveCam(cameras[idx].id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cameras, toggleActiveCam])
+
   // Mobile: two rows — FRONT-labeled cameras on top, everything else on bottom
   // Top row: only cameras with "FRONT" in the label (FL, F, FR)
   // Bottom row: SIDE + BACK/REAR cameras
@@ -116,6 +135,7 @@ export default function CameraPanel() {
                 active={activeCam === id}
                 onTogglePov={toggleActiveCam}
                 onHover={setHoveredCam}
+                shortcutKey={cameras.findIndex(c => c.id === id) + 1}
               />
             ))}
           </div>
@@ -135,7 +155,7 @@ export default function CameraPanel() {
       borderTop: `1px solid ${colors.borderSubtle}`,
       overflow: 'hidden',
     }}>
-      {cameras.map(({ id, label }) => (
+      {cameras.map(({ id, label }, idx) => (
         <CameraView
           key={id}
           cameraName={id}
@@ -147,6 +167,7 @@ export default function CameraPanel() {
           active={activeCam === id}
           onTogglePov={toggleActiveCam}
           onHover={setHoveredCam}
+          shortcutKey={idx + 1}
         />
       ))}
     </div>
@@ -169,9 +190,11 @@ interface CameraViewProps {
   active: boolean
   onTogglePov: (cameraName: number) => void
   onHover: (cameraName: number | null) => void
+  /** Keyboard shortcut number (1-9) shown on label */
+  shortcutKey?: number
 }
 
-function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover }: CameraViewProps) {
+function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover, shortcutKey }: CameraViewProps) {
   const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
   const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
   const showCameraSeg = useSceneStore((s) => s.showCameraSeg)
@@ -313,6 +336,9 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
         {window.innerWidth < 600
           ? (label.includes(' ') ? label.split(' ').map(w => w[0]).join('') : label)
           : label}
+        {shortcutKey != null && (
+          <span style={{ opacity: 0.5, marginLeft: 4, fontSize: '8px' }}>{shortcutKey}</span>
+        )}
       </div>
 
       {/* Active dot indicator */}

@@ -31,7 +31,7 @@ export default function MemoryOverlay() {
   // Toggle with 'M' key
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'm' || e.key === 'M') {
+      if (e.code === 'KeyM') {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
         setVisible((v) => {
           const next = !v

@@ -270,7 +270,7 @@ function App() {
   // Global keyboard shortcuts:
   //   Space        = play/pause
   //   ← →          = ±1 frame
-  //   J / L        = ±10 frames
+  //   [ / ]        = ±10 frames
   //   Shift+← / →  = prev/next segment
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -308,16 +308,16 @@ function App() {
           e.preventDefault()
           prevFrame()
           break
-        case 'KeyL': {
+        case 'BracketRight': {
           e.preventDefault()
-          const { currentFrameIndex, totalFrames } = useSceneStore.getState()
-          seekFrame(Math.min(currentFrameIndex + 10, totalFrames - 1))
+          const { currentFrameIndex: ci1, totalFrames: tf1 } = useSceneStore.getState()
+          seekFrame(Math.min(ci1 + 10, tf1 - 1))
           break
         }
-        case 'KeyJ': {
+        case 'BracketLeft': {
           e.preventDefault()
-          const { currentFrameIndex } = useSceneStore.getState()
-          seekFrame(Math.max(currentFrameIndex - 10, 0))
+          const { currentFrameIndex: ci2 } = useSceneStore.getState()
+          seekFrame(Math.max(ci2 - 10, 0))
           break
         }
       }
@@ -1559,96 +1559,7 @@ function CameraStripSkeleton() {
 // Main Views
 // ---------------------------------------------------------------------------
 
-function ShortcutHints() {
-  const [visible, setVisible] = useState(true)
-  const [fading, setFading] = useState(false)
-
-  useEffect(() => {
-    // Toggle with ? key
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement
-      const tag = el?.tagName
-      if (tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (tag === 'INPUT' && (el as HTMLInputElement).type !== 'range') return
-      if (e.key === '?') {
-        e.preventDefault()
-        setVisible((v) => !v)
-        setFading(false)
-        return
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  // Auto-hide: fade after 5s, remove after transition
-  useEffect(() => {
-    if (!visible || fading) return
-    const timer = setTimeout(() => setFading(true), 5000)
-    const hideOnInteract = (e: KeyboardEvent) => {
-      if (e.key === '?') return // let toggle handler deal with it
-      setFading(true)
-    }
-    const hideOnMouse = () => setFading(true)
-    window.addEventListener('keydown', hideOnInteract)
-    window.addEventListener('mousedown', hideOnMouse)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener('keydown', hideOnInteract)
-      window.removeEventListener('mousedown', hideOnMouse)
-    }
-  }, [visible, fading])
-
-  // After fade animation, hide completely
-  useEffect(() => {
-    if (!fading) return
-    const timer = setTimeout(() => setVisible(false), 300)
-    return () => clearTimeout(timer)
-  }, [fading])
-
-  if (!visible || window.innerWidth < 600) return null
-
-  const keys = [
-    { key: '← →', desc: 'frame' },
-    { key: 'J L', desc: '±10' },
-    { key: 'Space', desc: 'play/pause' },
-    { key: 'Shift+← →', desc: 'segment' },
-    { key: '?', desc: 'shortcuts' },
-  ]
-
-  return (
-    <div style={{
-      position: 'absolute',
-      bottom: '12px',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      display: 'flex',
-      gap: '16px',
-      padding: '6px 14px',
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
-      borderRadius: radius.pill,
-      backdropFilter: 'blur(8px)',
-      zIndex: 10,
-      opacity: fading ? 0 : 1,
-      transition: 'opacity 0.3s ease-out',
-      animation: 'shortcutFadeIn 0.3s ease-out',
-    }}>
-      <style>{`
-        @keyframes shortcutFadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
-      `}</style>
-      {keys.map(({ key, desc }, i) => (
-        <span key={i} style={{
-          fontSize: '10px',
-          fontFamily: fonts.mono,
-          color: colors.textDim,
-          whiteSpace: 'nowrap',
-        }}>
-          <span style={{ color: colors.textSecondary }}>{key}</span> {desc}
-        </span>
-      ))}
-    </div>
-  )
-}
+// ShortcutHints removed — ? key now toggles Keys popup in LidarViewer
 
 function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'minimal' | 'none' }) {
   const status = useSceneStore((s) => s.status)
@@ -1662,7 +1573,7 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
           {status === 'ready' ? (
             <>
               <LidarViewer hideControls={hideOverlays} />
-              {!hideOverlays && <ShortcutHints />}
+              {/* ShortcutHints removed — ? key now toggles Keys popup in LidarViewer */}
             </>
           ) : status === 'loading' ? (
             <LoadingSkeleton />
