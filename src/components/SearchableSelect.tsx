@@ -10,11 +10,19 @@
  *   - Frosted glass styling matching app theme
  *   - Works fine with small lists too (nuScenes 10 scenes)
  *   - Mobile: fullscreen modal with centered layout
+ *   - Virtualized list (react-window v2) for 700+ items
+ *   - Lazy-loaded scene thumbnails (on-mount fetch + concurrent queue)
  */
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties, type ReactElement } from 'react'
+import { List, type ListImperativeAPI } from 'react-window'
 import { colors, fonts, radius } from '../theme'
 import { trackKeyboardShortcut } from '../utils/analytics'
+import {
+  useThumbnailCache,
+  type ThumbnailResolverFn,
+  type ThumbnailEntry,
+} from '../hooks/useThumbnailCache'
 
 /** Thin dark scrollbar styles injected once per component instance */
 const SCROLLBAR_CSS = `
@@ -40,7 +48,17 @@ interface Props {
   title?: string
   /** Short label shown on mobile trigger button (e.g. "#1 / 10") */
   mobileLabel?: string
+  /** Async thumbnail resolver function (dataset-specific). null = no thumbnails. */
+  thumbnailResolver?: ThumbnailResolverFn | null
 }
+
+/** Row height: 60px when thumbnails enabled, 32px without */
+const ROW_HEIGHT_THUMB = 60
+const ROW_HEIGHT_PLAIN = 32
+const ROW_HEIGHT_MOBILE = 44
+/** Thumbnail size (px) */
+const THUMB_W = 48
+const THUMB_H = 32
 
 function useIsMobile(bp = 600) {
   const [m, setM] = useState(() => window.innerWidth < bp)
@@ -54,6 +72,124 @@ function useIsMobile(bp = 600) {
   return m
 }
 
+// ---------------------------------------------------------------------------
+// Thumbnail image component
+// ---------------------------------------------------------------------------
+
+function ThumbnailImage({ entry }: { entry: ThumbnailEntry }) {
+  if (entry.status === 'loaded' && entry.url) {
+    return (
+      <img
+        src={entry.url}
+        alt=""
+        style={{
+          width: THUMB_W,
+          height: THUMB_H,
+          objectFit: 'cover',
+          borderRadius: '3px',
+          flexShrink: 0,
+          opacity: 1,
+          transition: 'opacity 0.15s ease-in',
+        }}
+      />
+    )
+  }
+
+  if (entry.status === 'loading') {
+    return (
+      <div
+        style={{
+          width: THUMB_W,
+          height: THUMB_H,
+          borderRadius: '3px',
+          flexShrink: 0,
+          backgroundColor: colors.bgOverlay,
+          animation: 'ss-pulse 1.2s ease-in-out infinite',
+        }}
+      />
+    )
+  }
+
+  // unavailable or idle — camera icon placeholder
+  return (
+    <div
+      style={{
+        width: THUMB_W,
+        height: THUMB_H,
+        borderRadius: '3px',
+        flexShrink: 0,
+        backgroundColor: colors.bgOverlay,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '14px',
+        color: colors.textDim,
+      }}
+    >
+      ◻
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Row component for react-window v2 (receives custom props via rowProps)
+// ---------------------------------------------------------------------------
+
+interface RowCustomProps {
+  filtered: SelectItem[]
+  selectedValue: string | null
+  highlightIdx: number
+  isMobile: boolean
+  hasThumbnails: boolean
+  getThumbnail: (id: string) => ThumbnailEntry
+  requestThumbnail: (id: string) => void
+  onSelect: (value: string) => void
+  onHover: (index: number) => void
+}
+
+function VirtualRow({
+  index,
+  style,
+  filtered,
+  selectedValue,
+  highlightIdx,
+  isMobile,
+  hasThumbnails,
+  getThumbnail,
+  requestThumbnail,
+  onSelect,
+  onHover,
+}: {
+  index: number
+  style: CSSProperties
+  ariaAttributes: Record<string, unknown>
+} & RowCustomProps): ReactElement | null {
+  const item = filtered[index]
+  if (!item) return null
+
+  const isSelected = item.value === selectedValue
+  const isHighlighted = index === highlightIdx
+
+  return (
+    <RowItem
+      item={item}
+      style={style}
+      isSelected={isSelected}
+      isHighlighted={isHighlighted}
+      isMobile={isMobile}
+      hasThumbnails={hasThumbnails}
+      getThumbnail={getThumbnail}
+      requestThumbnail={requestThumbnail}
+      onSelect={onSelect}
+      onHover={() => onHover(index)}
+    />
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export default function SearchableSelect({
   items,
   value,
@@ -62,6 +198,7 @@ export default function SearchableSelect({
   disabled = false,
   title,
   mobileLabel,
+  thumbnailResolver = null,
 }: Props) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
@@ -69,7 +206,15 @@ export default function SearchableSelect({
   const [highlightIdx, setHighlightIdx] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<ListImperativeAPI>(null)
+
+  const hasThumbnails = thumbnailResolver != null
+  const rowHeight = isMobile
+    ? Math.max(hasThumbnails ? ROW_HEIGHT_THUMB : ROW_HEIGHT_PLAIN, ROW_HEIGHT_MOBILE)
+    : (hasThumbnails ? ROW_HEIGHT_THUMB : ROW_HEIGHT_PLAIN)
+
+  // Thumbnail cache
+  const { getThumbnail, requestThumbnail } = useThumbnailCache(thumbnailResolver)
 
   // Filter items by query (case-insensitive substring match)
   const filtered = useMemo(() => {
@@ -85,12 +230,11 @@ export default function SearchableSelect({
     setHighlightIdx(0)
   }, [filtered.length])
 
-  // Scroll highlighted item into view
+  // Scroll highlighted item into view (react-window v2)
   useEffect(() => {
     if (!open || !listRef.current) return
-    const el = listRef.current.children[highlightIdx] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [highlightIdx, open])
+    listRef.current.scrollToRow({ index: highlightIdx, align: 'smart' })
+  }, [highlightIdx, open, listRef])
 
   // Close on outside click (desktop only)
   useEffect(() => {
@@ -165,6 +309,10 @@ export default function SearchableSelect({
     [filtered, highlightIdx, handleSelect],
   )
 
+  const handleHover = useCallback((index: number) => {
+    setHighlightIdx(index)
+  }, [])
+
   // Currently selected item's label
   const selectedLabel = items.find((item) => item.value === value)?.label ?? placeholder
 
@@ -176,66 +324,18 @@ export default function SearchableSelect({
         ? `${items.length} items`
         : null
 
-  // ── Shared item list renderer ──
-  const renderList = () => (
-    <div
-      ref={listRef}
-      className="ss-list"
-      style={{
-        flex: 1,
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        padding: '4px 0',
-      }}
-    >
-      {filtered.length === 0 ? (
-        <div
-          style={{
-            padding: '12px 16px',
-            fontSize: '12px',
-            fontFamily: fonts.sans,
-            color: colors.textDim,
-            textAlign: 'center',
-          }}
-        >
-          No matches
-        </div>
-      ) : (
-        filtered.map((item, idx) => {
-          const isSelected = item.value === value
-          const isHighlighted = idx === highlightIdx
-          return (
-            <div
-              key={item.value}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                handleSelect(item.value)
-              }}
-              onMouseEnter={() => setHighlightIdx(idx)}
-              style={{
-                padding: isMobile ? '10px 16px' : '5px 12px',
-                fontSize: isMobile ? '12px' : '12px',
-                fontFamily: fonts.mono,
-                color: isSelected ? colors.accent : colors.textPrimary,
-                backgroundColor: isHighlighted ? colors.bgHover : 'transparent',
-                cursor: 'pointer',
-                whiteSpace: isMobile ? 'normal' : 'nowrap',
-                wordBreak: isMobile ? 'break-all' : undefined,
-                lineHeight: isMobile ? 1.4 : undefined,
-                transition: 'background-color 0.1s',
-              }}
-              title={item.value}
-            >
-              {isSelected && (
-                <span style={{ marginRight: '6px', fontSize: '10px' }}>●</span>
-              )}
-              {item.label}
-            </div>
-          )
-        })
-      )}
-    </div>
-  )
+  // ── Row props passed to react-window v2 rowComponent ──
+  const rowProps: RowCustomProps = useMemo(() => ({
+    filtered,
+    selectedValue: value,
+    highlightIdx,
+    isMobile,
+    hasThumbnails,
+    getThumbnail,
+    requestThumbnail,
+    onSelect: handleSelect,
+    onHover: handleHover,
+  }), [filtered, value, highlightIdx, isMobile, hasThumbnails, getThumbnail, requestThumbnail, handleSelect, handleHover])
 
   // ── Shared search input renderer ──
   const renderSearch = () => (
@@ -292,6 +392,40 @@ export default function SearchableSelect({
         )}
       </div>
     </div>
+  )
+
+  // ── Virtualized list renderer ──
+  const renderList = (maxHeight: number) => (
+    <>
+      <style>{`@keyframes ss-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }`}</style>
+      {filtered.length === 0 ? (
+        <div
+          style={{
+            padding: '12px 16px',
+            fontSize: '12px',
+            fontFamily: fonts.sans,
+            color: colors.textDim,
+            textAlign: 'center',
+          }}
+        >
+          No matches
+        </div>
+      ) : (
+        <List<RowCustomProps>
+          listRef={listRef as React.Ref<ListImperativeAPI>}
+          className="ss-list"
+          rowComponent={VirtualRow}
+          rowCount={filtered.length}
+          rowHeight={rowHeight}
+          rowProps={rowProps}
+          overscanCount={5}
+          style={{
+            maxHeight,
+            overflowX: 'hidden',
+          }}
+        />
+      )}
+    </>
   )
 
   return (
@@ -406,7 +540,7 @@ export default function SearchableSelect({
               </button>
             </div>
             {renderSearch()}
-            {renderList()}
+            {renderList(window.innerHeight - 200)}
           </div>
         </div>
       )}
@@ -433,7 +567,7 @@ export default function SearchableSelect({
         >
           <div
             style={{
-              width: '480px',
+              width: hasThumbnails ? '520px' : '480px',
               maxWidth: '90vw',
               maxHeight: '70vh',
               display: 'flex',
@@ -477,10 +611,89 @@ export default function SearchableSelect({
               </button>
             </div>
             {renderSearch()}
-            {renderList()}
+            {/* Desktop list area: cap at ~55% viewport height */}
+            {renderList(Math.min(filtered.length * rowHeight, Math.round(window.innerHeight * 0.55)))}
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// RowItem — individual list row (extracted to avoid re-creating per render)
+// ---------------------------------------------------------------------------
+
+interface RowItemProps {
+  item: SelectItem
+  style: React.CSSProperties
+  isSelected: boolean
+  isHighlighted: boolean
+  isMobile: boolean
+  hasThumbnails: boolean
+  getThumbnail: (id: string) => ThumbnailEntry
+  requestThumbnail: (id: string) => void
+  onSelect: (value: string) => void
+  onHover: () => void
+}
+
+function RowItem({
+  item,
+  style,
+  isSelected,
+  isHighlighted,
+  isMobile,
+  hasThumbnails,
+  getThumbnail,
+  requestThumbnail,
+  onSelect,
+  onHover,
+}: RowItemProps) {
+  // Request thumbnail when row mounts (i.e. enters react-window viewport)
+  const thumbEntry = hasThumbnails ? getThumbnail(item.value) : null
+  useEffect(() => {
+    if (hasThumbnails) {
+      requestThumbnail(item.value)
+    }
+  }, [hasThumbnails, item.value, requestThumbnail])
+
+  return (
+    <div
+      style={{
+        ...style,
+        display: 'flex',
+        alignItems: 'center',
+        gap: hasThumbnails ? '10px' : '0',
+        padding: isMobile
+          ? (hasThumbnails ? '6px 16px' : '10px 16px')
+          : (hasThumbnails ? '6px 12px' : '5px 12px'),
+        fontSize: '12px',
+        fontFamily: fonts.mono,
+        color: isSelected ? colors.accent : colors.textPrimary,
+        backgroundColor: isHighlighted ? colors.bgHover : 'transparent',
+        cursor: 'pointer',
+        transition: 'background-color 0.1s',
+        boxSizing: 'border-box',
+      }}
+      title={item.value}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        onSelect(item.value)
+      }}
+      onMouseEnter={onHover}
+    >
+      {hasThumbnails && thumbEntry && <ThumbnailImage entry={thumbEntry} />}
+      <div style={{
+        flex: 1,
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: isMobile ? 'normal' : 'nowrap',
+        wordBreak: isMobile ? 'break-all' : undefined,
+        lineHeight: isMobile ? 1.4 : 1.3,
+      }}>
+        {item.label}
+      </div>
     </div>
   )
 }

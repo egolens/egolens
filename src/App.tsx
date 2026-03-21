@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSceneStore } from './stores/useSceneStore'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useSceneStore, getThumbnailResolver } from './stores/useSceneStore'
 import LidarViewer from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
@@ -432,6 +432,10 @@ function Header() {
   const [shareCopied, setShareCopied] = useState<string | false>(false)
   const [showStarModal, setShowStarModal] = useState(false)
 
+  // Thumbnail resolver — recomputed when segments change (lazy, returns cached fn)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const thumbResolver = useMemo(() => getThumbnailResolver(), [availableSegments, status])
+
   // Sync document title with active dataset + segment
   useEffect(() => {
     if (status === 'ready' && currentSegment) {
@@ -564,6 +568,7 @@ function Header() {
           placeholder="-- select segment --"
           title={currentSegment ?? undefined}
           mobileLabel={currentSegment ? `#${availableSegments.indexOf(currentSegment) + 1} / ${availableSegments.length} · ${currentSegment.slice(0, 7)}` : undefined}
+          thumbnailResolver={thumbResolver}
         />
         <button
           onClick={() => {

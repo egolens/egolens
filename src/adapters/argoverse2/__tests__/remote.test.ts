@@ -13,6 +13,7 @@ import {
   discoverAV2FramesFromManifest,
   parseS3Url,
   parseS3ListXml,
+  fetchAV2ThumbnailUrl,
   type AV2Manifest,
 } from '../remote'
 import { DataLoadError } from '../../../utils/errors'
@@ -316,5 +317,86 @@ describe('parseS3ListXml', () => {
     const result = parseS3ListXml(xml)
     expect(result.keys).toHaveLength(0)
     expect(result.isTruncated).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// fetchAV2ThumbnailUrl
+// ---------------------------------------------------------------------------
+
+describe('fetchAV2ThumbnailUrl', () => {
+  const LOG_URL = 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/02a00399-3857-444e-8db3-a8f58489c394/'
+
+  it('returns first ring_front_center image URL from S3 listing', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>datasets/av2/sensor/val/02a00399-3857-444e-8db3-a8f58489c394/sensors/cameras/ring_front_center/315966265649927216.jpg</Key></Contents>
+</ListBucketResult>`
+
+    mockFetch.mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(xml) })
+
+    const result = await fetchAV2ThumbnailUrl(LOG_URL)
+    expect(result).toBe(
+      'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/02a00399-3857-444e-8db3-a8f58489c394/sensors/cameras/ring_front_center/315966265649927216.jpg',
+    )
+
+    // Verify correct S3 ListObjectsV2 request
+    const calledUrl = mockFetch.mock.calls[0][0] as string
+    expect(calledUrl).toContain('list-type=2')
+    expect(calledUrl).toContain('max-keys=1')
+    expect(calledUrl).toContain('sensors%2Fcameras%2Fring_front_center%2F')
+  })
+
+  it('returns null when S3 listing returns no keys (empty prefix)', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <IsTruncated>false</IsTruncated>
+</ListBucketResult>`
+
+    mockFetch.mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(xml) })
+
+    const result = await fetchAV2ThumbnailUrl(LOG_URL)
+    expect(result).toBeNull()
+  })
+
+  it('returns null on HTTP error (403/404)', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 })
+
+    const result = await fetchAV2ThumbnailUrl(LOG_URL)
+    expect(result).toBeNull()
+  })
+
+  it('returns null on network error', async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const result = await fetchAV2ThumbnailUrl(LOG_URL)
+    expect(result).toBeNull()
+  })
+
+  it('returns null for invalid URL', async () => {
+    const result = await fetchAV2ThumbnailUrl('not-a-url')
+    expect(result).toBeNull()
+  })
+
+  it('constructs correct prefix from logUrl path', async () => {
+    const xml = `<ListBucketResult><IsTruncated>false</IsTruncated>
+<Contents><Key>datasets/av2/sensor/train/abc123/sensors/cameras/ring_front_center/100.jpg</Key></Contents>
+</ListBucketResult>`
+
+    mockFetch.mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(xml) })
+
+    const trainLogUrl = 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/abc123/'
+    const result = await fetchAV2ThumbnailUrl(trainLogUrl)
+
+    expect(result).toBe(
+      'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/abc123/sensors/cameras/ring_front_center/100.jpg',
+    )
+
+    // Verify prefix includes the full path to ring_front_center
+    const calledUrl = mockFetch.mock.calls[0][0] as string
+    const url = new URL(calledUrl)
+    const prefix = url.searchParams.get('prefix')
+    expect(prefix).toBe('datasets/av2/sensor/train/abc123/sensors/cameras/ring_front_center/')
   })
 })

@@ -374,6 +374,50 @@ async function discoverAV2LogsInSplit(
 }
 
 // ---------------------------------------------------------------------------
+// Thumbnail helper — fetch first ring_front_center image key via S3 ListObjects
+// ---------------------------------------------------------------------------
+
+/**
+ * Given an AV2 log URL (e.g. `https://bucket/datasets/av2/sensor/val/{logId}/`),
+ * issue a ListObjectsV2 with max-keys=1 on the ring_front_center camera prefix
+ * to discover the first JPEG filename, then return its full URL.
+ *
+ * Returns null if the bucket doesn't support listing or the prefix is empty.
+ */
+export async function fetchAV2ThumbnailUrl(logUrl: string): Promise<string | null> {
+  // logUrl is `${bucketEndpoint}/${prefix}` where prefix ends with `/`
+  // e.g. "https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/02a00399-.../"
+  // We need to extract bucketEndpoint and the object prefix.
+  try {
+    const u = new URL(logUrl)
+    const bucketEndpoint = `${u.protocol}//${u.hostname}`
+    // pathname starts with / → remove it; logUrl prefix already has trailing /
+    const logPrefix = u.pathname.slice(1)
+    const camPrefix = `${logPrefix}sensors/cameras/ring_front_center/`
+
+    const params = new URLSearchParams({
+      'list-type': '2',
+      'prefix': camPrefix,
+      'max-keys': '1',
+    })
+
+    const res = await fetch(`${bucketEndpoint}/?${params}`, {
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!res.ok) return null
+
+    const xml = await res.text()
+    // Extract first <Key>...</Key>
+    const keyMatch = xml.match(/<Key>(.*?)<\/Key>/)
+    if (!keyMatch?.[1]) return null
+
+    return `${bucketEndpoint}/${keyMatch[1]}`
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Buffer fetch helper
 // ---------------------------------------------------------------------------
 

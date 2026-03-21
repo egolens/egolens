@@ -59,6 +59,7 @@ import {
   loadAV2FromUrl,
   isAV2ParentUrl,
   discoverAV2LogsFromS3,
+  fetchAV2ThumbnailUrl,
 } from '../adapters/argoverse2/remote'
 import {
   fetchWaymoManifest as fetchWaymoRemoteManifest,
@@ -2168,4 +2169,91 @@ export function getPoseByFrameIndex(): Map<number, number[]> {
   return internal.poseByFrameIndex
 }
 
+// ---------------------------------------------------------------------------
+// Thumbnail resolver — used by SearchableSelect for scene preview thumbnails
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a thumbnail resolver function based on the currently active dataset.
+ *
+ * Returns an async function that, given a segmentId, produces a direct image
+ * URL for the first frame's FRONT camera, or null if not available.
+ *
+ * - AV2 multi-log: fetches manifest.json per log → extract first FRONT camera ts → JPEG URL
+ * - AV2 single-log: extracts from loaded database
+ * - nuScenes: extracts from loaded database (first sample's CAM_FRONT)
+ * - Waymo: returns null (images locked in Parquet)
+ */
+export function getThumbnailResolver(): ((segmentId: string) => Promise<string | null> | string | null) | null {
+  const datasetId = internal.datasetId
+
+  if (datasetId === 'argoverse2') {
+    // Multi-log mode: discovered logs have per-log URLs
+    if (internal.av2DiscoveredLogs && internal.av2DiscoveredLogs.length > 0) {
+      const logMap = new Map(internal.av2DiscoveredLogs.map(l => [l.logId, l.logUrl]))
+
+      return async (segmentId: string) => {
+        // If this is the currently loaded log, try the db first
+        if (internal.av2Db && internal.av2Db.logId === segmentId) {
+          const frame0Cams = internal.av2Db.cameraFilesByFrame.get(0)
+          const front = frame0Cams?.find(c => c.cameraId === 4) // RING_FRONT_CENTER = 4
+          if (front && internal.av2SampleFiles) {
+            const entry = internal.av2SampleFiles.get(front.filename)
+            if (typeof entry === 'string') return entry
+          }
+        }
+
+        // For unloaded logs: S3 ListObjects with max-keys=1 on ring_front_center prefix
+        const logUrl = logMap.get(segmentId)
+        if (!logUrl) return null
+
+        return fetchAV2ThumbnailUrl(logUrl)
+      }
+    }
+
+    // Single-log mode: db is already loaded
+    if (internal.av2Db) {
+      const db = internal.av2Db
+      const sampleFiles = internal.av2SampleFiles
+      return (_segmentId: string) => {
+        const frame0Cams = db.cameraFilesByFrame.get(0)
+        const front = frame0Cams?.find(c => c.cameraId === 4) // RING_FRONT_CENTER = 4
+        if (!front || !sampleFiles) return null
+        const entry = sampleFiles.get(front.filename)
+        return typeof entry === 'string' ? entry : null
+      }
+    }
+  }
+
+  if (datasetId === 'nuscenes' && internal.nuScenesDb && internal.nuScenesSampleFiles) {
+    const db = internal.nuScenesDb
+    const sampleFiles = internal.nuScenesSampleFiles
+
+    return (sceneName: string) => {
+      const scene = db.scenes.find(s => s.name === sceneName)
+      if (!scene) return null
+
+      // Walk from first_sample_token → find CAM_FRONT sample_data
+      const firstSample = db.sampleByToken.get(scene.first_sample_token)
+      if (!firstSample) return null
+
+      // Find CAM_FRONT data for this sample
+      const sds = db.sampleDataBySample.get(firstSample.token) ?? []
+      for (const sd of sds) {
+        const calSensor = db.calibratedSensorByToken.get(sd.calibrated_sensor_token)
+        if (!calSensor) continue
+        const sensor = db.sensorByToken.get(calSensor.sensor_token)
+        if (!sensor || sensor.channel !== 'CAM_FRONT') continue
+
+        // sd.filename is like "samples/CAM_FRONT/n015-2018-07-24-11-22-45+0800__CAM_FRONT__1532402927612460.jpg"
+        const entry = sampleFiles.get(sd.filename)
+        if (typeof entry === 'string') return entry
+      }
+      return null
+    }
+  }
+
+  // Waymo: thumbnails not available without loading full Parquet
+  return null
+}
 
