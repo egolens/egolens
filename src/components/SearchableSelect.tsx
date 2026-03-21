@@ -110,7 +110,7 @@ function ThumbnailImage({ entry }: { entry: ThumbnailEntry }) {
     )
   }
 
-  // unavailable or idle — camera icon placeholder
+  // unavailable or idle — camera SVG placeholder
   return (
     <div
       style={{
@@ -122,11 +122,14 @@ function ThumbnailImage({ entry }: { entry: ThumbnailEntry }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '14px',
-        color: colors.textDim,
       }}
     >
-      ◻
+      <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
+        <rect x="1" y="2" width="16" height="11" rx="1.5" stroke={colors.textDim} strokeWidth="1.2" />
+        <circle cx="9" cy="7.5" r="3" stroke={colors.textDim} strokeWidth="1.2" />
+        <circle cx="9" cy="7.5" r="1" fill={colors.textDim} />
+        <rect x="12" y="3.5" width="2.5" height="1.5" rx="0.5" fill={colors.textDim} />
+      </svg>
     </div>
   )
 }
