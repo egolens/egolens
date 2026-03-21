@@ -338,8 +338,8 @@ function App() {
 
   return (
     <div style={{
-      width: '100vw',
-      height: '100vh',
+      width: '100%',
+      height: '100dvh',
       display: 'flex',
       flexDirection: 'column',
       backgroundColor: bgColor,
@@ -487,11 +487,11 @@ function Header() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '8px 24px',
+      padding: '8px 16px',
       background: colors.bgSurface,
       borderBottom: `1px solid ${colors.border}`,
       flexShrink: 0,
-      gap: '16px',
+      gap: '12px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <h1
@@ -657,11 +657,24 @@ function Header() {
 // Drop Zone — shown when no data is loaded
 // ---------------------------------------------------------------------------
 
+function useIsMobile(breakpoint = 600) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint)
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    setIsMobile(mq.matches)
+    return () => mq.removeEventListener('change', handler)
+  }, [breakpoint])
+  return isMobile
+}
+
 function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map<string, File>>) => Promise<void> }) {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const dragCounter = useRef(0)
+  const isMobile = useIsMobile()
 
   // URL loading state
   const [urlDataset, setUrlDataset] = useState<string>('argoverse2')
@@ -768,8 +781,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'safe center',
-        gap: '24px',
-        padding: '40px',
+        gap: isMobile ? '16px' : '24px',
+        padding: isMobile ? '20px 16px' : '40px',
         overflow: 'auto',
         transition: 'background-color 0.2s',
         backgroundColor: dragging ? 'rgba(0, 232, 157, 0.05)' : 'transparent',
@@ -782,24 +795,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         .dropzone-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
         .dropzone-scroll { scrollbar-color: rgba(255,255,255,0.15) transparent; scrollbar-width: thin; }
       `}</style>
-      {/* Safari warning */}
-      {/^((?!chrome|android).)*safari/i.test(navigator.userAgent) && (
-        <div style={{
-          maxWidth: '520px',
-          width: '100%',
-          padding: '8px 14px',
-          fontSize: '11px',
-          fontFamily: fonts.sans,
-          color: '#FFB347',
-          backgroundColor: 'rgba(255, 179, 71, 0.08)',
-          border: '1px solid rgba(255, 179, 71, 0.2)',
-          borderRadius: radius.sm,
-          textAlign: 'center',
-          lineHeight: 1.5,
-        }}>
-          Safari may crash on large datasets due to memory limits. <strong>Chrome or Edge</strong> is recommended.
-        </div>
-      )}
+      {/* Safari warning — hidden on landing page for cleaner UX */}
 
       {/* Intro */}
       <div style={{
@@ -818,14 +814,15 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           EgoLens
         </div>
         <div style={{
-          fontSize: '13px',
+          fontSize: isMobile ? '12px' : '13px',
           fontFamily: fonts.sans,
           color: colors.textSecondary,
           lineHeight: 1.7,
         }}>
-          Visualize point clouds, cameras, and 3D annotations in your browser<br />
-          — straight from the most widely used autonomous driving datasets.<br />
-          No conversion, no preprocessing.
+          {isMobile
+            ? 'Visualize point clouds, cameras, and 3D annotations — straight from Waymo, nuScenes, and Argoverse 2.'
+            : <>Visualize point clouds, cameras, and 3D annotations in your browser<br />— straight from the most widely used autonomous driving datasets.<br />No conversion, no preprocessing.</>
+          }
         </div>
         {/* Dataset badges — outlined, info only */}
         <div style={{
@@ -869,10 +866,10 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         </div>
 
         {/* Quick start — try with hosted data */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '8px' }}>
+        <div style={{ display: 'flex', gap: isMobile ? '8px' : '10px', flexWrap: isMobile ? 'nowrap' : 'wrap', justifyContent: 'center', marginTop: '8px', width: '100%' }}>
           {([
-            { dataset: 'nuscenes', label: 'Try nuScenes mini', url: 'https://data.egolens.org/nuscenes/', note: 'Hosted by EgoLens · 10 scenes' },
-            { dataset: 'argoverse2', label: 'Try Argoverse 2', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', note: 'Via Argoverse S3 · validation split' },
+            { dataset: 'nuscenes', label: 'Try nuScenes mini', url: 'https://data.egolens.org/nuscenes/', note: 'Hosted by EgoLens · 10 scenes', shortNote: '10 scenes' },
+            { dataset: 'argoverse2', label: 'Try Argoverse 2', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', note: 'Via Argoverse S3 · validation split', shortNote: 'validation split' },
           ] as const).map((preset) => {
             const isActive = urlDataset === preset.dataset && urlInput === preset.url
             return (
@@ -892,8 +889,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '2px',
-                  padding: '10px 20px',
-                  fontSize: '13px',
+                  padding: isMobile ? '8px 12px' : '10px 20px',
+                  fontSize: isMobile ? '12px' : '13px',
                   fontFamily: fonts.sans,
                   fontWeight: 600,
                   color: isActive ? '#000' : colors.textPrimary,
@@ -903,7 +900,8 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                   cursor: urlLoading ? 'not-allowed' : 'pointer',
                   transition: 'all 0.15s',
                   opacity: urlLoading ? 0.5 : 1,
-                  minWidth: '180px',
+                  flex: isMobile ? 1 : undefined,
+                  minWidth: isMobile ? 0 : '180px',
                 }}
                 onMouseEnter={(e) => {
                   if (!urlLoading && !isActive) {
@@ -923,7 +921,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                   fontSize: '10px',
                   fontWeight: 400,
                   color: isActive ? 'rgba(0,0,0,0.6)' : colors.textDim,
-                }}>{preset.note}</span>
+                }}>{isMobile ? preset.shortNote : preset.note}</span>
               </button>
             )
           })}
@@ -1141,15 +1139,16 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       <div style={{
         width: '100%',
         maxWidth: '520px',
-        padding: '32px 40px',
-        borderRadius: '16px',
+        padding: isMobile ? '20px 16px' : '32px 40px',
+        borderRadius: isMobile ? '12px' : '16px',
         border: `2px dashed ${dragging ? colors.accent : colors.border}`,
         backgroundColor: dragging ? 'rgba(0, 232, 157, 0.08)' : colors.bgSurface,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '16px',
+        gap: isMobile ? '12px' : '16px',
         transition: 'all 0.2s',
+        boxSizing: 'border-box',
       }}>
         {scanning ? (
           <div style={{
@@ -1233,7 +1232,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               color: colors.textDim,
               textAlign: 'left',
               lineHeight: 1.5,
-              display: 'flex',
+              display: isMobile ? 'none' : 'flex',
               gap: '24px',
               justifyContent: 'center',
               flexWrap: 'wrap',
