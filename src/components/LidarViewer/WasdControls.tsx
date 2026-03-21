@@ -132,12 +132,22 @@ export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: 
     // ── Translation (WASD + QE) ──
 
     // Forward = camera look direction projected onto XY plane (Z-up world)
+    // At BEV (looking straight down) the XY projection is near-zero,
+    // so fall back to camera's actual forward from its matrix.
     camera.getWorldDirection(_forward)
     _forward.z = 0
-    _forward.normalize()
+    const fwdLen = _forward.length()
+    if (fwdLen < 0.01) {
+      // Near-vertical: use camera matrix Y column (up in screen = forward in world)
+      _forward.setFromMatrixColumn(camera.matrixWorld, 1)
+      _forward.z = 0
+      _forward.normalize()
+    } else {
+      _forward.multiplyScalar(1 / fwdLen)
+    }
 
-    // Right = up × forward (Z-up world: gives correct right-hand direction)
-    _right.crossVectors(_up, _forward).normalize()
+    // Right from camera matrix — safe at any angle
+    _right.setFromMatrixColumn(camera.matrixWorld, 0)
 
     _delta.set(0, 0, 0)
 
@@ -175,14 +185,16 @@ export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: 
     // I/K = vertical rotation around camera's right axis
     if (k.has('KeyI') || k.has('KeyK')) {
       const angle = k.has('KeyI') ? -rotSpeed : rotSpeed
-      // Compute camera right vector for vertical rotation axis
-      camera.getWorldDirection(_forward)
-      _right.crossVectors(_up, _forward).normalize()
+      // Use camera's actual right vector from its matrix — safe at any angle
+      // (cross product of _up × _forward fails at BEV where they're parallel)
+      _right.setFromMatrixColumn(camera.matrixWorld, 0)
 
-      // Clamp: don't let camera go past directly above or below target
+      // Clamp: only block rotation that would go PAST the pole,
+      // always allow rotation that moves AWAY from the pole
+      const currentDotUp = _offset.clone().normalize().dot(_up)
       const newOffset = _offset.clone().applyAxisAngle(_right, angle)
-      const dotUp = newOffset.normalize().dot(_up)
-      if (Math.abs(dotUp) < 0.98) {
+      const newDotUp = newOffset.normalize().dot(_up)
+      if (Math.abs(newDotUp) < 0.999 || Math.abs(newDotUp) < Math.abs(currentDotUp)) {
         _offset.applyAxisAngle(_right, angle)
         moved = true
       }
