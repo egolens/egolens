@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use EgoLens in your research, please cite it as below."
+title: "EgoLens: A browser-based viewer for autonomous-driving datasets"
+abstract: >-
+  EgoLens is a zero-setup, browser-based viewer for the most widely used
+  autonomous-driving datasets (Waymo Open Dataset v2, nuScenes, and
+  Argoverse 2). It renders LiDAR point clouds, synchronized camera views,
+  3D bounding boxes, trajectory trails, and semantic segmentation directly
+  in the browser with no conversion or preprocessing, loading data from a
+  local folder or a URL.
+type: software
+authors:
+  - given-names: Heejae
+    family-names: Kim
+    # orcid: "https://orcid.org/0000-0000-0000-0000"  # add if you have one
+version: 1.0.0
+date-released: 2026-05-30
+license: MIT
+url: "https://egolens.github.io/egolens"
+repository-code: "https://github.com/egolens/egolens"
+keywords:
+  - autonomous driving
+  - LiDAR
+  - point cloud
+  - data visualization
+  - Waymo Open Dataset
+  - nuScenes
+  - Argoverse 2
+  - WebGL
+# After your first Zenodo release, uncomment and fill in the DOI Zenodo gives you.
+# This makes the "Cite this repository" button emit a DOI-backed citation.
+# doi: "10.5281/zenodo.XXXXXXX"
+# identifiers:
+#   - type: doi
+#     value: "10.5281/zenodo.XXXXXXX"
+#     description: "Concept DOI (always resolves to the latest release)"
