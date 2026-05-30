@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <a href="https://doi.org/10.5281/zenodo.20460188"><img src="https://zenodo.org/badge/1168808104.svg" alt="DOI" /></a>
+</p>
+
+<p align="center">
   <a href="https://egolens.github.io/egolens"><strong>Live Demo</strong></a> ·
   <a href="#url-loading">URL Loading</a> ·
   <a href="#share-view">Share View</a> ·
@@ -130,6 +134,24 @@ React 19 · TypeScript · Three.js · React Three Fiber · Vite · Zustand · hy
 Found a bug? Have a feature idea? Want support for another dataset? [Open an issue](https://github.com/egolens/egolens/issues) — all feedback is welcome.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines · [Changelog](CHANGELOG.md)
+
+## Citation
+
+If you use EgoLens in your research, please cite it via its Zenodo DOI:
+
+```bibtex
+@software{kim_egolens_2026,
+  author    = {Kim, Heejae},
+  title     = {{EgoLens: A browser-based viewer for autonomous-driving datasets}},
+  year      = {2026},
+  publisher = {Zenodo},
+  version   = {1.0.0},
+  doi       = {10.5281/zenodo.20460188},
+  url       = {https://github.com/egolens/egolens}
+}
+```
+
+Or use the **Cite this repository** button at the top of the GitHub page (powered by [`CITATION.cff`](CITATION.cff)).
 
 ## License
 
