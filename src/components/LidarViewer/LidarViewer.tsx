@@ -22,7 +22,7 @@ import CameraFrustums from './CameraFrustums'
 import WasdControls from './WasdControls'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
-import { useSceneStore, BG_PRESETS } from '../../stores/useSceneStore'
+import { useSceneStore, BG_PRESETS, ALL_COLORMAP_MODES, COLORMAP_LABELS } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
 import { colors, fonts, radius } from '../../theme'
@@ -1428,7 +1428,8 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
 
           {/* Colormap — hide when dataset only supports one mode */}
           {(() => {
-            const allModes: [ColormapMode, string][] = [['distance', 'Dist'], ['intensity', 'Int'], ['range', 'Range'], ['elongation', 'Elong'], ['segment', 'Seg'], ['panoptic', 'Pan'], ['camera', 'Cam']]
+            const allModes: [ColormapMode, string][] =
+              ALL_COLORMAP_MODES.map((mode) => [mode, COLORMAP_LABELS[mode]])
             const manifest = getManifest()
             const availableModes = (manifest.colormapModes
               ? allModes.filter(([mode]) => manifest.colormapModes!.includes(mode))

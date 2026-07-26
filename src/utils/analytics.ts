@@ -90,3 +90,18 @@ export function trackCameraSettle(params: {
 export function trackKeyboardShortcut(key: string) {
   track('keyboard_shortcut', { key })
 }
+
+/**
+ * An uncaught error was caught by a boundary or a global handler.
+ *
+ * Send through `reportError` in errorReporting.ts rather than calling this
+ * directly — it deduplicates, which matters because a broken render throws once
+ * per frame. `description` is clipped to GA4's 100-character parameter limit.
+ */
+export function trackException(params: { description: string; feature: string; fatal: boolean }) {
+  track('exception', {
+    description: params.description.slice(0, 100),
+    feature: params.feature,
+    fatal: params.fatal,
+  })
+}

@@ -86,7 +86,31 @@ import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverl
 
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type BoxMode = 'off' | 'box' | 'model'
-export type ColormapMode = 'intensity' | 'range' | 'elongation' | 'distance' | 'segment' | 'panoptic' | 'camera'
+/**
+ * Every colormap mode, in UI display order.
+ *
+ * ColormapMode is derived from this array rather than declared alongside it, so
+ * a new mode cannot be added to one and forgotten in the other. Anything that
+ * needs to enumerate modes — the picker in LidarViewer, exhaustiveness tests —
+ * must iterate this instead of a hand-written list. A hand-written list is what
+ * let camera mode go untested and blank the app.
+ */
+export const ALL_COLORMAP_MODES = [
+  'distance', 'intensity', 'range', 'elongation', 'segment', 'panoptic', 'camera',
+] as const
+
+export type ColormapMode = typeof ALL_COLORMAP_MODES[number]
+
+/** Short button labels for the colormap picker. Record<> forces a label per mode. */
+export const COLORMAP_LABELS: Record<ColormapMode, string> = {
+  distance: 'Dist',
+  intensity: 'Int',
+  range: 'Range',
+  elongation: 'Elong',
+  segment: 'Seg',
+  panoptic: 'Pan',
+  camera: 'Cam',
+}
 export type PointShape = 'square' | 'circle'
 
 /** Background color presets for 3D viewport */

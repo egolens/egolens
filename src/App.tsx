@@ -13,6 +13,7 @@ import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/Li
 import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
+import ErrorBoundary from './components/ErrorBoundary'
 import MemoryOverlay from './components/MemoryOverlay'
 import SearchableSelect, { type SelectItem } from './components/SearchableSelect'
 
@@ -1582,7 +1583,11 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
         <div style={{ position: 'absolute', inset: 0 }}>
           {status === 'ready' ? (
             <>
-              <LidarViewer hideControls={hideOverlays} />
+              {/* Losing the 3D view costs the user the whole tool, so this one
+                  earns the recovery screen rather than an empty black area. */}
+              <ErrorBoundary feature="LidarViewer" variant="root">
+                <LidarViewer hideControls={hideOverlays} />
+              </ErrorBoundary>
               {/* ShortcutHints removed — ? key now toggles Keys popup in LidarViewer */}
             </>
           ) : status === 'loading' ? (
@@ -1605,7 +1610,13 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
       </div>
 
       {/* Camera Image Strip — bottom (hidden when controls=none) */}
-      {status === 'ready' && !hideOverlays && <CameraPanel />}
+      {/* The camera strip is supporting context — if it breaks, the 3D view
+          and timeline stay usable, so drop the strip instead of the session. */}
+      {status === 'ready' && !hideOverlays && (
+        <ErrorBoundary feature="CameraPanel">
+          <CameraPanel />
+        </ErrorBoundary>
+      )}
       {status === 'loading' && !hideOverlays && <CameraStripSkeleton />}
     </div>
   )

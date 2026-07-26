@@ -16,6 +16,7 @@ import { useSceneStore } from '../../stores/useSceneStore'
 import type { ParquetRow } from '../../utils/merge'
 import { colors, fonts, radius, shadows } from '../../theme'
 import { getManifest } from '../../adapters/registry'
+import ErrorBoundary from '../ErrorBoundary'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
 import LidarProjectionOverlay from './LidarProjectionOverlay'
 import BoxProjectionOverlay from './BoxProjectionOverlay'
@@ -293,29 +294,45 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
         </div>
       )}
 
+      {/*
+        Each overlay gets its own boundary: they project the same frame through
+        independent math, so one bad code path should cost its own layer and
+        nothing else. Before these existed, a throw here unmounted the whole app.
+      */}
+
       {/* Camera segmentation overlay (below lidar/bbox overlays) */}
       {showCameraSeg && hasCameraSeg && (
-        <CameraSegOverlay cameraName={cameraName} />
+        <ErrorBoundary feature="CameraSegOverlay">
+          <CameraSegOverlay cameraName={cameraName} />
+        </ErrorBoundary>
       )}
 
       {/* LiDAR point projection overlay (separate toggle) */}
       {showLidarOverlay && (
-        <LidarProjectionOverlay cameraName={cameraName} />
+        <ErrorBoundary feature="LidarProjectionOverlay">
+          <LidarProjectionOverlay cameraName={cameraName} />
+        </ErrorBoundary>
       )}
 
       {/* 3D box → camera wireframe projection (only when no native 2D boxes — AV2/nuScenes) */}
       {boxMode !== 'off' && boxes.length === 0 && (
-        <BoxProjectionOverlay cameraName={cameraName} />
+        <ErrorBoundary feature="BoxProjectionOverlay">
+          <BoxProjectionOverlay cameraName={cameraName} />
+        </ErrorBoundary>
       )}
 
       {/* Native 2D bounding box overlay (Waymo — has pre-associated camera_box data) */}
       {boxes.length > 0 && (
-        <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
+        <ErrorBoundary feature="BBoxOverlayCanvas">
+          <BBoxOverlayCanvas cameraName={cameraName} boxes={boxes} />
+        </ErrorBoundary>
       )}
 
       {/* 2D keypoint skeleton overlay (Waymo camera_hkp) */}
       {showKeypoints2D && hasKeypoints && (
-        <KeypointOverlay cameraName={cameraName} />
+        <ErrorBoundary feature="KeypointOverlay">
+          <KeypointOverlay cameraName={cameraName} />
+        </ErrorBoundary>
       )}
 
       {/* Label overlay — abbreviate on mobile to avoid two-line wrap */}

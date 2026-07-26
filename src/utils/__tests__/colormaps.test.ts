@@ -20,7 +20,7 @@ import {
   computePointColor,
 } from '../colormaps'
 import { WAYMO_SEG_PALETTE } from '../waymoSemanticClasses'
-import type { ColormapMode } from '../../stores/useSceneStore'
+import { ALL_COLORMAP_MODES } from '../../stores/useSceneStore'
 
 // ---------------------------------------------------------------------------
 // colormapColor — gradient interpolation
@@ -299,7 +299,7 @@ describe('computePointColor', () => {
 
   it('returns values in [0, 1] range for all modes', () => {
     const pos = makePositions(5, 5, 5, 0.7, 30, 0.4)
-    for (const mode of ['intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic', 'camera'] as const) {
+    for (const mode of ALL_COLORMAP_MODES) {
       const stops = COLORMAP_STOPS[mode]
       const off = ATTR_OFFSET[mode]
       const [min, max] = ATTR_RANGE[mode]
@@ -374,7 +374,7 @@ describe('computePointColor', () => {
 // ---------------------------------------------------------------------------
 
 describe('COLORMAP_STOPS / ATTR_OFFSET / ATTR_RANGE completeness', () => {
-  const ALL_MODES: ColormapMode[] = ['intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic', 'camera']
+  const ALL_MODES = ALL_COLORMAP_MODES
 
   it('COLORMAP_STOPS has entry for every ColormapMode', () => {
     for (const mode of ALL_MODES) {
@@ -396,4 +396,66 @@ describe('COLORMAP_STOPS / ATTR_OFFSET / ATTR_RANGE completeness', () => {
       expect(max).toBeGreaterThan(min)
     }
   })
+})
+
+// ---------------------------------------------------------------------------
+// Cross-product smoke test
+// ---------------------------------------------------------------------------
+
+/**
+ * The LiDAR→Camera whiteout was not a bad color — it was a mode that no test
+ * ever exercised, reading outside its buffer and throwing. Per-mode tests miss
+ * that class because each one is written for the mode its author had in mind.
+ *
+ * So sweep the whole product instead: every colormap mode against every point
+ * stride we ship, with and without the label arrays, at the first point (where
+ * a backward read goes negative) and a later one (where it silently lands on a
+ * neighbour). The only assertion is that a caller always gets three usable
+ * channels — which is the contract every drawing path depends on.
+ */
+describe('computePointColor — every mode × stride × label availability', () => {
+  /** pointStride by dataset: AV2 ships x,y,z,intensity; Waymo adds range,elongation */
+  const STRIDES = [4, 6]
+
+  function buffer(stride: number, pointCount: number): Float32Array {
+    const buf = new Float32Array(stride * pointCount)
+    for (let i = 0; i < pointCount; i++) {
+      const o = i * stride
+      // Metre-scale coordinates: large enough that a stale read clamps to t=1,
+      // which is what turned the overlay near-white.
+      buf[o] = 10 + i * 15   // x
+      buf[o + 1] = 2 + i     // y
+      buf[o + 2] = 40 - i    // z
+      for (let a = 3; a < stride; a++) buf[o + a] = 0.5
+    }
+    return buf
+  }
+
+  for (const mode of ALL_COLORMAP_MODES) {
+    for (const stride of STRIDES) {
+      for (const withLabels of [true, false]) {
+        for (const srcIndex of [0, 2]) {
+          it(`${mode} · stride ${stride} · ${withLabels ? 'labelled' : 'unlabelled'} · point ${srcIndex}`, () => {
+            const positions = buffer(stride, 3)
+            const segLabels = withLabels ? new Uint8Array([1, 2, 3]) : null
+            const panopticLabels = withLabels ? new Int32Array([1000, 2001, 3002]) : null
+            const [min, max] = ATTR_RANGE[mode]
+
+            const rgb = computePointColor(
+              mode, srcIndex, positions, stride,
+              COLORMAP_STOPS[mode], ATTR_OFFSET[mode], min, max - min,
+              segLabels, panopticLabels,
+            )
+
+            expect(rgb).toHaveLength(3)
+            for (const channel of rgb) {
+              expect(Number.isFinite(channel)).toBe(true)
+              expect(channel).toBeGreaterThanOrEqual(0)
+              expect(channel).toBeLessThanOrEqual(1)
+            }
+          })
+        }
+      }
+    }
+  }
 })
