@@ -87,6 +87,9 @@ export default function WasdControls({ orbitRef, enabled = true, onMoveStart }: 
       // Ignore when typing in an input/textarea/select
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      // Leave browser/OS chords alone (Shift stays: it's the 3x speed modifier).
+      // Also avoids stuck keys on macOS, which suppresses keyup while Meta is held.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
 
       if (MOVE_CODES.has(e.code)) {
         keys.current.add(e.code)

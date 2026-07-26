@@ -31,6 +31,8 @@ export default function MemoryOverlay() {
   // Toggle with 'M' key
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Leave browser/OS chords alone (Cmd+M minimizes on macOS)
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
       if (e.code === 'KeyM') {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
         setVisible((v) => {

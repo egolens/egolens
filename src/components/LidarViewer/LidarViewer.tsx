@@ -798,6 +798,10 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      // Leave browser/OS chords alone (e.code matches the physical key even
+      // with Cmd/Ctrl held, so Ctrl+C would otherwise toggle world mode)
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.repeat) return // all shortcuts here are toggles/one-shots
       if (e.key === '?') {
         e.preventDefault()
         setShowKeyHints((v) => {

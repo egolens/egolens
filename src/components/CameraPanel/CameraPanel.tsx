@@ -72,6 +72,9 @@ export default function CameraPanel() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      // Leave browser/OS chords alone (Cmd/Ctrl+1-9 switches tabs)
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.repeat) return // POV toggle must not thrash while held
 
       // Digit1..Digit9 → index 0..8
       const match = e.code.match(/^Digit([1-9])$/)

@@ -273,6 +273,8 @@ export default function SearchableSelect({
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      // Leave browser/OS chords alone (e.g. Cmd+/ in some browsers)
+      if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === '/' && !open) {
         e.preventDefault()
         setOpen(true)

@@ -282,6 +282,9 @@ function App() {
       // Blur focused buttons so Space doesn't re-click them
       if (tag === 'BUTTON') (el as HTMLButtonElement).blur()
 
+      // Leave browser/OS chords alone (Cmd/Ctrl/Alt); Shift is ours (segment nav)
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
       // Shift+Arrow: segment navigation (works even during loading)
       if (e.shiftKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
         e.preventDefault()
@@ -298,6 +301,7 @@ function App() {
       switch (e.code) {
         case 'Space':
           e.preventDefault()
+          if (e.repeat) break // holding Space must not thrash play/pause
           togglePlayback()
           trackKeyboardShortcut('Space')
           break
