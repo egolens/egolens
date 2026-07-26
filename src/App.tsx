@@ -8,6 +8,7 @@ import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
+import { PRESETS, isPresetUrl } from './utils/presets'
 import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
 import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut } from './utils/analytics'
@@ -58,6 +59,7 @@ function useSegmentDiscovery() {
 const SUPPORTED_URL_DATASETS = ['argoverse2', 'nuscenes', 'waymo'] as const
 type UrlDataset = typeof SUPPORTED_URL_DATASETS[number]
 
+
 /** Guard against double-invocation from React StrictMode */
 let urlAutoLoadStarted = false
 
@@ -81,8 +83,13 @@ function useUrlAutoLoad() {
 
     try {
       const baseUrl = normalizeBaseUrl(dataUrl)
-      const hasView = new URLSearchParams(window.location.search).has('frame')
-      trackDatasetLoad(dataset, hasView ? 'url' : 'preset')
+      // A Share View link carries view state; a bare ?dataset&data URL is an
+      // embed or a bookmark. Neither is a preset unless the URL is actually one.
+      const isShared = new URLSearchParams(window.location.search).has('frame')
+      trackDatasetLoad(
+        dataset,
+        isPresetUrl(dataUrl) ? 'preset' : isShared ? 'url_shared' : 'url_direct',
+      )
       loadFromUrl(dataset, baseUrl, scene)
     } catch {
       // Invalid URL — silently ignore, user will see the landing page
@@ -1003,10 +1010,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 
         {/* Quick start — try with hosted data */}
         <div style={{ display: 'flex', gap: isMobile ? '8px' : '10px', flexWrap: isMobile ? 'nowrap' : 'wrap', justifyContent: 'center', marginTop: '8px', width: '100%' }}>
-          {([
-            { dataset: 'nuscenes', label: 'Try nuScenes mini', url: 'https://data.egolens.org/nuscenes/', note: 'Hosted by EgoLens · 10 scenes', shortNote: '10 scenes' },
-            { dataset: 'argoverse2', label: 'Try Argoverse 2', url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/', note: 'Via Argoverse S3 · validation split', shortNote: 'validation split' },
-          ] as const).map((preset) => {
+          {PRESETS.map((preset) => {
             const isActive = urlDataset === preset.dataset && urlInput === preset.url
             return (
               <button
@@ -1409,7 +1413,9 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
     try {
       const baseUrl = normalizeBaseUrl(urlInput)
       const scene = urlSegment.trim() || undefined
-      trackDatasetLoad(urlDataset, 'url')
+      // The form is shared by presets and hand-entered URLs — the URL itself is
+      // what separates "trying the demo" from "brought their own data".
+      trackDatasetLoad(urlDataset, isPresetUrl(urlInput) ? 'preset' : 'url_manual')
       await loadFromUrl(urlDataset, baseUrl, scene)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

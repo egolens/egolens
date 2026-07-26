@@ -15,8 +15,28 @@ function track(event: string, params?: Record<string, string | number | boolean>
   }
 }
 
-/** User loaded a dataset (URL or local files) */
-export function trackDatasetLoad(dataset: string, source: 'url' | 'local' | 'preset') {
+/**
+ * Where the data a user opened came from.
+ *
+ * The split that matters is "our data" versus "their data": someone browsing a
+ * preset is evaluating the tool, someone pointing it at their own bucket is
+ * using it. Everything downstream — whether to build the BYO adapter, whether
+ * it worked — reads this field, so the values must stay mutually exclusive.
+ */
+export type DataSource =
+  /** Landing-page preset — data we host or curate */
+  | 'preset'
+  /** A URL the user supplied themselves */
+  | 'url_manual'
+  /** Arrived through a Share View link (carries view params) */
+  | 'url_shared'
+  /** Arrived at a ?dataset&data URL with no view params — embed or bookmark */
+  | 'url_direct'
+  /** Local folder, dropped or picked */
+  | 'local'
+
+/** User loaded a dataset */
+export function trackDatasetLoad(dataset: string, source: DataSource) {
   track('dataset_load', { dataset, source })
 }
 
@@ -50,19 +70,29 @@ export function trackOverlayToggle(overlay: string, enabled: boolean) {
   track('overlay_toggle', { overlay, enabled })
 }
 
+/**
+ * Which layout surfaced the star prompt.
+ *
+ * Named `placement`, not `source`: GA4 custom dimensions are keyed by parameter
+ * name across all events, so reusing `source` here would blend 'mobile' and
+ * 'desktop' into the same column as the dataset origins above and make the
+ * adoption metric unreadable.
+ */
+export type StarPlacement = 'mobile' | 'desktop'
+
 /** User opened the GitHub star modal */
-export function trackStarModalOpen(source: 'mobile' | 'desktop') {
-  track('star_modal_open', { source })
+export function trackStarModalOpen(placement: StarPlacement) {
+  track('star_modal_open', { placement })
 }
 
 /** User clicked "Star us on GitHub" in the modal */
-export function trackStarClick(source: 'mobile' | 'desktop') {
-  track('star_click', { source })
+export function trackStarClick(placement: StarPlacement) {
+  track('star_click', { placement })
 }
 
 /** User dismissed the star modal without clicking */
-export function trackStarDismiss(source: 'mobile' | 'desktop') {
-  track('star_dismiss', { source })
+export function trackStarDismiss(placement: StarPlacement) {
+  track('star_dismiss', { placement })
 }
 
 /** Camera settled after WASD/IJKL movement (2s idle) */

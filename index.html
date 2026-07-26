@@ -63,16 +63,32 @@
         ]
       }
     </script>
-    <!-- Google Analytics — anonymous usage metrics (no cookies, no PII) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4LENPW8TBE"></script>
+    <!--
+      Google Analytics — anonymous usage metrics (no cookies, no PII).
+
+      Skipped on localhost. GA4's own "internal traffic" filter matches on IP
+      address only, so it cannot exclude a hostname; leaving this on meant dev
+      sessions outnumbered real visitors roughly ten to one and quietly buried
+      them in every report.
+    -->
     <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-4LENPW8TBE', {
-        storage: 'none',
-        client_id: Math.random().toString(36).slice(2) + Date.now().toString(36),
-      });
+      window.__EGOLENS_ANALYTICS__ =
+        !['localhost', '127.0.0.1', '0.0.0.0', '[::1]'].includes(location.hostname);
+
+      if (window.__EGOLENS_ANALYTICS__) {
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=G-4LENPW8TBE';
+        document.head.appendChild(s);
+
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { dataLayer.push(arguments); };
+        gtag('js', new Date());
+        gtag('config', 'G-4LENPW8TBE', {
+          storage: 'none',
+          client_id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+        });
+      }
     </script>
     <style>
       /* Cross-browser range slider — teal accent on dark track */
