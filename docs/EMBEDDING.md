@@ -1,12 +1,14 @@
-# Embedding Perception Studio
+# Embedding EgoLens
 
-Perception Studio can be embedded in third-party websites via iframe, following the Matterport embed pattern.
+EgoLens can be embedded in third-party websites via iframe, following the Matterport embed pattern.
+
+The hosted build at `https://egolens.org` is embeddable as-is — no need to run your own copy unless you want to pin a version or serve it from your own origin.
 
 ## Quick Start
 
 ```html
 <iframe
-  src="https://your-host.com/waymo-perception-studio/?dataset=argoverse2&data=https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/00a6ffc1-6ce9-3bc3-a060-6006e9893a1a/&embed=true"
+  src="https://egolens.org/?dataset=argoverse2&data=https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/00a6ffc1-6ce9-3bc3-a060-6006e9893a1a/&embed=true"
   width="100%"
   height="600"
   frameborder="0"
@@ -112,7 +114,7 @@ sandbox="allow-scripts allow-same-origin"
 
 ### CSP Headers (Self-Hosted)
 
-For production deployments, set these response headers on the Perception Studio HTML:
+Only relevant if you self-host. Set these response headers on the EgoLens HTML:
 
 ```
 Content-Security-Policy: frame-ancestors 'self' https:;
