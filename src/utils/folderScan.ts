@@ -17,6 +17,95 @@
 import { getAllKnownComponents, detectDataset } from '../adapters/registry'
 
 // ---------------------------------------------------------------------------
+// Scan result & rejection diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Directory names that belong to a published dataset layout.
+ *
+ * Only these are ever reported to analytics. Everything else in a user's tree
+ * could name their employer or project, and answering "what shape do people
+ * drop?" does not require knowing that.
+ */
+const KNOWN_LAYOUT_NAMES = new Set([
+  // Waymo archive splits
+  'training', 'validation', 'testing', 'domain_adaptation', 'perception', 'motion',
+  // Generic splits
+  'train', 'val', 'test',
+  // nuScenes
+  'samples', 'sweeps', 'maps', 'can_bus',
+  'v1.0-mini', 'v1.0-trainval', 'v1.0-test',
+  // Argoverse 2
+  'sensor', 'lidar', 'cameras', 'calibration',
+])
+
+/** Split directories that mean the user is pointing above a single log. */
+const SPLIT_NAMES = new Set(['training', 'validation', 'testing', 'train', 'val', 'test'])
+
+/** Why a scan came back with nothing — drives the on-screen message and telemetry. */
+export interface FolderRejection {
+  /**
+   * Every top-level directory name found.
+   *
+   * For the error message only. Shown in the browser, never transmitted: a
+   * folder can be named after a company or an unreleased project.
+   */
+  found: string[]
+  /** The subset drawn from KNOWN_LAYOUT_NAMES — the part safe to report */
+  knownNames: string[]
+  /** How many directories were there, a shape hint carrying no names */
+  dirCount: number
+  /** The drop looks like a dataset archive root, not a single log directory */
+  looksLikeArchiveRoot: boolean
+}
+
+/** Outcome of a folder scan. `rejection` is set only when no segments were found. */
+export interface ScanResult {
+  segments: Map<string, Map<string, File>>
+  rejection?: FolderRejection
+}
+
+/** Build the diagnostic for a folder that yielded no dataset. */
+export function describeRejection(topLevelDirNames: string[]): FolderRejection {
+  const lower = topLevelDirNames.map((n) => n.toLowerCase())
+  return {
+    found: topLevelDirNames,
+    knownNames: lower.filter((n) => KNOWN_LAYOUT_NAMES.has(n)).sort(),
+    dirCount: topLevelDirNames.length,
+    looksLikeArchiveRoot: lower.some((n) => SPLIT_NAMES.has(n)),
+  }
+}
+
+
+/**
+ * Turn a failed scan into something the user can act on.
+ *
+ * The published datasets are tens to thousands of logs deep and hundreds of
+ * gigabytes wide, so "drop a dataset folder" is not guidance — the whole
+ * question is *which* folder. Each branch below names the specific mistake the
+ * directory listing points to.
+ */
+export function describeFolderProblem(rejection: FolderRejection | undefined): string {
+  const expected = 'Expected a log folder containing component directories like vehicle_pose/, lidar/, camera_image/ (Waymo), samples/ + sweeps/ (nuScenes), or sensors/ + calibration/ (Argoverse 2).'
+
+  if (!rejection || rejection.dirCount === 0) {
+    return `No folders found in that drop. Drop a dataset folder, not individual files. ${expected}`
+  }
+
+  if (rejection.looksLikeArchiveRoot) {
+    return (
+      `That looks like the dataset archive root — it contains ${rejection.found.slice(0, 4).join(', ')}` +
+      `${rejection.found.length > 4 ? ', …' : ''}. Go into one split (e.g. validation/), then drop a single log folder from inside it. ${expected}`
+    )
+  }
+
+  return (
+    `No dataset found in that folder. It contains ${rejection.found.slice(0, 5).join(', ')}` +
+    `${rejection.found.length > 5 ? `, and ${rejection.found.length - 5} more` : ''}. ${expected}`
+  )
+}
+
+// ---------------------------------------------------------------------------
 // FileSystemDirectoryHandle path (Chrome, Edge — best UX)
 // ---------------------------------------------------------------------------
 
@@ -26,7 +115,7 @@ import { getAllKnownComponents, detectDataset } from '../adapters/registry'
  */
 export async function scanDirectoryHandle(
   dirHandle: FileSystemDirectoryHandle,
-): Promise<Map<string, Map<string, File>>> {
+): Promise<ScanResult> {
   const segments = new Map<string, Map<string, File>>()
 
   // Check if this directory IS a component folder (user dropped waymo_data/)
@@ -63,15 +152,20 @@ export async function scanDirectoryHandle(
     }
   }
 
-  if (componentDirs.size === 0) return segments
+  if (componentDirs.size === 0) {
+    // Nothing recognisable at either level. Report what the user actually
+    // pointed at so the message can name the mismatch instead of restating
+    // the requirement.
+    return { segments, rejection: describeRejection([...childDirs.keys()]) }
+  }
 
   // Detect dataset type — nuScenes/AV2 require different scanning strategies
   const detectedManifest = detectDataset([...componentDirs.keys()])
   if (detectedManifest?.id === 'nuscenes') {
-    return scanNuScenesDirectoryHandle(componentDirs)
+    return { segments: await scanNuScenesDirectoryHandle(componentDirs) }
   }
   if (detectedManifest?.id === 'argoverse2') {
-    return scanAV2DirectoryHandle(resolvedDirHandle, componentDirs)
+    return { segments: await scanAV2DirectoryHandle(resolvedDirHandle, componentDirs) }
   }
 
   // Scan each component directory for .parquet files
@@ -91,7 +185,10 @@ export async function scanDirectoryHandle(
     }
   }
 
-  return segments
+  if (segments.size === 0) {
+    return { segments, rejection: describeRejection([...childDirs.keys()]) }
+  }
+  return { segments }
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +415,7 @@ async function scanSingleAV2Log(
  */
 export async function scanDataTransfer(
   items: DataTransferItemList,
-): Promise<Map<string, Map<string, File>>> {
+): Promise<ScanResult> {
   const segments = new Map<string, Map<string, File>>()
 
   // Prefer FileSystem Access API handles (Chrome/Edge)
@@ -335,11 +432,12 @@ export async function scanDataTransfer(
     // Fallback: webkitGetAsEntry
     const entry = item.webkitGetAsEntry?.()
     if (entry?.isDirectory) {
-      return scanFileSystemEntry(entry as FileSystemDirectoryEntry)
+      return { segments: await scanFileSystemEntry(entry as FileSystemDirectoryEntry) }
     }
   }
 
-  return segments
+  // No directory in the drop at all — loose files, or a browser without either API.
+  return { segments, rejection: describeRejection([]) }
 }
 
 /**
@@ -425,7 +523,7 @@ async function scanFileSystemEntry(
  * Open a native folder picker dialog and scan for segments.
  * Only works in Chrome/Edge (File System Access API).
  */
-export async function pickAndScanFolder(): Promise<Map<string, Map<string, File>>> {
+export async function pickAndScanFolder(): Promise<ScanResult> {
   const dirHandle = await (window as any).showDirectoryPicker()
   return scanDirectoryHandle(dirHandle)
 }

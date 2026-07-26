@@ -208,3 +208,28 @@ export function trackException(params: { description: string; feature: string; f
     fatal: params.fatal,
   })
 }
+
+/**
+ * A dropped or picked folder contained no recognisable dataset.
+ *
+ * This is the one failure the funnel could not see: it happens before any load
+ * attempt, so it looked identical to a visitor who simply never tried. Roughly
+ * 43% of visitors reach the page and never fire `dataset_load`, and until now
+ * there was no way to tell how many of them were trying and failing.
+ *
+ * Reports shape, not names. `knownNames` is restricted upstream to published
+ * dataset-layout directories; a folder named after a company or an unreleased
+ * project contributes only to the count. That keeps the answer to "what are
+ * people dropping?" available without collecting anything about who they are.
+ */
+export function trackFolderRejected(rejection: {
+  knownNames: string[]
+  dirCount: number
+  looksLikeArchiveRoot: boolean
+}) {
+  track('folder_rejected', {
+    dir_count: rejection.dirCount,
+    known_names: rejection.knownNames.join(',') || 'none',
+    archive_root: rejection.looksLikeArchiveRoot,
+  })
+}

@@ -7,11 +7,13 @@ import { colors, fonts, radius, gradients } from './theme'
 import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
+import { describeFolderProblem } from './utils/folderScan'
+import type { ScanResult } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
 import { PRESETS, isPresetUrl } from './utils/presets'
 import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
-import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut } from './utils/analytics'
+import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -58,6 +60,8 @@ function useSegmentDiscovery() {
 
 const SUPPORTED_URL_DATASETS = ['argoverse2', 'nuscenes', 'waymo'] as const
 type UrlDataset = typeof SUPPORTED_URL_DATASETS[number]
+
+
 
 
 /** Guard against double-invocation from React StrictMode */
@@ -828,9 +832,12 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
   const [urlError, setUrlError] = useState<string | null>(null)
   const loadFromUrl = useSceneStore((s) => s.actions.loadFromUrl)
 
-  const handleFiles = useCallback(async (segments: Map<string, Map<string, File>>) => {
+  const handleFiles = useCallback(async ({ segments, rejection }: ScanResult) => {
     if (segments.size === 0) {
-      setError('No dataset found. Drop a Waymo, nuScenes, or Argoverse 2 dataset folder.')
+      // Restating the requirement is what left an ex-Zoox PM asking "what folder
+      // do I drop?" twice against a 2 TB tree. Name what we saw instead.
+      if (rejection) trackFolderRejected(rejection)
+      setError(describeFolderProblem(rejection))
       setScanning(false)
       return
     }
