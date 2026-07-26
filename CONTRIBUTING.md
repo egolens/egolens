@@ -13,6 +13,20 @@ npm run dev
 
 The dev server runs at `http://localhost:5173`. Drop a dataset folder into the browser to load data.
 
+### Analytics while developing
+
+Running locally sends anonymous usage events, tagged `deployment: local`. That is
+deliberate — most real EgoLens usage happens on people's own machines, and
+Waymo's licence means its users have no other option, so silencing local runs
+would hide the majority of the picture. Nothing about your data or your machine
+is transmitted; see `src/utils/analyticsBootstrap.ts`.
+
+To opt out, create `.env.development.local` (already gitignored):
+
+```
+VITE_ANALYTICS_DISABLED=true
+```
+
 ## Project Structure
 
 ```

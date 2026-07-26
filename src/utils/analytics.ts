@@ -4,17 +4,21 @@
  */
 
 import { classifyDataHost } from './dataHost'
+import { getDeployment } from './analyticsBootstrap'
 
 declare global {
   interface Window {
     gtag?: (...args: unknown[]) => void
+    dataLayer?: unknown[]
   }
 }
 
 function track(event: string, params?: Record<string, string | number | boolean>) {
-  if (typeof window !== 'undefined' && window.gtag) {
-    window.gtag('event', event, params)
-  }
+  if (typeof window === 'undefined' || !window.gtag) return
+  // Every event carries where it came from. Without it, a clone running locally
+  // and the hosted build are one undifferentiated blob — and local runs are the
+  // larger half.
+  window.gtag('event', event, { ...params, deployment: getDeployment() })
 }
 
 /**

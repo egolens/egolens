@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
+import { installAnalytics } from './utils/analyticsBootstrap'
 import { installGlobalErrorHandlers } from './utils/errorReporting'
 import { installLoadTelemetry } from './utils/loadTelemetry'
 
@@ -11,6 +12,8 @@ document.documentElement.style.padding = '0'
 document.body.style.margin = '0'
 document.body.style.padding = '0'
 
+// Analytics first: the error handlers below report through it.
+installAnalytics()
 // Must run before render so a crash during the first paint is still reported.
 installGlobalErrorHandlers()
 // Subscribes to load status transitions; must be live before any load starts.
