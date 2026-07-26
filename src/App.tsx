@@ -89,6 +89,7 @@ function useUrlAutoLoad() {
       trackDatasetLoad(
         dataset,
         isPresetUrl(dataUrl) ? 'preset' : isShared ? 'url_shared' : 'url_direct',
+        baseUrl,
       )
       loadFromUrl(dataset, baseUrl, scene)
     } catch {
@@ -1415,7 +1416,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       const scene = urlSegment.trim() || undefined
       // The form is shared by presets and hand-entered URLs — the URL itself is
       // what separates "trying the demo" from "brought their own data".
-      trackDatasetLoad(urlDataset, isPresetUrl(urlInput) ? 'preset' : 'url_manual')
+      trackDatasetLoad(urlDataset, isPresetUrl(urlInput) ? 'preset' : 'url_manual', baseUrl)
       await loadFromUrl(urlDataset, baseUrl, scene)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

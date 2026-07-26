@@ -3,6 +3,8 @@
  * Calls gtag() if available, otherwise silently no-ops.
  */
 
+import { classifyDataHost } from './dataHost'
+
 declare global {
   interface Window {
     gtag?: (...args: unknown[]) => void
@@ -35,9 +37,80 @@ export type DataSource =
   /** Local folder, dropped or picked */
   | 'local'
 
-/** User loaded a dataset */
-export function trackDatasetLoad(dataset: string, source: DataSource) {
-  track('dataset_load', { dataset, source })
+/**
+ * A load attempt and everything the outcome events need to describe it.
+ *
+ * Success and failure are reported by a store subscription that has no idea how
+ * the load was started, so the origin is parked here rather than threaded
+ * through every call site. Only one load runs at a time, so a single slot is
+ * enough.
+ */
+let pendingLoad: { dataset: string; source: DataSource; startedAt: number } | null = null
+
+/** User started loading a dataset. Always paired with a success or error event. */
+export function trackDatasetLoad(dataset: string, source: DataSource, dataUrl?: string | null) {
+  pendingLoad = { dataset, source, startedAt: performance.now() }
+  track('dataset_load', {
+    dataset,
+    source,
+    data_host_kind: classifyDataHost(dataUrl),
+  })
+}
+
+/**
+ * The scene became viewable.
+ *
+ * `load_ms` measures the attempt, not the page: it is how long this data source
+ * took to open, which is the number that says whether someone's own bucket is
+ * usable with EgoLens.
+ */
+export function trackDatasetLoadSuccess(frameCount: number) {
+  if (!pendingLoad) return
+  track('dataset_load_success', {
+    dataset: pendingLoad.dataset,
+    source: pendingLoad.source,
+    load_ms: Math.round(performance.now() - pendingLoad.startedAt),
+    frame_count: frameCount,
+  })
+  pendingLoad = null
+}
+
+/**
+ * The load failed.
+ *
+ * `error_stage` is the pipeline step it died in, which separates "your URL is
+ * wrong" from "your server refuses range requests" from "the data parsed but
+ * the frames would not decode" — three failures that need three different fixes
+ * and are indistinguishable in the message alone.
+ */
+export function trackDatasetLoadError(errorCode: string, errorStage: string) {
+  track('dataset_load_error', {
+    dataset: pendingLoad?.dataset ?? 'unknown',
+    source: pendingLoad?.source ?? 'unknown',
+    error_code: errorCode,
+    error_stage: errorStage,
+    load_ms: pendingLoad ? Math.round(performance.now() - pendingLoad.startedAt) : 0,
+  })
+  pendingLoad = null
+}
+
+/**
+ * First frame painted, timed from navigation start rather than from the load
+ * attempt — bundle download, worker startup and all.
+ *
+ * This is the wait the visitor actually experiences and the one that predicts
+ * whether they stay, which `load_ms` alone would understate.
+ */
+export function trackFirstFrameRender(dataset: string) {
+  track('first_frame_render', {
+    dataset,
+    ttfr_ms: Math.round(performance.now()),
+  })
+}
+
+/** Test seam — clears the in-flight load so cases do not leak into each other. */
+export function resetPendingLoadForTests() {
+  pendingLoad = null
 }
 
 /** User clicked Share View */

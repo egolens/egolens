@@ -34,6 +34,7 @@ import { WorkerPool } from '../workers/workerPool'
 import type { SegmentMeta } from '../types/waymo'
 import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
+import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
 import { getManifest, setManifest } from '../adapters/registry'
 import { waymoManifest } from '../adapters/waymo/manifest'
 import { loadWaymoMetadata } from '../adapters/waymo/metadata'
@@ -180,6 +181,8 @@ export interface SceneState {
   // Loading
   status: LoadStatus
   error: string | null
+  /** Classified cause of the last failure — drives telemetry, not the message */
+  errorCode: DataLoadErrorCode | null
   availableComponents: string[]
   loadProgress: number
   /** Current loading step for UI feedback */
@@ -547,9 +550,31 @@ function syncCameraCachedFrames(set: (partial: Partial<SceneState>) => void) {
 // Store
 // ---------------------------------------------------------------------------
 
+
+/**
+ * Put the store into its failed state.
+ *
+ * Every load path funnels through here so a failure always carries a classified
+ * code alongside the human message. Telemetry reads the code; adding a new load
+ * path cannot silently skip it the way seven hand-written catch blocks could.
+ */
+function failLoad(
+  set: (partial: Partial<SceneState>) => void,
+  error: unknown,
+  context: string,
+): void {
+  console.error(`[${context}] Error:`, error)
+  set({
+    status: 'error',
+    error: error instanceof Error ? error.message : String(error),
+    errorCode: error instanceof DataLoadError ? error.code : 'UNKNOWN',
+  })
+}
+
 export const useSceneStore = create<SceneState>((set, get) => ({
   status: 'idle',
   error: null,
+  errorCode: null,
   availableComponents: [],
   loadProgress: 0,
   loadStep: 'opening' as LoadStep,
@@ -663,11 +688,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }
         })
       } catch (e) {
-        console.error('[loadDataset] Error:', e)
-        set({
-          status: 'error',
-          error: e instanceof Error ? e.message : String(e),
-        })
+        failLoad(set, e, 'loadDataset')
       }
     },
 
@@ -1115,11 +1136,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           // 5. Load scene (metadata → batches → workers → pipeline)
           await get().actions.selectSegment(db.logId)
         } catch (e) {
-          console.error('[loadFromUrl] AV2 error:', e)
-          set({
-            status: 'error',
-            error: e instanceof Error ? e.message : String(e),
-          })
+          failLoad(set, e, 'loadFromUrl:AV2')
         }
         return
       }
@@ -1225,11 +1242,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             await get().actions.selectSegment(targetScene)
           }
         } catch (e) {
-          console.error('[loadFromUrl] nuScenes error:', e)
-          set({
-            status: 'error',
-            error: e instanceof Error ? e.message : String(e),
-          })
+          failLoad(set, e, 'loadFromUrl:nuScenes')
         }
         return
       }
@@ -1278,20 +1291,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           set({ availableSegments: segmentIds, loadProgress: 0.15 })
           await get().actions.selectSegment(segmentIds[0])
         } catch (e) {
-          console.error('[loadFromUrl] Waymo error:', e)
-          set({
-            status: 'error',
-            error: e instanceof Error ? e.message : String(e),
-          })
+          failLoad(set, e, 'loadFromUrl:Waymo')
         }
         return
       }
 
       // Unknown dataset
-      set({
-        status: 'error',
-        error: `URL loading for "${dataset}" is not supported.`,
-      })
+      failLoad(set, new DataLoadError(`URL loading for "${dataset}" is not supported.`, 'UNKNOWN'), 'loadFromUrl')
     },
 
     reset: () => {
@@ -1620,11 +1626,7 @@ async function loadNuScenesScene(
     // 6. Load first frames, display, and prefetch remaining
     await runPostWorkerPipeline(set, get, 'nuscenes')
   } catch (e) {
-    console.error('[loadNuScenesScene] Error:', e)
-    set({
-      status: 'error',
-      error: e instanceof Error ? e.message : String(e),
-    })
+    failLoad(set, e, 'loadNuScenesScene')
   }
 }
 
@@ -1836,11 +1838,7 @@ async function loadAV2Scene(
     // 5. Load first frames, display, and prefetch remaining
     await runPostWorkerPipeline(set, get, 'av2')
   } catch (e) {
-    console.error('[loadAV2Scene] Error:', e)
-    set({
-      status: 'error',
-      error: e instanceof Error ? e.message : String(e),
-    })
+    failLoad(set, e, 'loadAV2Scene')
   }
 }
 
