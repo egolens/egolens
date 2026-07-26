@@ -16,7 +16,7 @@ authors:
 version: 1.0.0
 date-released: 2026-05-30
 license: MIT
-url: "https://egolens.github.io/egolens"
+url: "https://egolens.org"
 repository-code: "https://github.com/egolens/egolens"
 keywords:
   - autonomous driving

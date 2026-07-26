@@ -70,8 +70,10 @@ function serveWaymoData(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
-  base: command === 'serve' ? '/' : '/egolens/',
+export default defineConfig(() => ({
+  // Served from the apex custom domain (public/CNAME), so assets live at the root.
+  // GitHub Pages 301s egolens.github.io/egolens/* → egolens.org/*, keeping old links alive.
+  base: '/',
   plugins: [react(), serveWaymoData()],
   resolve: {
     alias: {

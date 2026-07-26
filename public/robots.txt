@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# Embed mode renders the same app without chrome — no separate content to index.
+Disallow: /*embed=true
+
+Sitemap: https://egolens.org/sitemap.xml
