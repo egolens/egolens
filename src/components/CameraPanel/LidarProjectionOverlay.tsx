@@ -4,9 +4,10 @@
  *
  * Reads LiDAR points from the current frame's sensorClouds, projects them
  * into the camera's image plane using calibration data, and draws colored
- * dots. Color always matches the currently selected colormapMode in the 3D
- * viewer (intensity/range/elongation/distance/segment/panoptic) by reusing
- * the same colormap stops, attribute offsets, and normalization ranges.
+ * dots. Color matches the currently selected colormapMode in the 3D viewer
+ * (intensity/range/elongation/distance/segment/panoptic) by reusing the same
+ * colormap stops, attribute offsets, and normalization ranges. 'camera' is the
+ * one mode that can't carry over — see the fallback in draw().
  *
  * Imperative draw pattern (same as BBoxOverlayCanvas): zero DOM churn,
  * updates via Zustand subscribe + ResizeObserver.
@@ -77,7 +78,11 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
     const frame = state.currentFrame
     if (!frame) return
 
-    const cmap = state.colormapMode
+    // 'camera' colors each point by the camera pixel it projects into, which is
+    // resolved on the GPU and would render the dots invisible against the very
+    // image they are drawn over. Fall back to distance — computed from xyz, so
+    // it works for every dataset regardless of which attributes it ships.
+    const cmap: ColormapMode = state.colormapMode === 'camera' ? 'distance' : state.colormapMode
     const visibleSensors = state.visibleSensors
     const manifest = getManifest()
     const stride = manifest.pointStride

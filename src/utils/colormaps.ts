@@ -221,9 +221,13 @@ export function computePointColor(
   const px = positions[src]
   const py = positions[src + 1]
   const pz = positions[src + 2]
+  // Negative offsets are sentinels for modes whose color comes from a side array
+  // (segment/panoptic handled above, camera resolved by the GPU material), except
+  // -1 which means "compute from xyz". Without the >= 0 guard a sentinel reads
+  // backwards into the previous point's data and produces garbage colors.
   const raw = attrOff === -1
     ? Math.sqrt(px * px + py * py + pz * pz)
-    : (attrOff < stride ? positions[src + attrOff] : 0)
+    : (attrOff >= 0 && attrOff < stride ? positions[src + attrOff] : 0)
   const t = Math.max(0, Math.min(1, (raw - attrMin) / attrSpan))
   return colormapColor(stops, t)
 }

@@ -299,7 +299,7 @@ describe('computePointColor', () => {
 
   it('returns values in [0, 1] range for all modes', () => {
     const pos = makePositions(5, 5, 5, 0.7, 30, 0.4)
-    for (const mode of ['intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic'] as const) {
+    for (const mode of ['intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic', 'camera'] as const) {
       const stops = COLORMAP_STOPS[mode]
       const off = ATTR_OFFSET[mode]
       const [min, max] = ATTR_RANGE[mode]
@@ -344,6 +344,30 @@ describe('computePointColor', () => {
     expect(r).toBeCloseTo(LIDARSEG_PALETTE[17][0])
     expect(g).toBeCloseTo(LIDARSEG_PALETTE[17][1])
     expect(b).toBeCloseTo(LIDARSEG_PALETTE[17][2])
+  })
+
+  // ATTR_OFFSET.camera is a -4 sentinel meaning "color comes from the camera
+  // projection, not the point buffer". It used to slip past the `attrOff < stride`
+  // bounds check and read positions[src - 4] — the previous point's data — which
+  // for real ego-frame coordinates clamped to t=1 and painted the LiDAR→Camera
+  // overlay near-white over the whole panel.
+  it('camera mode: does not read backwards into the previous point', () => {
+    const twoPoints = new Float32Array([
+      1, 1, 40, 0.5, 20, 0.3, // point 0 — z sits exactly where the stale read landed
+      2, 1, 0, 0.5, 20, 0.3,  // point 1
+    ])
+    const stops = COLORMAP_STOPS.camera
+    const [min, max] = ATTR_RANGE.camera
+    const rgb = computePointColor('camera', 1, twoPoints, stride, stops, ATTR_OFFSET.camera, min, max - min)
+    expect(rgb).toEqual(stops[0])
+    expect(rgb).not.toEqual(stops[stops.length - 1]) // the near-white whiteout
+  })
+
+  it('camera mode: does not throw on the first point', () => {
+    const pos = makePositions(1, 2, 3)
+    expect(() =>
+      computePointColor('camera', 0, pos, stride, COLORMAP_STOPS.camera, ATTR_OFFSET.camera, 0, 1),
+    ).not.toThrow()
   })
 })
 
