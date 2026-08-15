@@ -28,6 +28,7 @@ The hosted build at `https://egolens.org` is embeddable as-is — no need to run
 | `frame` | number | `0` | Initial frame index (0-based) |
 | `t0` / `t1` | int64 string | — | Playback time window (sensor timestamps, ns or µs). Auto-seeks to the window start and loops playback inside it; `t0` wins over `frame` |
 | `cameras` | `all` \| `false` | follows `controls` | Camera strip visibility. `false` also skips loading camera images entirely when nothing else needs them — the largest allocation in a scene |
+| `camera` | string | — | Initial camera POV by name: the panel label (`FRONT`, `REAR LEFT`), the dataset's own channel name (`ring_front_center`, `CAM_FRONT`), or an id. Case, spaces, underscores and hyphens are ignored. Share links write the numeric `cam=` instead, and `cam` wins when both are present |
 | `autoplay` | `true` | `false` | Auto-start playback after first frame loads |
 | `colormap` | string | `intensity` | Initial colormap mode |
 | `bgcolor` | hex | — | Canvas background color without `#` (e.g., `000000`, `1a1f35`) |

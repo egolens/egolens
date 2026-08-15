@@ -13,6 +13,7 @@ import { normalizeBaseUrl } from './utils/urlValidation'
 import { PRESETS, isPresetUrl } from './utils/presets'
 import { buildShareUrl, parseViewParams, parseCamerasParam, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
+import { resolveCameraParam } from './utils/cameraParam'
 import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
@@ -204,6 +205,20 @@ function useEmbedInitialState(embedParams: EmbedParams) {
     // Apply colormap
     if (embedParams.colormap) {
       actions.setColormapMode(embedParams.colormap)
+    }
+
+    // Apply `camera=<name>` — the human-writable spelling of `cam=<id>`.
+    // Resolved here rather than at parse time because it names a camera in
+    // the active dataset's vocabulary, and no dataset exists when the URL is
+    // parsed. `cam` wins: it is what Share links write, so a link carrying
+    // both is a share of a session that already had a POV.
+    if (embedParams.camera && parseViewParams(getInitialSearch() ?? undefined).activeCam == null) {
+      const id = resolveCameraParam(embedParams.camera, getManifest())
+      if (id === null) {
+        console.warn(`[embed] camera="${embedParams.camera}" matches no camera in this dataset`)
+      } else {
+        actions.setActiveCam(id)
+      }
     }
 
     // Apply autoplay. Explicit play(), not togglePlayback(): with no view

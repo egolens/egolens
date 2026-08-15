@@ -139,6 +139,10 @@ export const argoverse2Manifest: DatasetManifest = {
     [CAM.RING_REAR_RIGHT]: colors.sensorSideR,
   },
 
+  // Ring camera names as AV2 writes them, so `camera=ring_front_center` works
+  cameraAliases: Object.fromEntries(
+    AV2_RING_CAMERA_NAMES.map((name) => [name, AV2_SENSOR_NAME_TO_ID[name]]),
+  ),
   cameraPovLabels: {
     [CAM.RING_FRONT_CENTER]: 'FC',
     [CAM.RING_FRONT_LEFT]: 'FL',
