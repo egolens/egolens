@@ -627,6 +627,120 @@ function failLoad(
   })
 }
 
+/**
+ * Load a scanned local folder, dispatching on the sentinel key the scanner
+ * put in the segment map.
+ *
+ * Split out of the `loadFromFiles` action so the action can funnel every
+ * failure through `failLoad` with one catch rather than one per branch.
+ */
+async function loadLocalSegments(
+  segments: Map<string, Map<string, File>>,
+  set: (partial: Partial<SceneState>) => void,
+  get: () => SceneState,
+): Promise<void> {
+  // Check for nuScenes sentinel key (produced by folder scanner)
+  if (segments.has('__nuscenes__')) {
+    const allFiles = segments.get('__nuscenes__')!
+
+    // Separate JSON metadata from sample data files
+    const jsonFiles = new Map<string, File>()
+    const sampleFiles = new Map<string, File>()
+    for (const [path, file] of allFiles) {
+      if (path.endsWith('.json')) {
+        jsonFiles.set(path, file)
+      } else {
+        sampleFiles.set(path, file)
+      }
+    }
+
+    // Full-split metadata dies on V8's ~512MB string limit before
+    // JSON.parse even starts — fail with directions, not a RangeError.
+    const oversized = [...jsonFiles.entries()].find(([, f]) => f.size > NUSCENES_TABLE_SIZE_LIMIT)
+    if (oversized) {
+      failLoad(set, new Error(
+        `${oversized[0]} is ${(oversized[1].size / 1e9).toFixed(1)}GB — full-split nuScenes metadata `
+        + 'is too large for a browser to parse. Shard it per scene first with '
+        + 'scripts/shard_nuscenes.py (see docs/NUSCENES_FULL_HOSTING.md), then serve '
+        + 'the output folder and load it by URL.',
+      ), 'loadFromFiles:nuScenesOversize')
+      return
+    }
+
+    // Initialize nuScenes state (local files → single-directory mode)
+    internal.datasetId = 'nuscenes'
+    internal.nuScenesSampleFiles = sampleFiles
+    internal.nuScenesDiscoveredScenes = null
+    setManifest(nuScenesManifest)
+
+    // Build one-time database from JSON tables
+    set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
+    internal.nuScenesDb = await buildNuScenesDatabase(jsonFiles)
+
+    // Discover scenes as available "segments"
+    const sceneNames = internal.nuScenesDb.scenes.map(s => s.name).sort()
+    set({ availableSegments: sceneNames, loadProgress: 0.1 })
+
+    // Auto-select first scene
+    if (sceneNames.length > 0) {
+      await get().actions.selectSegment(sceneNames[0])
+    }
+    return
+  }
+
+  // Check for Argoverse 2 sentinel key (produced by folder scanner)
+  if (segments.has('__argoverse2__')) {
+    const allFiles = segments.get('__argoverse2__')!
+
+    // Extract log ID from sentinel file
+    const logIdFile = allFiles.get('__logId__')
+    const logId = logIdFile?.name || 'av2_log'
+
+    // Remove sentinel entries
+    const sampleFiles = new Map<string, File>()
+    for (const [path, file] of allFiles) {
+      if (path !== '__logId__') {
+        sampleFiles.set(path, file)
+      }
+    }
+
+    // Initialize AV2 state
+    internal.datasetId = 'argoverse2'
+    internal.av2SampleFiles = sampleFiles
+    setManifest(argoverse2Manifest)
+
+    // Build log database from Feather files
+    set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
+    internal.av2Db = await buildAV2LogDatabase(sampleFiles, logId)
+
+    // AV2 has a single "scene" per log — use log ID as segment name
+    set({ availableSegments: [logId], loadProgress: 0.1 })
+
+    // Auto-select the single log
+    await get().actions.selectSegment(logId)
+    return
+  }
+
+  // Waymo path — store file references for later use by selectSegment
+  internal.datasetId = 'waymo'
+  internal.nuScenesDb = null
+  internal.nuScenesSampleFiles = null
+  internal.nuScenesDiscoveredScenes = null
+  internal.av2Db = null
+  internal.av2SampleFiles = null
+  internal.av2DiscoveredLogs = null
+  internal.waymoBaseUrl = null
+  setManifest(waymoManifest)
+  internal.filesBySegment = segments
+  const segmentIds = [...segments.keys()].sort()
+  set({ availableSegments: segmentIds })
+
+  // Auto-select if only one segment, otherwise select first
+  if (segmentIds.length > 0) {
+    await get().actions.selectSegment(segmentIds[0])
+  }
+}
+
 export const useSceneStore = create<SceneState>((set, get) => ({
   status: 'idle',
   error: null,
@@ -1104,105 +1218,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const datasetHint = segments.has('__nuscenes__') ? 'nuscenes' : segments.has('__argoverse2__') ? 'argoverse2' : 'waymo'
       trackDatasetLoad(datasetHint, 'local')
 
-      // Check for nuScenes sentinel key (produced by folder scanner)
-      if (segments.has('__nuscenes__')) {
-        const allFiles = segments.get('__nuscenes__')!
-
-        // Separate JSON metadata from sample data files
-        const jsonFiles = new Map<string, File>()
-        const sampleFiles = new Map<string, File>()
-        for (const [path, file] of allFiles) {
-          if (path.endsWith('.json')) {
-            jsonFiles.set(path, file)
-          } else {
-            sampleFiles.set(path, file)
-          }
-        }
-
-        // Full-split metadata dies on V8's ~512MB string limit before
-        // JSON.parse even starts — fail with directions, not a RangeError.
-        const oversized = [...jsonFiles.entries()].find(([, f]) => f.size > NUSCENES_TABLE_SIZE_LIMIT)
-        if (oversized) {
-          failLoad(set, new Error(
-            `${oversized[0]} is ${(oversized[1].size / 1e9).toFixed(1)}GB — full-split nuScenes metadata `
-            + 'is too large for a browser to parse. Shard it per scene first with '
-            + 'scripts/shard_nuscenes.py (see docs/NUSCENES_FULL_HOSTING.md), then serve '
-            + 'the output folder and load it by URL.',
-          ), 'loadFromFiles:nuScenesOversize')
-          return
-        }
-
-        // Initialize nuScenes state (local files → single-directory mode)
-        internal.datasetId = 'nuscenes'
-        internal.nuScenesSampleFiles = sampleFiles
-        internal.nuScenesDiscoveredScenes = null
-        setManifest(nuScenesManifest)
-
-        // Build one-time database from JSON tables
-        set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
-        internal.nuScenesDb = await buildNuScenesDatabase(jsonFiles)
-
-        // Discover scenes as available "segments"
-        const sceneNames = internal.nuScenesDb.scenes.map(s => s.name).sort()
-        set({ availableSegments: sceneNames, loadProgress: 0.1 })
-
-        // Auto-select first scene
-        if (sceneNames.length > 0) {
-          await get().actions.selectSegment(sceneNames[0])
-        }
-        return
-      }
-
-      // Check for Argoverse 2 sentinel key (produced by folder scanner)
-      if (segments.has('__argoverse2__')) {
-        const allFiles = segments.get('__argoverse2__')!
-
-        // Extract log ID from sentinel file
-        const logIdFile = allFiles.get('__logId__')
-        const logId = logIdFile?.name || 'av2_log'
-
-        // Remove sentinel entries
-        const sampleFiles = new Map<string, File>()
-        for (const [path, file] of allFiles) {
-          if (path !== '__logId__') {
-            sampleFiles.set(path, file)
-          }
-        }
-
-        // Initialize AV2 state
-        internal.datasetId = 'argoverse2'
-        internal.av2SampleFiles = sampleFiles
-        setManifest(argoverse2Manifest)
-
-        // Build log database from Feather files
-        set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
-        internal.av2Db = await buildAV2LogDatabase(sampleFiles, logId)
-
-        // AV2 has a single "scene" per log — use log ID as segment name
-        set({ availableSegments: [logId], loadProgress: 0.1 })
-
-        // Auto-select the single log
-        await get().actions.selectSegment(logId)
-        return
-      }
-
-      // Waymo path — store file references for later use by selectSegment
-      internal.datasetId = 'waymo'
-      internal.nuScenesDb = null
-      internal.nuScenesSampleFiles = null
-      internal.nuScenesDiscoveredScenes = null
-      internal.av2Db = null
-      internal.av2SampleFiles = null
-      internal.av2DiscoveredLogs = null
-      internal.waymoBaseUrl = null
-      setManifest(waymoManifest)
-      internal.filesBySegment = segments
-      const segmentIds = [...segments.keys()].sort()
-      set({ availableSegments: segmentIds })
-
-      // Auto-select if only one segment, otherwise select first
-      if (segmentIds.length > 0) {
-        await get().actions.selectSegment(segmentIds[0])
+      // Local loading sets status to "loading" before it parses anything, which
+      // unmounts the drop zone (App renders it only while status is "idle").
+      // Without this catch a parse failure left the store in "loading" for good:
+      // no error screen, no drop zone, just the skeleton. Every other load path
+      // already funnels through failLoad.
+      try {
+        await loadLocalSegments(segments, set, get)
+      } catch (e) {
+        failLoad(set, e, 'loadFromFiles')
       }
     },
 

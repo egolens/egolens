@@ -251,6 +251,42 @@ describe('nuScenes store integration', () => {
     }, 10000)
   })
 
+  describe('a failed local load surfaces as an error, not a hung load', () => {
+    // The drop zone is only rendered while status is 'idle', and local loading
+    // flips status to 'loading' before it parses anything. A throw that escaped
+    // left the store in 'loading' with no error and no drop zone — a skeleton
+    // the user could not get out of without reloading the page.
+    const corrupt = (file: string) => {
+      const segments = createSyntheticNuScenesSegments()
+      segments.get('__nuscenes__')!.set(file, new File(['{ not json'], file, { type: 'application/json' }))
+      return segments
+    }
+
+    it('lands in error, never in loading, when a metadata table is unparseable', async () => {
+      await expect(actions().loadFromFiles(corrupt('scene.json'))).resolves.toBeUndefined()
+
+      expect(state().status).toBe('error')
+      expect(state().error).toBeTruthy()
+    }, 10000)
+
+    it('reports the failure with a classified code so telemetry can read it', async () => {
+      await actions().loadFromFiles(corrupt('sample_data.json'))
+
+      expect(state().status).toBe('error')
+      expect(state().errorCode).toBeTruthy()
+    }, 10000)
+
+    it('leaves the store recoverable — a good folder still loads afterwards', async () => {
+      await actions().loadFromFiles(corrupt('scene.json'))
+      expect(state().status).toBe('error')
+
+      await actions().loadFromFiles(createSyntheticNuScenesSegments())
+
+      expect(state().status).toBe('ready')
+      expect(state().availableSegments).toEqual(['scene-0001', 'scene-0002'])
+    }, 15000)
+  })
+
   describe('first frame (auto-loaded)', () => {
     it('starts at frame 0 with point cloud data', async () => {
       const segments = createSyntheticNuScenesSegments()
