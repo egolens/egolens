@@ -183,6 +183,13 @@ export interface DatasetManifest {
   cameraColors: Record<number, string>
   /** POV label shown when a camera is active (cameraId → short name) */
   cameraPovLabels: Record<number, string>
+  /**
+   * Dataset-native camera names (e.g. `ring_front_center`, `CAM_FRONT`) →
+   * camera id, so a URL can name a camera the way the dataset does rather
+   * than by our numeric id. Optional: datasets whose only identifier is the
+   * display label (Waymo) omit it and are matched on labels alone.
+   */
+  cameraAliases?: Record<string, number>
 
   // -- Perception capabilities (gated by runtime data availability) --------
 

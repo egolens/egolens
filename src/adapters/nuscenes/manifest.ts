@@ -136,6 +136,10 @@ export const nuScenesManifest: DatasetManifest = {
     [CAM.BACK_RIGHT]: colors.camSideRight,
   },
 
+  // nuScenes channel names, so `camera=CAM_FRONT` works
+  cameraAliases: Object.fromEntries(
+    Object.entries(NUSCENES_CHANNEL_TO_ID).filter(([name]) => name.startsWith('CAM_')),
+  ),
   cameraPovLabels: {
     [CAM.FRONT]: 'FRONT',
     [CAM.FRONT_LEFT]: 'FL',
