@@ -2368,39 +2368,100 @@ async function runPostWorkerPipeline(
   // Determine target frame from Share URL (if any)
   const initSearch = getInitialSearch()
   const viewParams = initSearch ? parseViewParams(initSearch) : {}
-  const targetFrame = viewParams.frame != null
-    ? Math.min(viewParams.frame, internal.timestamps.length - 1)
-    : 0
 
-  // Compute which batch contains the target frame
-  const framesPerBatch = internal.numBatches > 0
-    ? Math.ceil(internal.timestamps.length / internal.numBatches)
-    : internal.timestamps.length
-  const targetBatch = Math.floor(targetFrame / framesPerBatch)
+  // A t0/t1 link says "watch this interval", so its first frame — not frame
+  // 0 — is what the first paint should wait for.
+  const linkRange = viewParams.t0 && viewParams.t1
+    ? resolveWindowToFrames(internal.timestamps, viewParams.t0, viewParams.t1)
+    : null
 
-  // 1. Load batches: always batch 0 + target batch (+ neighbors)
+  const targetFrame = linkRange
+    ? linkRange.f0
+    : viewParams.frame != null
+      ? Math.min(viewParams.frame, internal.timestamps.length - 1)
+      : 0
+
+  /** Which batch of `numBatches` holds a frame (lidar and camera split differently). */
+  const batchIndexOf = (frame: number, numBatches: number): number => {
+    if (numBatches <= 0) return 0
+    const perBatch = Math.ceil(internal.timestamps.length / numBatches)
+    if (perBatch <= 0) return 0
+    return Math.min(Math.floor(frame / perBatch), numBatches - 1)
+  }
+
+  const targetBatch = batchIndexOf(targetFrame, internal.numBatches)
+  const camTargetBatch = batchIndexOf(targetFrame, internal.cameraNumBatches)
+
+  // Past a few batches, prioritising the range is the same as prioritising
+  // everything — so a wide range keeps the ordinary behaviour.
+  const RANGE_BATCH_CAP = 3
+  const rangeLastBatch = linkRange ? batchIndexOf(linkRange.f1, internal.numBatches) : targetBatch
+  const rangeIsNarrow = linkRange != null && rangeLastBatch - targetBatch + 1 <= RANGE_BATCH_CAP
+
   set({ loadStep: 'first-frame' as LoadStep })
   const rgT0 = performance.now()
   const firstFramePromises: Promise<void>[] = []
+  /** Queued right after the critical path — ordering only, never awaited. */
+  const queueAfterFirstPaint: (() => void)[] = []
 
   if (internal.workerPool?.isReady()) {
-    const batchesToLoad = new Set([0, targetBatch])
-    // Also load neighbor batch for smoother playback from target
-    if (targetBatch > 0) batchesToLoad.add(targetBatch - 1)
-    if (targetBatch + 1 < internal.numBatches) batchesToLoad.add(targetBatch + 1)
-    for (const b of batchesToLoad) {
-      firstFramePromises.push(loadAndCacheRowGroup(b, set))
+    if (linkRange) {
+      // Critical path is the range's own first batch. Batch 0 is dead weight
+      // for a link that points elsewhere, so it drops to the background —
+      // this makes the first paint faster than the no-range case, not slower.
+      firstFramePromises.push(loadAndCacheRowGroup(targetBatch, set))
+      const rest: number[] = []
+      if (rangeIsNarrow) {
+        for (let b = targetBatch + 1; b <= rangeLastBatch; b++) rest.push(b)
+      } else if (targetBatch + 1 < internal.numBatches) {
+        rest.push(targetBatch + 1)
+      }
+      rest.push(0)
+      queueAfterFirstPaint.push(() => {
+        for (const b of rest) {
+          if (b >= 0 && b < internal.numBatches && !internal.loadedRowGroups.has(b)) {
+            void loadAndCacheRowGroup(b, set).catch(() => {})
+          }
+        }
+      })
+    } else {
+      const batchesToLoad = new Set([0, targetBatch])
+      // Also load neighbor batch for smoother playback from target
+      if (targetBatch > 0) batchesToLoad.add(targetBatch - 1)
+      if (targetBatch + 1 < internal.numBatches) batchesToLoad.add(targetBatch + 1)
+      for (const b of batchesToLoad) {
+        firstFramePromises.push(loadAndCacheRowGroup(b, set))
+      }
     }
   } else if (mainThreadFallback) {
     firstFramePromises.push(mainThreadFallback())
   }
 
   if (internal.cameraPool?.isReady()) {
-    const camBatchesToLoad = new Set([0, targetBatch])
-    if (targetBatch > 0) camBatchesToLoad.add(targetBatch - 1)
-    if (targetBatch + 1 < internal.cameraNumBatches) camBatchesToLoad.add(targetBatch + 1)
-    for (const b of camBatchesToLoad) {
-      firstFramePromises.push(loadAndCacheCameraRowGroup(b, set))
+    if (linkRange) {
+      firstFramePromises.push(loadAndCacheCameraRowGroup(camTargetBatch, set))
+      const camRest: number[] = []
+      const camLast = batchIndexOf(linkRange.f1, internal.cameraNumBatches)
+      if (rangeIsNarrow) {
+        for (let b = camTargetBatch + 1; b <= camLast; b++) camRest.push(b)
+      } else if (camTargetBatch + 1 < internal.cameraNumBatches) {
+        camRest.push(camTargetBatch + 1)
+      }
+      camRest.push(0)
+      queueAfterFirstPaint.push(() => {
+        for (const b of camRest) {
+          if (b >= 0 && b < internal.cameraNumBatches) {
+            void loadAndCacheCameraRowGroup(b, set).catch(() => {})
+          }
+        }
+      })
+    } else {
+      const camBatchesToLoad = new Set([0, camTargetBatch])
+      if (camTargetBatch > 0) camBatchesToLoad.add(camTargetBatch - 1)
+      if (camTargetBatch + 1 < internal.cameraNumBatches) camBatchesToLoad.add(camTargetBatch + 1)
+      for (const b of camBatchesToLoad) {
+        firstFramePromises.push(loadAndCacheCameraRowGroup(b, set))
+      }
     }
   }
 
@@ -2410,8 +2471,15 @@ async function runPostWorkerPipeline(
     note: `${rgMs.toFixed(0)}ms, target frame ${targetFrame}`,
   })
 
+  // Queue the rest of the range (then batch 0) before the general prefetch,
+  // so they sit ahead of it in the pool's FIFO queue.
+  for (const queue of queueAfterFirstPaint) queue()
+
   // 2. Show target frame (or frame 0 as fallback)
   const displayFrame = internal.frameCache.has(targetFrame) ? targetFrame : 0
+  // If neither is cached yet (a failed target batch), let the frame land as
+  // soon as it arrives rather than showing nothing.
+  if (!internal.frameCache.has(displayFrame)) internal.pendingSeekFrame = targetFrame
   const firstFrame = internal.frameCache.get(displayFrame)
   if (firstFrame) {
     const camData = internal.cameraImageCache.get(displayFrame)
