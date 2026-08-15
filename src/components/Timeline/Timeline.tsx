@@ -244,7 +244,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const showCameraBuffer = cameraCachedFrames.length > 0 && cameraCachedFrames.length < cachedFrames.length
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '13px' }}>
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '14px', fontSize: '13px' }}>
       <button
         onClick={() => actions.togglePlayback()}
         disabled={disabled || cachedFrames.length === 0}
@@ -504,20 +504,24 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
         )}
       </div>
 
-      {/* Fixed-width slot whether or not a range is active — the chip
-          appearing mid-drag must not reflow the track under the cursor */}
-      {!minimal && (
-        <span style={{ width: '64px', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
-          {playbackWindow && (
-            <button
-              onClick={clearWindow}
-              title="Reset playback range — play the full recording"
-              style={windowChipButtonStyle}
-            >
-              range <span aria-hidden="true">✕</span>
-            </button>
-          )}
-        </span>
+      {/* Floating overlay — takes no layout space, so its appearance can
+          never reflow the track under a mid-drag cursor, and costs nothing
+          when idle */}
+      {playbackWindow && !minimal && (
+        <button
+          onClick={clearWindow}
+          title="Reset playback range — play the full recording"
+          style={{
+            ...windowChipButtonStyle,
+            position: 'absolute',
+            right: 0,
+            top: '-26px',
+            backgroundColor: 'rgba(15, 19, 38, 0.85)',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          range <span aria-hidden="true">✕</span>
+        </button>
       )}
 
       <span style={{
