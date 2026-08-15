@@ -1601,6 +1601,60 @@ function CameraStripSkeleton() {
 
 // ShortcutHints removed — ? key now toggles Keys popup in LidarViewer
 
+/**
+ * Full-viewer error state. Until this existed, every post-landing load
+ * failure (bad URL, CORS, oversized metadata) left a silent black screen —
+ * the carefully written DataLoadError messages only ever reached the console.
+ */
+function LoadErrorScreen() {
+  const error = useSceneStore((s) => s.error)
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '16px',
+      height: '100%',
+      backgroundColor: colors.bgDeep,
+      fontFamily: fonts.sans,
+      padding: '24px',
+      boxSizing: 'border-box',
+    }}>
+      <div style={{ fontSize: '15px', fontWeight: 600, color: colors.textPrimary }}>
+        Couldn't load this data
+      </div>
+      <div style={{
+        maxWidth: '560px',
+        fontSize: '13px',
+        lineHeight: 1.6,
+        color: colors.textSecondary,
+        textAlign: 'center',
+        wordBreak: 'break-word',
+      }}>
+        {error ?? 'Unknown error.'}
+      </div>
+      <button
+        onClick={() => { window.location.assign(window.location.pathname) }}
+        style={{
+          padding: '8px 20px',
+          fontSize: '13px',
+          fontFamily: fonts.sans,
+          fontWeight: 600,
+          color: '#000',
+          backgroundColor: colors.accent,
+          border: 'none',
+          borderRadius: radius.md,
+          cursor: 'pointer',
+        }}
+      >
+        ← Back to start
+      </button>
+    </div>
+  )
+}
+
 function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'minimal' | 'none' }) {
   const status = useSceneStore((s) => s.status)
   const hideOverlays = embedControls === 'none'
@@ -1621,6 +1675,8 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
             </>
           ) : status === 'loading' ? (
             <LoadingSkeleton />
+          ) : status === 'error' ? (
+            <LoadErrorScreen />
           ) : (
             <div style={{
               display: 'flex',

@@ -1023,6 +1023,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }
         }
 
+        // Full-split metadata dies on V8's ~512MB string limit before
+        // JSON.parse even starts — fail with directions, not a RangeError.
+        const oversized = [...jsonFiles.entries()].find(([, f]) => f.size > NUSCENES_TABLE_SIZE_LIMIT)
+        if (oversized) {
+          failLoad(set, new Error(
+            `${oversized[0]} is ${(oversized[1].size / 1e9).toFixed(1)}GB — full-split nuScenes metadata `
+            + 'is too large for a browser to parse. Shard it per scene first with '
+            + 'scripts/shard_nuscenes.py (see docs/NUSCENES_FULL_HOSTING.md), then serve '
+            + 'the output folder and load it by URL.',
+          ), 'loadFromFiles:nuScenesOversize')
+          return
+        }
+
         // Initialize nuScenes state (local files → single-directory mode)
         internal.datasetId = 'nuscenes'
         internal.nuScenesSampleFiles = sampleFiles
@@ -1551,6 +1564,14 @@ async function initCameraWorker(
  * Called from selectSegment when the active dataset is nuScenes.
  */
 /**
+ * Largest metadata table the browser will attempt to parse. V8 caps strings
+ * at ~512MB, so a full-split sample_data.json (~1.3GB for trainval) fails in
+ * File.text()/res.text() with an opaque RangeError — this limit turns that
+ * into an actionable "shard it first" error instead.
+ */
+const NUSCENES_TABLE_SIZE_LIMIT = 400 * 1024 * 1024
+
+/**
  * Fetch one nuScenes version directory over HTTP and build the database plus
  * URL-based sample file map. Works for a classic full directory (v1.0-mini)
  * and for a per-scene shard (scripts/shard_nuscenes.py) alike — a shard is
@@ -1582,6 +1603,19 @@ async function fetchNuScenesVersionData(
     )
   }
   set({ loadProgress: 0.05 })
+
+  // Same string-limit guard as the local path — enforced only when the server
+  // reports a size, so hosts without content-length still load normally.
+  const head = await fetch(`${baseUrl}${detectedSplit}/sample_data.json`, { method: 'HEAD' })
+    .catch(() => null)
+  const tableBytes = Number(head?.headers.get('content-length') ?? 0)
+  if (tableBytes > NUSCENES_TABLE_SIZE_LIMIT) {
+    throw new Error(
+      `sample_data.json is ${(tableBytes / 1e9).toFixed(1)}GB — full-split nuScenes metadata `
+      + 'is too large for a browser to parse. Shard it per scene with '
+      + 'scripts/shard_nuscenes.py (see docs/NUSCENES_FULL_HOSTING.md) and load the shard root instead.',
+    )
+  }
 
   // 2. Fetch all metadata JSONs as text strings (buildNuScenesDatabase accepts string values)
   const metaBase = `${baseUrl}${detectedSplit}/`
