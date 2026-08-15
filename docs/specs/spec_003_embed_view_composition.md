@@ -112,12 +112,29 @@ carrying that key.
 - `cameras` gets its own parser used by both embed and normal mode, and a
   field on `ShareableState` for `buildShareUrl` only, so Share links still
   carry it.
-- **Known consequence of spec_001** to fix while here: `t0`/`t1` already
-  joined `parseViewParams`, so a range link today opens with the layer panel
-  collapsed and no autoplay. Decide explicitly — the recommendation is that
-  a range link *should* keep autoplay (it says "watch this interval") and
-  should not collapse the panel — and make the share-link signal explicit
-  (a dedicated key set) rather than "any view param".
+- **`t0`/`t1` joined that signal in spec_001**, so a range link now opens
+  paused with the layer panel collapsed. Reviewed against what each producer
+  of such a link wants, and **left as is**:
+
+  - A *Share View* link carries `t0`/`t1` alongside `frame`, camera pose and
+    colormap. Its recipient wants the shared moment; autoplaying would leave
+    that frame immediately and destroy what was shared. Paused, unobstructed
+    is correct.
+  - A *mining hit* link carries a range and no frame or pose, and does want
+    playback — but its producer is an embed host that already passes
+    `autoplay=true` explicitly.
+
+  So the default stays. What is actually missing is the producer's ability to
+  ask, and a signal that does not silently grow:
+
+  1. **`autoplay` is embed-only** (App.tsx:200 sits behind the
+     `embedParams.embed` guard), so a normal-mode link — a scene link pasted
+     into a chat, a mining hit shared outside an iframe — cannot request
+     playback at all. Honour `autoplay` outside embed mode too.
+  2. **Make the share-link signal an explicit key set** rather than "any key
+     in `parseViewParams`", so the next parameter added doesn't silently
+     change autoplay and panel state (this spec's `cameras` would have been
+     the third such key).
 
 ## Skipping camera loads
 
@@ -178,7 +195,9 @@ Design constraints found in review:
 - `camera=FRONT` enters that POV on all three datasets; `cam=` wins when both
   are given.
 - A URL carrying `cameras` does **not** change autoplay or layer-panel
-  behaviour (regression test against the `parseViewParams` emptiness signal).
+  behaviour (regression test against the share-link signal).
+- A range link keeps today's behaviour — paused, panel collapsed — and
+  `autoplay=true` works on it in both embed and normal mode.
 - A Share View link round-trips `cameras`.
 
 ## Non-goals
