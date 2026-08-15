@@ -14,8 +14,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 type MockWorker = {
   postMessage: ReturnType<typeof vi.fn>
   terminate: ReturnType<typeof vi.fn>
-  onmessage: ((e: { data: any }) => void) | null
-  onerror: ((e: any) => void) | null
+  onmessage: ((e: { data: unknown }) => void) | null
+  onerror: ((e: unknown) => void) | null
 }
 
 function createMockWorker(): MockWorker {
@@ -35,7 +35,7 @@ function createMockWorker(): MockWorker {
 // Instead, we test the core logic by reimplementing the relevant parts with mocks.
 
 interface PendingRequest {
-  resolve: (result: any) => void
+  resolve: (result: unknown) => void
   reject: (err: Error) => void
 }
 
@@ -49,7 +49,7 @@ class TestableWorkerPool {
   waitQueue: Array<{
     requestId: number
     rowGroupIndex: number
-    resolve: (result: any) => void
+    resolve: (result: unknown) => void
     reject: (err: Error) => void
   }> = []
   nextRequestId = 0
@@ -64,7 +64,7 @@ class TestableWorkerPool {
     }
   }
 
-  requestRowGroup(rowGroupIndex: number): Promise<any> {
+  requestRowGroup(rowGroupIndex: number): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
       const idle = this.workers.find((w) => w.ready && !w.busy)
@@ -80,7 +80,7 @@ class TestableWorkerPool {
     pw: { worker: MockWorker; busy: boolean; ready: boolean },
     requestId: number,
     rowGroupIndex: number,
-    resolve: (result: any) => void,
+    resolve: (result: unknown) => void,
     reject: (err: Error) => void,
   ) {
     pw.busy = true
@@ -89,7 +89,7 @@ class TestableWorkerPool {
   }
 
   /** Simulate worker responding */
-  simulateWorkerResponse(workerIndex: number, requestId: number, data: any) {
+  simulateWorkerResponse(workerIndex: number, requestId: number, data: unknown) {
     const pw = this.workers[workerIndex]
     const pending = this.pendingRequests.get(requestId)
     if (pending) {
@@ -183,7 +183,7 @@ describe('WorkerPool pending promise handling', () => {
       // The promises are now permanently pending — they will never resolve or reject.
       // We can verify this by racing with a timeout.
       const TIMEOUT = Symbol('timeout')
-      const raceTimeout = (p: Promise<any>, ms: number) =>
+      const raceTimeout = (p: Promise<unknown>, ms: number) =>
         Promise.race([p, new Promise((r) => setTimeout(() => r(TIMEOUT), ms))])
 
       expect(await raceTimeout(p1, 50)).toBe(TIMEOUT) // never resolves
@@ -202,7 +202,7 @@ describe('WorkerPool pending promise handling', () => {
       pool.terminateWithoutReject()
 
       const TIMEOUT = Symbol('timeout')
-      const raceTimeout = (p: Promise<any>, ms: number) =>
+      const raceTimeout = (p: Promise<unknown>, ms: number) =>
         Promise.race([p, new Promise((r) => setTimeout(() => r(TIMEOUT), ms))])
 
       expect(await raceTimeout(p3, 50)).toBe(TIMEOUT) // never resolves
@@ -215,7 +215,7 @@ describe('WorkerPool pending promise handling', () => {
       pool.reinitWithoutReject()
 
       const TIMEOUT = Symbol('timeout')
-      const raceTimeout = (p: Promise<any>, ms: number) =>
+      const raceTimeout = (p: Promise<unknown>, ms: number) =>
         Promise.race([p, new Promise((r) => setTimeout(() => r(TIMEOUT), ms))])
 
       expect(await raceTimeout(p1, 50)).toBe(TIMEOUT)
@@ -276,11 +276,11 @@ describe('WorkerPool pending promise handling', () => {
     it('rejected promises release their resolve/reject closures', async () => {
       // Create a large object captured by the promise chain
       let leaked: ArrayBuffer | null = new ArrayBuffer(10 * 1024 * 1024) // 10 MB
-      const weakRef = new WeakRef(leaked)
+      const _weakRef = new WeakRef(leaked)
 
       const p1 = pool.requestRowGroup(0).then((result) => {
         // This closure captures `leaked` via the outer scope
-        return leaked!.byteLength + result
+        return leaked!.byteLength + (result as number)
       }).catch(() => {
         // rejection path — leaked should be releasable after this
       })

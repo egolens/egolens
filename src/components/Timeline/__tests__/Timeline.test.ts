@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { computeBufferSegments, type BufferSegment } from '../Timeline'
+import { computeBufferSegments } from '../Timeline'
 
 describe('computeBufferSegments', () => {
   it('returns empty for totalFrames <= 1', () => {

@@ -20,7 +20,6 @@ import { resolve } from 'path'
 import type { AsyncBuffer } from 'hyparquet'
 import { openParquetFile, readAllRows, readRowRange, isHeavyComponent } from '../parquet'
 import {
-  convertRangeImageToPointCloud,
   convertAllSensors,
   parseLidarCalibration,
   POINT_STRIDE,
@@ -45,6 +44,7 @@ if (process.env.SKIP_GPU_TESTS) {
   try {
     // Probe: spawn a subprocess to check if require('webgpu') crashes.
     // If it does, the subprocess exits non-zero and we skip gracefully.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { execSync } = require('child_process')
     execSync('node -e "require(\'webgpu\')"', { timeout: 5000, stdio: 'pipe' })
 

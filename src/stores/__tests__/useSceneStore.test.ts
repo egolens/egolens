@@ -18,6 +18,26 @@ import { resolve } from 'path'
 import type { AsyncBuffer } from 'hyparquet'
 import type { LidarCalibration, RangeImage } from '../../utils/rangeImage'
 
+// Type-only handles to the dynamically imported modules used by the mock pool.
+// (Type-level `import()` is erased at runtime, so this doesn't defeat vi.mock hoisting.)
+type ParquetModule = typeof import('../../utils/parquet')
+type RangeImageModule = typeof import('../../utils/rangeImage')
+type ParquetFile = Awaited<ReturnType<ParquetModule['openParquetFile']>>
+
+/** Shape of the per-sensor cloud entries the mock pool emits */
+interface MockSensorCloud {
+  laserName: number
+  positions: Float32Array
+  pointCount: number
+}
+
+/** Shape of the frames the mock pool emits */
+interface MockFrame {
+  timestamp: string
+  sensorClouds: MockSensorCloud[]
+  convertMs: number
+}
+
 // ---------------------------------------------------------------------------
 // Mock WorkerPool — runs Parquet I/O + LiDAR conversion in-process
 // ---------------------------------------------------------------------------
@@ -27,9 +47,11 @@ vi.mock('../../workers/workerPool', () => {
   // would be hoisted AFTER vi.mock, causing reference errors).
   return {
     WorkerPool: class MockWorkerPool {
-      private pf: unknown = null
+      private pf: ParquetFile | null = null
       private calibrations = new Map<number, LidarCalibration>()
       private _numBatches = 0
+      private _readRowGroupRows: ParquetModule['readRowGroupRows'] | null = null
+      private _convertAllSensors: RangeImageModule['convertAllSensors'] | null = null
 
       constructor(public readonly concurrency: number, _workerFactory?: () => Worker) {}
 
@@ -40,7 +62,7 @@ vi.mock('../../workers/workerPool', () => {
         }
 
         // LiDAR pool init
-        const { openParquetFile, buildHeavyFileFrameIndex, readRowGroupRows } =
+        const { openParquetFile, readRowGroupRows } =
           await import('../../utils/parquet')
         const { convertAllSensors } = await import('../../utils/rangeImage')
 
@@ -51,8 +73,8 @@ vi.mock('../../workers/workerPool', () => {
         this._numBatches = pfTyped.rowGroups.length
 
         // Attach modules for later use
-        ;(this as any)._readRowGroupRows = readRowGroupRows
-        ;(this as any)._convertAllSensors = convertAllSensors
+        this._readRowGroupRows = readRowGroupRows
+        this._convertAllSensors = convertAllSensors
 
         return { numBatches: this._numBatches }
       }
@@ -74,8 +96,8 @@ vi.mock('../../workers/workerPool', () => {
       }
 
       async requestBatch(batchIndex: number) {
-        const readRowGroupRows = (this as any)._readRowGroupRows as typeof import('../../utils/parquet').readRowGroupRows
-        const convertAllSensors = (this as any)._convertAllSensors as typeof import('../../utils/rangeImage').convertAllSensors
+        const readRowGroupRows = this._readRowGroupRows!
+        const convertAllSensors = this._convertAllSensors!
 
         const LIDAR_COLUMNS = [
           'key.frame_timestamp_micros',
@@ -85,7 +107,7 @@ vi.mock('../../workers/workerPool', () => {
         ]
 
         const t0 = performance.now()
-        const allRows = await readRowGroupRows(this.pf as any, batchIndex, LIDAR_COLUMNS)
+        const allRows = await readRowGroupRows(this.pf!, batchIndex, LIDAR_COLUMNS)
 
         // Group by timestamp
         const frameGroups = new Map<bigint, typeof allRows>()
@@ -100,7 +122,7 @@ vi.mock('../../workers/workerPool', () => {
         }
 
         // Convert each frame
-        const frames: any[] = []
+        const frames: MockFrame[] = []
         for (const [ts, rows] of frameGroups) {
           const rangeImages = new Map<number, RangeImage>()
           for (const row of rows) {
@@ -115,7 +137,7 @@ vi.mock('../../workers/workerPool', () => {
           const result = convertAllSensors(rangeImages, this.calibrations)
           const convertMs = performance.now() - ct0
 
-          const sensorClouds: any[] = []
+          const sensorClouds: MockSensorCloud[] = []
           for (const [laserName, cloud] of result.perSensor) {
             sensorClouds.push({ laserName, positions: cloud.positions, pointCount: cloud.pointCount })
           }

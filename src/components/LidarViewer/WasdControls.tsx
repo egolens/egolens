@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { trackCameraSettle } from '../../utils/analytics'
@@ -50,7 +51,7 @@ const MOVE_CODES = new Set([
 
 interface WasdControlsProps {
   /** OrbitControls ref — target is moved alongside camera */
-  orbitRef: React.RefObject<any>
+  orbitRef: React.RefObject<OrbitControlsImpl | null>
   /** Disable keyboard movement (e.g. during POV animation) */
   enabled?: boolean
   /** Called when WASD movement starts — used to disable follow-cam */

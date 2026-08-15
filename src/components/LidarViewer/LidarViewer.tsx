@@ -13,6 +13,7 @@ import { useEffect, useRef, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
 import PointCloud from './PointCloud'
 import { LIDARSEG_PALETTE, LIDARSEG_LABELS } from '../../utils/colormaps'
@@ -99,7 +100,7 @@ function PovController({
   returningRef,
 }: {
   targetCalib: CameraCalib | null
-  orbitRef: React.RefObject<any>
+  orbitRef: React.RefObject<OrbitControlsImpl | null>
   /** Shared ref so parent can disable OrbitControls during return animation */
   returningRef: React.MutableRefObject<boolean>
 }) {
@@ -358,7 +359,7 @@ function WorldPoseSync({ groupRef }: { groupRef: React.RefObject<THREE.Group | n
 // ---------------------------------------------------------------------------
 // InitialCameraSetup — one-time orbit target setup for chase-cam
 // ---------------------------------------------------------------------------
-function InitialCameraSetup({ orbitRef, initializedRef }: { orbitRef: React.RefObject<any>; initializedRef: React.MutableRefObject<boolean> }) {
+function InitialCameraSetup({ orbitRef, initializedRef }: { orbitRef: React.RefObject<OrbitControlsImpl | null>; initializedRef: React.MutableRefObject<boolean> }) {
   useFrame(() => {
     if (!initializedRef.current && orbitRef.current) {
       if (_pendingCameraPose) {
@@ -423,7 +424,7 @@ function InitialCameraSetup({ orbitRef, initializedRef }: { orbitRef: React.RefO
 // WorldFollowCamera — delta-based camera follow in world mode
 // ---------------------------------------------------------------------------
 function WorldFollowCamera({ orbitRef, enabled, returningRef }: {
-  orbitRef: React.RefObject<any>
+  orbitRef: React.RefObject<OrbitControlsImpl | null>
   enabled: boolean
   returningRef: React.MutableRefObject<boolean>
 }) {
@@ -522,7 +523,7 @@ function ResetViewController({
   orbitRef,
   resetRequestedRef,
 }: {
-  orbitRef: React.RefObject<any>
+  orbitRef: React.RefObject<OrbitControlsImpl | null>
   resetRequestedRef: React.MutableRefObject<boolean>
 }) {
   const animStartTime = useRef<number | null>(null)
@@ -547,8 +548,8 @@ function ResetViewController({
       }
 
       // Snapshot current state + start timed animation
-      animFromPos.current.copy(orbitRef.current.object.position)
-      animFromTarget.current.copy(orbitRef.current.target)
+      animFromPos.current.copy(orbitRef.current!.object.position)
+      animFromTarget.current.copy(orbitRef.current!.target)
       animStartTime.current = performance.now()
     }
 
@@ -578,7 +579,7 @@ function BevViewController({
   orbitRef,
   bevRequestedRef,
 }: {
-  orbitRef: React.RefObject<any>
+  orbitRef: React.RefObject<OrbitControlsImpl | null>
   bevRequestedRef: React.MutableRefObject<boolean>
 }) {
   const animStartTime = useRef<number | null>(null)
@@ -603,8 +604,8 @@ function BevViewController({
       }
 
       // Start: offset direction from current target → quaternion
-      animFromTarget.current.copy(orbitRef.current.target)
-      _bevStartDir.copy(orbitRef.current.object.position).sub(orbitRef.current.target)
+      animFromTarget.current.copy(orbitRef.current!.target)
+      _bevStartDir.copy(orbitRef.current!.object.position).sub(orbitRef.current!.target)
       startRadius.current = _bevStartDir.length()
       _bevStartDir.normalize()
       _bevQStart.setFromUnitVectors(_bevRefDir, _bevStartDir)
@@ -657,7 +658,7 @@ function BevViewController({
 // ---------------------------------------------------------------------------
 // PinCameraSync — saves camera pose to store every frame when pinCamera is on
 // ---------------------------------------------------------------------------
-function PinCameraSync({ orbitRef, initialized }: { orbitRef: React.RefObject<any>; initialized: React.RefObject<boolean> }) {
+function PinCameraSync({ orbitRef, initialized }: { orbitRef: React.RefObject<OrbitControlsImpl | null>; initialized: React.RefObject<boolean> }) {
   const pinCamera = useSceneStore((s) => s.pinCamera)
   useFrame(() => {
     // Don't save until InitialCameraSetup has finished — otherwise we'd
@@ -760,7 +761,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
   const bgPreset = useSceneStore((s) => s.bgPreset)
   const pointSize = useSceneStore((s) => s.pointSize)
   const setPointSize = useSceneStore((s) => s.actions.setPointSize)
-  const orbitRef = useRef<any>(null)
+  const orbitRef = useRef<OrbitControlsImpl | null>(null)
   const sceneGroupRef = useRef<THREE.Group>(null)
   const returningRef = useRef(false)
   const resetRequestedRef = useRef(false)

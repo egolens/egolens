@@ -202,7 +202,6 @@ export default function CameraSegOverlay({ cameraName }: CameraSegOverlayProps) 
       }
     })
     return () => unsub()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draw])
 
   // ResizeObserver — update canvas dimensions + redraw
