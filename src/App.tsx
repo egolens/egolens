@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useSceneStore, getThumbnailResolver, getSegmentSplits } from './stores/useSceneStore'
-import LidarViewer from './components/LidarViewer/LidarViewer'
+import LidarViewer, { type ViewerChrome } from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
 import { colors, fonts, radius, gradients } from './theme'
@@ -11,7 +11,7 @@ import { describeFolderProblem } from './utils/folderScan'
 import type { ScanResult } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
 import { PRESETS, isPresetUrl } from './utils/presets'
-import { buildShareUrl, parseViewParams, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
+import { buildShareUrl, parseViewParams, parseCamerasParam, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
 import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
@@ -501,6 +501,7 @@ function Header() {
       frame: s.currentFrameIndex,
       t0: s.playbackWindow?.t0,
       t1: s.playbackWindow?.t1,
+      cameras: parseCamerasParam() ?? undefined,
       colormap: s.colormapMode,
       boxMode: s.boxMode,
       worldMode: s.worldMode,
@@ -1681,9 +1682,14 @@ function LoadErrorScreen() {
   )
 }
 
-function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'minimal' | 'none' }) {
+function SensorView({ embedControls = 'full' }: { embedControls?: ViewerChrome }) {
   const status = useSceneStore((s) => s.status)
-  const hideOverlays = embedControls === 'none'
+  // The camera strip is content, not chrome. `controls=none` hides it by
+  // default; an explicit `cameras=` always wins, so `controls=none&cameras=all`
+  // is a bare viewer that still shows camera images.
+  const camerasParam = useMemo(() => parseCamerasParam(), [])
+  const showCameraStrip = camerasParam ?? embedControls !== 'none'
+  const hideCameraStrip = !showCameraStrip
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1695,7 +1701,7 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
               {/* Losing the 3D view costs the user the whole tool, so this one
                   earns the recovery screen rather than an empty black area. */}
               <ErrorBoundary feature="LidarViewer" variant="root">
-                <LidarViewer hideControls={hideOverlays} />
+                <LidarViewer chrome={embedControls} />
               </ErrorBoundary>
               {/* ShortcutHints removed — ? key now toggles Keys popup in LidarViewer */}
             </>
@@ -1723,12 +1729,12 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
       {/* Camera Image Strip — bottom (hidden when controls=none) */}
       {/* The camera strip is supporting context — if it breaks, the 3D view
           and timeline stay usable, so drop the strip instead of the session. */}
-      {status === 'ready' && !hideOverlays && (
+      {status === 'ready' && !hideCameraStrip && (
         <ErrorBoundary feature="CameraPanel">
           <CameraPanel />
         </ErrorBoundary>
       )}
-      {status === 'loading' && !hideOverlays && <CameraStripSkeleton />}
+      {status === 'loading' && !hideCameraStrip && <CameraStripSkeleton />}
     </div>
   )
 }

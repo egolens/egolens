@@ -59,7 +59,10 @@ const HEX_COLOR_RE = /^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?([0-9a-fA-F]{2})?$/
  * @param search - URL search string (defaults to window.location.search)
  */
 export function parseEmbedParams(search?: string): EmbedParams {
-  const params = new URLSearchParams(search ?? window.location.search)
+  // The store reads these to decide whether camera images are needed, and it
+  // is exercised in a node environment by the store tests
+  const live = typeof window === 'undefined' ? '' : window.location.search
+  const params = new URLSearchParams(search ?? live)
 
   const embed = params.get('embed') === 'true'
 

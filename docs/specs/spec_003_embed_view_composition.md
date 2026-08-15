@@ -1,6 +1,6 @@
 # Spec 003 — Embed view composition (`controls`, `cameras`)
 
-**Status**: planned · **Date**: 2026-08-15 · **Revised**: 2026-08-15 after
+**Status**: in-progress · **Date**: 2026-08-15 · **Revised**: 2026-08-15 after
 adversarial review (43 confirmed findings, 8 blocking) · **Estimated
 effort**: 2–3 days
 **Depends on**: nothing. Independent of spec_002.
