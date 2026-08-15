@@ -48,16 +48,6 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
 // Component
 // ---------------------------------------------------------------------------
 
-const windowChipButtonStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: colors.accentBlue,
-  fontSize: '12px',
-  cursor: 'pointer',
-  padding: 0,
-  lineHeight: 1,
-}
-
 export default function Timeline({ minimal = false }: { minimal?: boolean } = {}) {
   const status = useSceneStore((s) => s.status)
   const currentFrameIndex = useSceneStore((s) => s.currentFrameIndex)
@@ -75,11 +65,6 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
   const disabled = status !== 'ready'
   const maxFrame = Math.max(totalFrames - 1, 0)
-
-  const clearWindow = useCallback(() => {
-    actions.setPlaybackWindow(null)
-    syncWindowToUrl(null)
-  }, [actions])
 
   // ── Handle dragging (full-controls mode only) ──
   const trackRef = useRef<HTMLDivElement>(null)
@@ -488,23 +473,6 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       {/* Floating overlay — takes no layout space, so its appearance can
           never reflow the track under a mid-drag cursor, and costs nothing
           when idle */}
-      {/* Clear-range cell keeps its 20px whether or not a range is active, so
-          creating one mid-drag can never reflow the track under the cursor.
-          Lives beside the frame counter — inside the row, so nothing above
-          the timeline can intercept the click. */}
-      {!minimal && (
-        <span style={{ width: '20px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-          {playbackWindow && (
-            <button
-              onClick={clearWindow}
-              title="Reset playback range — play the full recording"
-              aria-label="Reset playback range"
-              style={windowChipButtonStyle}
-            >✕</button>
-          )}
-        </span>
-      )}
-
       <span style={{
         fontFamily: fonts.mono,
         fontSize: '11px',
