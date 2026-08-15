@@ -8,7 +8,7 @@
  * with annotation frame markers (segmentation, keypoints).
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { colors, fonts, radius, gradients } from '../../theme'
 
@@ -81,6 +81,11 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const playbackWindow = useSceneStore((s) => s.playbackWindow)
   const actions = useSceneStore((s) => s.actions)
 
+  // Ghost handles (no active window) appear only while hovering the track —
+  // idle affordance without idle noise. Active-window handles always show:
+  // they ARE the window's boundary marks.
+  const [trackHovered, setTrackHovered] = useState(false)
+
   const disabled = status !== 'ready'
   const maxFrame = Math.max(totalFrames - 1, 0)
 
@@ -103,10 +108,14 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     syncWindowParams(null)
   }, [actions, syncWindowParams])
 
+  // ── Handle dragging (full-controls mode only) ──
+  const trackRef = useRef<HTMLDivElement>(null)
+  const dragEdgeRef = useRef<'f0' | 'f1' | null>(null)
+
   // The window as it arrived (URL or setWindow) — one-click restore after a
   // drag, so editing a shared link is never destructive.
   const sharedWindowRef = useRef<{ t0: string; t1: string } | null>(null)
-  if (playbackWindow && sharedWindowRef.current === null) {
+  if (playbackWindow && sharedWindowRef.current === null && dragEdgeRef.current === null) {
     sharedWindowRef.current = { t0: playbackWindow.t0, t1: playbackWindow.t1 }
   }
   if (!playbackWindow && sharedWindowRef.current !== null) {
@@ -122,9 +131,6 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     syncWindowParams(shared)
   }, [actions, syncWindowParams])
 
-  // ── Handle dragging (full-controls mode only) ──
-  const trackRef = useRef<HTMLDivElement>(null)
-  const dragEdgeRef = useRef<'f0' | 'f1' | null>(null)
 
   const frameFromClientX = useCallback((clientX: number, max: number): number => {
     const rect = trackRef.current?.getBoundingClientRect()
@@ -142,23 +148,35 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
   const onHandlePointerMove = useCallback((e: React.PointerEvent) => {
     const edge = dragEdgeRef.current
-    const win = useSceneStore.getState().playbackWindow
-    const max = Math.max(useSceneStore.getState().totalFrames - 1, 0)
-    if (!edge || !win) return
+    if (!edge) return
+    const state = useSceneStore.getState()
+    const max = Math.max(state.totalFrames - 1, 0)
+    // No window yet: the handles rest at the recording edges, and dragging
+    // one inward creates the window (Foxglove idiom)
+    const win = state.playbackWindow ?? { f0: 0, f1: max }
     const frame = frameFromClientX(e.clientX, max)
     if (edge === 'f0') {
       const f0 = Math.min(frame, win.f1)
-      if (f0 !== win.f0) actions.setPlaybackWindowFrames(f0, win.f1)
+      if (f0 !== state.playbackWindow?.f0) actions.setPlaybackWindowFrames(f0, win.f1)
     } else {
       const f1 = Math.max(frame, win.f0)
-      if (f1 !== win.f1) actions.setPlaybackWindowFrames(win.f0, f1)
+      if (f1 !== state.playbackWindow?.f1) actions.setPlaybackWindowFrames(win.f0, f1)
     }
   }, [actions, frameFromClientX])
 
   const onHandlePointerUp = useCallback(() => {
     if (!dragEdgeRef.current) return
     dragEdgeRef.current = null
-    syncWindowParams(useSceneStore.getState().playbackWindow)
+    const state = useSceneStore.getState()
+    const win = state.playbackWindow
+    const max = Math.max(state.totalFrames - 1, 0)
+    if (win && win.f0 === 0 && win.f1 === max) {
+      // Spanning the whole recording is the same as no window
+      state.actions.setPlaybackWindow(null)
+      syncWindowParams(null)
+      return
+    }
+    syncWindowParams(win)
   }, [syncWindowParams])
 
   // Foxglove's exact trim shortcuts: Cmd/Ctrl+Shift+← snaps the window start
@@ -271,7 +289,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       {/* Custom slider with buffer bar + annotation lanes */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {/* Main track area — outer container keeps full width for hit area */}
-        <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
+        <div onMouseEnter={() => setTrackHovered(true)} onMouseLeave={() => setTrackHovered(false)} style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
           {/* Inset track container — padded by dot radius so playhead fits at 0% and 100% */}
           <div ref={trackRef} style={{ position: 'absolute', left: 6, right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center' }}>
             {/* Track background */}
@@ -362,56 +380,66 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                       pointerEvents: 'none',
                     }} />
                   )}
-                  {minimal ? (
+                  {minimal && (
                     // Minimal/embed: boundary ticks only — the window is host-controlled
                     <>
                       <div style={{ position: 'absolute', left: `${leftPct}%`, width: '1.5px', height: '16px', backgroundColor: colors.accentBlue, transform: 'translateX(-50%)', pointerEvents: 'none' }} />
                       <div style={{ position: 'absolute', left: `${rightPct}%`, width: '1.5px', height: '16px', backgroundColor: colors.accentBlue, transform: 'translateX(-50%)', pointerEvents: 'none' }} />
                     </>
-                  ) : (
-                    // Full controls: draggable in/out handles (Foxglove idiom)
-                    <>
-                      <div
-                        onPointerDown={onHandlePointerDown('f0')}
-                        onPointerMove={onHandlePointerMove}
-                        onPointerUp={onHandlePointerUp}
-                        title="Window start — drag to adjust"
-                        style={{
-                          position: 'absolute',
-                          left: `${leftPct}%`,
-                          width: '6px',
-                          height: '18px',
-                          backgroundColor: colors.accentBlue,
-                          borderRadius: '2px',
-                          transform: 'translateX(-50%)',
-                          cursor: 'ew-resize',
-                          zIndex: 2,
-                          touchAction: 'none',
-                        }}
-                      />
-                      <div
-                        onPointerDown={onHandlePointerDown('f1')}
-                        onPointerMove={onHandlePointerMove}
-                        onPointerUp={onHandlePointerUp}
-                        title="Window end — drag to adjust"
-                        style={{
-                          position: 'absolute',
-                          left: `${rightPct}%`,
-                          width: '6px',
-                          height: '18px',
-                          backgroundColor: colors.accentBlue,
-                          borderRadius: '2px',
-                          transform: 'translateX(-50%)',
-                          cursor: 'ew-resize',
-                          zIndex: 2,
-                          touchAction: 'none',
-                        }}
-                      />
-                    </>
                   )}
                 </>
               )
             })()}
+
+            {/* In/out handles — always present in full-controls mode. With no
+                window they rest at the recording edges; dragging one inward
+                creates the window (Foxglove idiom). */}
+            {!minimal && !disabled && maxFrame > 0 && (
+              <>
+                <div
+                  onPointerDown={onHandlePointerDown('f0')}
+                  onPointerMove={onHandlePointerMove}
+                  onPointerUp={onHandlePointerUp}
+                  title={playbackWindow ? 'Window start — drag to adjust' : 'Drag inward to set a playback window'}
+                  style={{
+                    position: 'absolute',
+                    left: `${((playbackWindow?.f0 ?? 0) / maxFrame) * 100}%`,
+                    width: '6px',
+                    height: '18px',
+                    backgroundColor: playbackWindow ? colors.accentBlue : 'rgba(0, 201, 219, 0.45)',
+                    borderRadius: '2px',
+                    transform: 'translateX(-50%)',
+                    cursor: 'ew-resize',
+                    zIndex: 2,
+                    touchAction: 'none',
+                    opacity: playbackWindow || trackHovered ? 1 : 0,
+                    pointerEvents: playbackWindow || trackHovered ? 'auto' : 'none',
+                    transition: 'opacity 0.15s',
+                  }}
+                />
+                <div
+                  onPointerDown={onHandlePointerDown('f1')}
+                  onPointerMove={onHandlePointerMove}
+                  onPointerUp={onHandlePointerUp}
+                  title={playbackWindow ? 'Window end — drag to adjust' : 'Drag inward to set a playback window'}
+                  style={{
+                    position: 'absolute',
+                    left: `${((playbackWindow?.f1 ?? maxFrame) / maxFrame) * 100}%`,
+                    width: '6px',
+                    height: '18px',
+                    backgroundColor: playbackWindow ? colors.accentBlue : 'rgba(0, 201, 219, 0.45)',
+                    borderRadius: '2px',
+                    transform: 'translateX(-50%)',
+                    cursor: 'ew-resize',
+                    zIndex: 2,
+                    touchAction: 'none',
+                    opacity: playbackWindow || trackHovered ? 1 : 0,
+                    pointerEvents: playbackWindow || trackHovered ? 'auto' : 'none',
+                    transition: 'opacity 0.15s',
+                  }}
+                />
+              </>
+            )}
           </div>
 
           {/* Invisible range input — matches inset track area */}
