@@ -4,6 +4,7 @@ Browser-based 3D perception explorer for autonomous driving datasets (Waymo, nuS
 
 ## Quick Context
 - **Detailed technical plan**: `docs/TECHNICAL_PLAN.md` (read for architecture decisions, data schemas, reasoning)
+- **New plans go in `docs/specs/spec_NNN_<name>.md`** — numbered, with a Status header (see `docs/specs/README.md`); runbooks/guides stay in `docs/` and are edited in place
 - Zero-install: browser-only, no server, no Python
 - Parquet native: `hyparquet` + `hyparquet-compressors` (BROTLI) for browser parsing with row-group random access
 - LiDAR data is **range images** (not xyz) — must convert spherical→cartesian in Web Worker
