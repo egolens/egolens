@@ -138,6 +138,8 @@ export interface ShareableState {
   /** Playback time window bounds — int64 sensor timestamps as strings */
   t0?: string
   t1?: string
+  /** Camera strip visibility; build-only (parsed by parseCamerasParam) */
+  cameras?: boolean
   colormap?: string
   boxMode?: string
   worldMode?: boolean
@@ -173,6 +175,7 @@ export function buildShareUrl(state: ShareableState): string {
   if (state.scene) params.set('scene', state.scene)
   if (state.frame != null && state.frame > 0) params.set('frame', String(state.frame))
   if (state.t0 && state.t1) { params.set('t0', state.t0); params.set('t1', state.t1) }
+  if (state.cameras === false) params.set('cameras', 'false')
   if (state.colormap && state.colormap !== 'intensity') params.set('colormap', state.colormap)
   if (state.boxMode && state.boxMode !== 'box') params.set('box', state.boxMode)
   if (state.worldMode === false) params.set('world', '0')
@@ -277,7 +280,50 @@ export function parseViewParams(search?: string): Partial<ShareableState> {
   return state
 }
 
-/** True when the initial URL contained view params (i.e. opened via Share link) */
+/**
+ * Params that mean "this link is showing you a specific view" — a Share View
+ * link, or a deep link that pins a moment. Consumers use this to decide
+ * whether to autoplay and whether to start with the layer panel out of the
+ * way.
+ *
+ * Stated as a list on purpose. It used to be "any key `parseViewParams`
+ * returned", so every parameter added silently joined it: `t0`/`t1` did, and
+ * a display filter like `cameras` would have too, changing autoplay for URLs
+ * that say nothing about playback.
+ */
+const SHARE_VIEW_KEYS = [
+  'frame', 't0', 't1', 'colormap', 'box', 'world', 'sensors', 'ps', 'opacity',
+  'cam', 'trail', 'lidar2d', 'kp3d', 'kp2d', 'camseg', 'speed', 'follow',
+  'cp', 'ct', 'az', 'cd',
+] as const
+
+/** True when the initial URL pinned a view (i.e. opened via Share link) */
 export function isShareView(): boolean {
-  return Object.keys(parseViewParams(initialSearch ?? undefined)).length > 0
+  // Falls back to the live search when nothing was captured yet — the old
+  // implementation did this via parseViewParams' own default, and callers
+  // (the layer panel) can mount before setUrlSource runs.
+  const live = typeof window === 'undefined' ? '' : window.location.search
+  const params = new URLSearchParams(initialSearch ?? live)
+  return SHARE_VIEW_KEYS.some((key) => params.has(key))
+}
+
+/**
+ * Camera strip visibility (`cameras=all|false`). Parsed on its own rather
+ * than through `parseViewParams`, which is a list of post-load actions to
+ * replay and doubles as the share-link signal above; this is a render-time
+ * display switch and belongs in neither.
+ *
+ * Returns null when unset, so the caller can apply the `controls`-derived
+ * default.
+ */
+export function parseCamerasParam(search?: string): boolean | null {
+  // Runs from the store, which is exercised in a node environment too
+  const live = typeof window === 'undefined' ? '' : window.location.search
+  const raw = new URLSearchParams(search ?? initialSearch ?? live).get('cameras')
+  if (raw === null) return null
+  const v = raw.toLowerCase()
+  if (v === 'all' || v === 'true' || v === '1') return true
+  if (v === 'false' || v === 'none' || v === '0') return false
+  console.warn(`[urlState] cameras="${raw}" is not all|false — ignoring`)
+  return null
 }

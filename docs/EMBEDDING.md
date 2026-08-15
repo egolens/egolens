@@ -27,7 +27,7 @@ The hosted build at `https://egolens.org` is embeddable as-is — no need to run
 | `controls` | `full` \| `minimal` \| `none` | `full` | UI controls visibility |
 | `frame` | number | `0` | Initial frame index (0-based) |
 | `t0` / `t1` | int64 string | — | Playback time window (sensor timestamps, ns or µs). Auto-seeks to the window start and loops playback inside it; `t0` wins over `frame` |
-| `camera` | string | — | Initial camera POV (e.g., `FRONT`, `ring_front_center`) |
+| `cameras` | `all` \| `false` | follows `controls` | Camera strip visibility. `false` also skips loading camera images entirely when nothing else needs them — the largest allocation in a scene |
 | `autoplay` | `true` | `false` | Auto-start playback after first frame loads |
 | `colormap` | string | `intensity` | Initial colormap mode |
 | `bgcolor` | hex | — | Canvas background color without `#` (e.g., `000000`, `1a1f35`) |
@@ -35,9 +35,23 @@ The hosted build at `https://egolens.org` is embeddable as-is — no need to run
 
 ### Controls Modes
 
-- **`full`** (default): All controls visible — layer panel, camera controls, BEV minimap, timeline with annotations
-- **`minimal`**: Only play/pause button, scrubber, and frame counter
-- **`none`**: View-only — orbit/pan/zoom still works, but no UI overlays. Camera strip also hidden.
+| Surface | `full` | `minimal` | `none` |
+|---|---|---|---|
+| Layer panel (coordinate, sensors, colormap, perception) | shown | hidden | hidden |
+| Floating buttons (BEV, Pin, Keys) | shown | hidden | hidden |
+| Axis gizmo, POV indicator | shown | shown | hidden |
+| Timeline (play/pause, scrubber, counter, buffer) | shown | shown | hidden |
+| Timeline annotation lanes | shown | hidden | — |
+| Playback-range handles | draggable | ticks only | — |
+| Camera strip | shown | shown | hidden by default |
+
+`none` is view-only: orbit/pan/zoom still work, but nothing is drawn over the
+3D view. The camera strip is content rather than chrome, so `cameras=`
+overrides its default in every mode — `controls=none&cameras=all` is a bare
+viewer that still shows camera images.
+
+Keyboard shortcuts follow their surfaces: the playback-range trim shortcuts
+(`Cmd/Ctrl+Shift+←/→`) need the timeline and are unavailable under `none`.
 
 ### Colormap Values
 

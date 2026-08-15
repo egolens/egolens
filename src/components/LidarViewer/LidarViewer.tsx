@@ -727,7 +727,20 @@ export function setPendingCameraPose(
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function LidarViewer({ hideControls = false }: { hideControls?: boolean } = {}) {
+/**
+ * Chrome level for the 3D view, mirroring the embed `controls` parameter:
+ *   full    — everything
+ *   minimal — no panels or floating buttons; orientation aids stay
+ *   none    — view only; even the gizmo and the POV chip go
+ */
+export type ViewerChrome = 'full' | 'minimal' | 'none'
+
+export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome } = {}) {
+  // Panels and floating buttons: gone from `minimal` down
+  const hideControls = chrome !== 'full'
+  // Orientation aids: only `none` loses them — they are how you tell which
+  // way the vehicle is facing in a still-navigable view
+  const hideOrientationAids = chrome === 'none'
   const visibleSensors = useSceneStore((s) => s.visibleSensors)
   const toggleSensor = useSceneStore((s) => s.actions.toggleSensor)
   const sensorClouds = useSceneStore((s) => s.currentFrame?.sensorClouds)
@@ -969,12 +982,14 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
           }}
         />
 
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport
-            axisColors={[colors.gizmoX, colors.gizmoY, colors.gizmoZ]}
-            labelColor="white"
-          />
-        </GizmoHelper>
+        {!hideOrientationAids && (
+          <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+            <GizmoViewport
+              axisColors={[colors.gizmoX, colors.gizmoY, colors.gizmoZ]}
+              labelColor="white"
+            />
+          </GizmoHelper>
+        )}
 
         {/* BEV minimap: reads scene ref, renders into external canvas */}
         <BevMinimapRenderer canvasRef={bevCanvasRef} zoomIndex={bevZoom} />
@@ -1813,7 +1828,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
       </div>}
 
       {/* POV mode indicator + exit button */}
-      {activeCam !== null && (
+      {activeCam !== null && !hideOrientationAids && (
         <div style={{
           position: 'absolute',
           top: 12,

@@ -84,8 +84,9 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
-import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindowToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindowToUrl, getInitialSearch, parseViewParams, parseCamerasParam } from '../utils/urlState'
 import { resolveWindowToFrames } from '../utils/playbackWindow'
+import { getEmbedParams } from '../utils/embedParams'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
@@ -340,6 +341,17 @@ const internal = {
   cameraPrefetchStarted: false,
   /** Prevent duplicate prefetchAllRowGroups calls (React StrictMode) */
   prefetchStarted: false,
+  /**
+   * Deferred camera-pool init. Camera JPEGs are the biggest allocation in a
+   * scene, so when nothing needs the images (strip hidden, no camera
+   * colormap, no POV) the pool is never started — the init closure is kept
+   * here and run later if something asks for images.
+   */
+  cameraPoolInit: null as (() => Promise<void>) | null,
+  /** Bumped on every scene reset — a late lazy start must not install a pool over a newer scene */
+  sceneToken: 0,
+  /** Colormap waiting for the first camera images to arrive (see setColormapMode) */
+  pendingCameraColormap: false,
   /** Last per-frame conversion time (for performance tracking) */
   lastConvertMs: 0,
   /** Frame index for per-frame fallback (test env / no Worker) */
@@ -397,6 +409,9 @@ function resetInternal() {
   internal.parquetFiles.clear()
   internal.timestamps = []
   internal.pendingSeekFrame = null
+  internal.cameraPoolInit = null
+  internal.pendingCameraColormap = false
+  internal.sceneToken++
   internal.timestampToFrame.clear()
   internal.lidarBoxByFrame.clear()
   internal.cameraBoxByFrame.clear()
@@ -579,6 +594,12 @@ function syncCachedFrames(set: (partial: Partial<SceneState>) => void) {
 function syncCameraCachedFrames(set: (partial: Partial<SceneState>) => void) {
   const indices = [...internal.cameraImageCache.keys()].sort((a, b) => a - b)
   set({ cameraCachedFrames: indices })
+
+  // A camera colormap held back while images loaded takes effect now
+  if (internal.pendingCameraColormap && indices.length > 0) {
+    internal.pendingCameraColormap = false
+    set({ colormapMode: 'camera' })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -892,10 +913,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set({ pointOpacity: Math.max(0.1, Math.min(1, opacity)) })
     },
     setColormapMode: (mode: ColormapMode) => {
-      set({ colormapMode: mode })
       trackColormapChange(mode)
+      // The camera colormap samples camera textures. If images were skipped
+      // (cameras=false), start them now and stay on the current colormap
+      // until the first frames land — switching early would sample nothing
+      // and freeze the cloud on stale or empty colour.
+      if (mode === 'camera' && internal.cameraImageCache.size === 0 && internal.cameraPoolInit) {
+        internal.pendingCameraColormap = true
+        console.log('[camera] camera colormap requested — loading images first')
+        void ensureCameraPool(set)
+        return
+      }
+      set({ colormapMode: mode })
     },
     setActiveCam: (cam: number | null) => {
+      if (cam !== null) void ensureCameraPool(set)
       set({ activeCam: cam })
       trackPovSwitch(cam !== null ? `camera_${cam}` : 'orbit')
     },
@@ -1660,6 +1692,7 @@ async function initCameraWorker(
   const cameraSource = sources.get('camera_image')
   if (!cameraSource) return
 
+  const start = async () => {
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
     2,
     () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
@@ -1669,6 +1702,11 @@ async function initCameraWorker(
   internal.cameraPool = pool
   internal.cameraNumBatches = numBatches
   useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+  }
+
+  internal.cameraPoolInit = start
+  if (cameraImagesWanted()) await start()
+  else console.log('[camera] nothing needs images — pool deferred')
 }
 
 // ---------------------------------------------------------------------------
@@ -2047,18 +2085,24 @@ async function initNuScenesCameraWorker(
     if (entry) fileEntries.push([filename, entry])
   }
 
-  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-    2,
-    () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
-  )
-  const { numBatches } = await pool.init({
-    frameBatches: batches,
-    fileEntries,
-  })
+  const start = async () => {
+    const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
+      2,
+      () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
+    )
+    const { numBatches } = await pool.init({
+      frameBatches: batches,
+      fileEntries,
+    })
 
-  internal.cameraPool = pool
-  internal.cameraNumBatches = numBatches
-  useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+    internal.cameraPool = pool
+    internal.cameraNumBatches = numBatches
+    useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+  }
+
+  internal.cameraPoolInit = start
+  if (cameraImagesWanted()) await start()
+  else console.log('[camera] nothing needs images — pool deferred')
 }
 
 // ---------------------------------------------------------------------------
@@ -2219,18 +2263,81 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
     if (entry) fileEntries.push([filename, entry])
   }
 
-  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-    2,
-    () => new Worker(new URL('../workers/av2CameraWorker.ts', import.meta.url), { type: 'module' }),
-  )
-  const { numBatches } = await pool.init({
-    frameBatches: batches,
-    fileEntries,
-  })
+  const start = async () => {
+    const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
+      2,
+      () => new Worker(new URL('../workers/av2CameraWorker.ts', import.meta.url), { type: 'module' }),
+    )
+    const { numBatches } = await pool.init({
+      frameBatches: batches,
+      fileEntries,
+    })
 
-  internal.cameraPool = pool
-  internal.cameraNumBatches = numBatches
-  useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+    internal.cameraPool = pool
+    internal.cameraNumBatches = numBatches
+    useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+  }
+
+  internal.cameraPoolInit = start
+  if (cameraImagesWanted()) await start()
+  else console.log('[camera] nothing needs images — pool deferred')
+}
+
+/**
+ * Does anything on screen need camera images right now?
+ *
+ * Three consumers: the camera strip, the LiDAR→camera colormap, and POV mode.
+ * Re-evaluated per scene, because all three can change across a switch.
+ */
+function cameraImagesWanted(): boolean {
+  const stripVisible = parseCamerasParam() ?? getEmbedParams().controls !== 'none'
+  if (stripVisible) return true
+  const state = useSceneStore.getState()
+  return state.colormapMode === 'camera' || state.activeCam !== null
+}
+
+/**
+ * Start the camera pipeline that `cameraImagesWanted() === false` skipped.
+ * No-op when the pool is already running or there is nothing deferred.
+ *
+ * Guarded by the scene token: an await here can outlive the scene that
+ * queued it, and installing a stale pool over a new scene would feed it
+ * another log's frames.
+ */
+async function ensureCameraPool(set: (partial: Partial<SceneState>) => void): Promise<void> {
+  // Read through a getter: a direct `internal.cameraPool` check narrows the
+  // property to null for the rest of the function, and init() assigns it.
+  const pool = () => internal.cameraPool
+  const init = internal.cameraPoolInit
+  if (pool() || !init) return
+  const token = internal.sceneToken
+  internal.cameraPoolInit = null
+
+  try {
+    await init()
+  } catch (e) {
+    console.warn('[camera] deferred init failed:', e)
+    return
+  }
+  if (token !== internal.sceneToken) return  // scene changed under us
+  if (!pool()?.isReady()) return
+
+  // Load the batch the viewer is actually on first — a plain prefetch would
+  // start at batch 0 and hand the user images for every frame but theirs.
+  const state = useSceneStore.getState()
+  const perBatch = internal.cameraNumBatches > 0
+    ? Math.ceil(internal.timestamps.length / internal.cameraNumBatches)
+    : internal.timestamps.length
+  const visibleBatch = perBatch > 0
+    ? Math.min(Math.floor(state.currentFrameIndex / perBatch), internal.cameraNumBatches - 1)
+    : 0
+  await loadAndCacheCameraRowGroup(visibleBatch, set, { priority: true }).catch(() => {})
+
+  if (token !== internal.sceneToken) return
+  if (!internal.cameraPrefetchStarted) {
+    internal.cameraPrefetchStarted = true
+    void prefetchAllCameraRowGroups(set)
+  }
 }
 
 /** Load + cache a single camera row group */
