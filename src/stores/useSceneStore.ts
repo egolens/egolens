@@ -44,6 +44,10 @@ import {
   loadNuScenesSceneMetadata,
   type NuScenesDatabase,
 } from '../adapters/nuscenes/metadata'
+import {
+  discoverNuScenesScenes,
+  type NuScenesDiscoveredScene,
+} from '../adapters/nuscenes/remote'
 import type { NuScenesFrameDescriptor, NuScenesRadarFileDescriptor } from '../workers/nuScenesLidarWorker'
 import type {
   NuScenesCameraFrameDescriptor,
@@ -360,6 +364,8 @@ const internal = {
   nuScenesDb: null as NuScenesDatabase | null,
   /** nuScenes sample data files keyed by relative path (File for local, string URL for remote) */
   nuScenesSampleFiles: null as Map<string, File | string> | null,
+  /** Discovered per-scene shards from an index.json root (sharded hosting mode) */
+  nuScenesDiscoveredScenes: null as NuScenesDiscoveredScene[] | null,
   // -- Argoverse 2-specific state --
   /** Parsed AV2 log database */
   av2Db: null as AV2LogDatabase | null,
@@ -881,7 +887,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
       // After reset, UI prefs are already preserved. Just set the segment.
       // If the dataset type changed, visibleSensors IDs may be stale — validate them.
-      if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
+      if (internal.datasetId === 'nuscenes' && (internal.nuScenesDb || internal.nuScenesDiscoveredScenes)) {
         setManifest(nuScenesManifest)
       } else if (internal.datasetId === 'argoverse2' && internal.av2Db) {
         setManifest(argoverse2Manifest)
@@ -895,10 +901,29 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const visibleSensors = valid.size > 0 ? valid : manifestIds
       set({ currentSegment: segmentId, visibleSensors })
 
-      if (internal.datasetId === 'nuscenes' && internal.nuScenesDb) {
-        await loadNuScenesScene(segmentId, set, get)
-        syncSegmentToUrl(segmentId)
-        return
+      if (internal.datasetId === 'nuscenes') {
+        // Sharded mode: fetch the scene's shard first if it isn't the loaded one
+        if (internal.nuScenesDiscoveredScenes
+            && (!internal.nuScenesDb || !internal.nuScenesDb.scenes.some(s => s.name === segmentId))) {
+          const entry = internal.nuScenesDiscoveredScenes.find(s => s.name === segmentId)
+          if (!entry) throw new Error(`nuScenes scene not found: ${segmentId}`)
+
+          set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
+          try {
+            const { db, sampleFiles } = await fetchNuScenesVersionData(entry.sceneUrl, set)
+            internal.nuScenesDb = db
+            internal.nuScenesSampleFiles = sampleFiles
+          } catch (e) {
+            failLoad(set, e, 'selectSegment:nuScenesShard')
+            return
+          }
+        }
+
+        if (internal.nuScenesDb) {
+          await loadNuScenesScene(segmentId, set, get)
+          syncSegmentToUrl(segmentId)
+          return
+        }
       }
 
       if (internal.datasetId === 'argoverse2') {
@@ -998,9 +1023,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }
         }
 
-        // Initialize nuScenes state
+        // Initialize nuScenes state (local files → single-directory mode)
         internal.datasetId = 'nuscenes'
         internal.nuScenesSampleFiles = sampleFiles
+        internal.nuScenesDiscoveredScenes = null
         setManifest(nuScenesManifest)
 
         // Build one-time database from JSON tables
@@ -1055,6 +1081,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       internal.datasetId = 'waymo'
       internal.nuScenesDb = null
       internal.nuScenesSampleFiles = null
+      internal.nuScenesDiscoveredScenes = null
       internal.av2Db = null
       internal.av2SampleFiles = null
       internal.av2DiscoveredLogs = null
@@ -1095,6 +1122,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             internal.av2DiscoveredLogs = logs
             internal.av2Db = null
             internal.av2SampleFiles = null
+            internal.nuScenesDb = null
+            internal.nuScenesSampleFiles = null
+            internal.nuScenesDiscoveredScenes = null
             setManifest(argoverse2Manifest)
 
             // Show all log IDs as available segments
@@ -1134,6 +1164,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           internal.datasetId = 'argoverse2'
           internal.av2Db = db
           internal.av2SampleFiles = sampleFiles
+          internal.nuScenesDb = null
+          internal.nuScenesSampleFiles = null
+          internal.nuScenesDiscoveredScenes = null
           setManifest(argoverse2Manifest)
 
           // AV2 has a single "scene" per log
@@ -1151,92 +1184,37 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
         try {
-          // 1. Auto-detect split by probing known metadata paths
-          const splits = ['v1.0-mini', 'v1.0-trainval', 'v1.0-test']
-          let detectedSplit: string | null = null
+          // Sharded hosting: an index.json at the root lists per-scene shards
+          // (see scripts/shard_nuscenes.py). Each shard loads on scene select.
+          const discovered = await discoverNuScenesScenes(baseUrl)
+          if (discovered && discovered.length > 0) {
+            console.log(`[loadFromUrl] nuScenes index found: ${discovered.length} scenes`)
+            internal.datasetId = 'nuscenes'
+            internal.nuScenesDiscoveredScenes = discovered
+            internal.nuScenesDb = null
+            internal.nuScenesSampleFiles = null
+            setManifest(nuScenesManifest)
 
-          for (const split of splits) {
-            try {
-              const url = `${baseUrl}${split}/scene.json`
-              const res = await fetch(url, { method: 'HEAD' })
-              if (res.ok) {
-                detectedSplit = split
-                console.log(`[loadFromUrl] nuScenes detected: ${split}`)
-                break
-              }
-            } catch { /* try next split */ }
+            const sceneNames = discovered.map(s => s.name)
+            set({ availableSegments: sceneNames, loadProgress: 0.1 })
+
+            const targetScene = initialScene && sceneNames.includes(initialScene)
+              ? initialScene
+              : sceneNames[0]
+            await get().actions.selectSegment(targetScene)
+            return
           }
 
-          if (!detectedSplit) {
-            throw new Error(
-              'Could not detect nuScenes data. Expected v1.0-mini/, v1.0-trainval/, or v1.0-test/ folder with scene.json at the given URL.'
-            )
-          }
-          set({ loadProgress: 0.05 })
-
-          // 2. Fetch all metadata JSONs as text strings (buildNuScenesDatabase accepts string values)
-          const metaBase = `${baseUrl}${detectedSplit}/`
-          const jsonFileNames = [
-            'scene.json', 'sample.json', 'sample_data.json', 'ego_pose.json',
-            'sample_annotation.json', 'calibrated_sensor.json', 'sensor.json',
-            'instance.json', 'category.json', 'log.json',
-            'lidarseg.json', 'panoptic.json', 'attribute.json', 'visibility.json',
-          ]
-
-          const jsonFiles = new Map<string, string>()
-          const fetchResults = await Promise.allSettled(
-            jsonFileNames.map(async (name) => {
-              const res = await fetch(`${metaBase}${name}`)
-              if (res.ok) {
-                jsonFiles.set(name, await res.text())
-              }
-            })
-          )
-          // Log any failures (non-critical files like panoptic.json may be missing)
-          for (let i = 0; i < fetchResults.length; i++) {
-            if (fetchResults[i].status === 'rejected') {
-              console.warn(`[loadFromUrl] Failed to fetch ${jsonFileNames[i]}`)
-            }
-          }
-          set({ loadProgress: 0.15 })
-
-          // 3. Build nuScenes database (same as local mode)
+          // Classic single version directory (v1.0-mini style)
+          internal.nuScenesDiscoveredScenes = null
           internal.datasetId = 'nuscenes'
           setManifest(nuScenesManifest)
-          set({ loadStep: 'parsing' as LoadStep })
 
-          const db = await buildNuScenesDatabase(jsonFiles)
+          const { db, sampleFiles } = await fetchNuScenesVersionData(baseUrl, set)
           internal.nuScenesDb = db
-          console.log(`[loadFromUrl] nuScenes DB built: ${db.scenes.length} scenes`)
-          set({ loadProgress: 0.2 })
-
-          // 4. Build URL-based sample file map (filename → full URL)
-          //    Workers will fetch files by URL string instead of reading File objects
-          const sampleFiles = new Map<string, string>()
-          for (const [, sd] of db.sampleDataByToken) {
-            sampleFiles.set(sd.filename, `${baseUrl}${sd.filename}`)
-          }
-          // Also add lidarseg/panoptic files if present
-          if (jsonFiles.has('lidarseg.json')) {
-            try {
-              const lidarsegEntries = JSON.parse(jsonFiles.get('lidarseg.json')!) as Array<{ filename: string }>
-              for (const entry of lidarsegEntries) {
-                sampleFiles.set(entry.filename, `${baseUrl}${entry.filename}`)
-              }
-            } catch { /* ignore parse errors */ }
-          }
-          if (jsonFiles.has('panoptic.json')) {
-            try {
-              const panopticEntries = JSON.parse(jsonFiles.get('panoptic.json')!) as Array<{ filename: string }>
-              for (const entry of panopticEntries) {
-                sampleFiles.set(entry.filename, `${baseUrl}${entry.filename}`)
-              }
-            } catch { /* ignore parse errors */ }
-          }
           internal.nuScenesSampleFiles = sampleFiles
-          console.log(`[loadFromUrl] nuScenes file map: ${sampleFiles.size} entries`)
 
-          // 5. Set available scenes and auto-select first
+          // Set available scenes and auto-select first
           const sceneNames = db.scenes.map(s => s.name).sort()
           set({ availableSegments: sceneNames, loadProgress: 0.25 })
 
@@ -1263,6 +1241,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           internal.filesBySegment = null
           internal.nuScenesDb = null
           internal.nuScenesSampleFiles = null
+          internal.nuScenesDiscoveredScenes = null
           internal.av2Db = null
           internal.av2SampleFiles = null
           internal.av2DiscoveredLogs = null
@@ -1571,6 +1550,92 @@ async function initCameraWorker(
  * Load a nuScenes scene — the nuScenes equivalent of loadDataset.
  * Called from selectSegment when the active dataset is nuScenes.
  */
+/**
+ * Fetch one nuScenes version directory over HTTP and build the database plus
+ * URL-based sample file map. Works for a classic full directory (v1.0-mini)
+ * and for a per-scene shard (scripts/shard_nuscenes.py) alike — a shard is
+ * just a version dir with one scene in it.
+ */
+async function fetchNuScenesVersionData(
+  baseUrl: string,
+  set: (partial: Partial<SceneState>) => void,
+): Promise<{ db: NuScenesDatabase; sampleFiles: Map<string, string> }> {
+  // 1. Auto-detect split by probing known metadata paths
+  const splits = ['v1.0-mini', 'v1.0-trainval', 'v1.0-test']
+  let detectedSplit: string | null = null
+
+  for (const split of splits) {
+    try {
+      const url = `${baseUrl}${split}/scene.json`
+      const res = await fetch(url, { method: 'HEAD' })
+      if (res.ok) {
+        detectedSplit = split
+        console.log(`[loadFromUrl] nuScenes detected: ${split}`)
+        break
+      }
+    } catch { /* try next split */ }
+  }
+
+  if (!detectedSplit) {
+    throw new Error(
+      'Could not detect nuScenes data. Expected v1.0-mini/, v1.0-trainval/, or v1.0-test/ folder with scene.json at the given URL.'
+    )
+  }
+  set({ loadProgress: 0.05 })
+
+  // 2. Fetch all metadata JSONs as text strings (buildNuScenesDatabase accepts string values)
+  const metaBase = `${baseUrl}${detectedSplit}/`
+  const jsonFileNames = [
+    'scene.json', 'sample.json', 'sample_data.json', 'ego_pose.json',
+    'sample_annotation.json', 'calibrated_sensor.json', 'sensor.json',
+    'instance.json', 'category.json', 'log.json',
+    'lidarseg.json', 'panoptic.json', 'attribute.json', 'visibility.json',
+  ]
+
+  const jsonFiles = new Map<string, string>()
+  const fetchResults = await Promise.allSettled(
+    jsonFileNames.map(async (name) => {
+      const res = await fetch(`${metaBase}${name}`)
+      if (res.ok) {
+        jsonFiles.set(name, await res.text())
+      }
+    })
+  )
+  // Log any failures (non-critical files like panoptic.json may be missing)
+  for (let i = 0; i < fetchResults.length; i++) {
+    if (fetchResults[i].status === 'rejected') {
+      console.warn(`[loadFromUrl] Failed to fetch ${jsonFileNames[i]}`)
+    }
+  }
+  set({ loadProgress: 0.15, loadStep: 'parsing' as LoadStep })
+
+  // 3. Build nuScenes database (same as local mode)
+  const db = await buildNuScenesDatabase(jsonFiles)
+  console.log(`[loadFromUrl] nuScenes DB built: ${db.scenes.length} scenes`)
+  set({ loadProgress: 0.2 })
+
+  // 4. Build URL-based sample file map (filename → full URL)
+  //    Workers will fetch files by URL string instead of reading File objects
+  const sampleFiles = new Map<string, string>()
+  for (const [, sd] of db.sampleDataByToken) {
+    sampleFiles.set(sd.filename, `${baseUrl}${sd.filename}`)
+  }
+  // Also add lidarseg/panoptic files if present
+  for (const segTable of ['lidarseg.json', 'panoptic.json']) {
+    if (jsonFiles.has(segTable)) {
+      try {
+        const entries = JSON.parse(jsonFiles.get(segTable)!) as Array<{ filename: string }>
+        for (const entry of entries) {
+          sampleFiles.set(entry.filename, `${baseUrl}${entry.filename}`)
+        }
+      } catch { /* ignore parse errors */ }
+    }
+  }
+  console.log(`[loadFromUrl] nuScenes file map: ${sampleFiles.size} entries`)
+
+  return { db, sampleFiles }
+}
+
 async function loadNuScenesScene(
   sceneName: string,
   set: (partial: Partial<SceneState>) => void,
@@ -2279,6 +2344,14 @@ export function getThumbnailResolver(): ((segmentId: string) => Promise<string |
         return typeof entry === 'string' ? entry : null
       }
     }
+  }
+
+  // Sharded nuScenes: the index carries a pre-resized thumbnail per scene
+  if (datasetId === 'nuscenes' && internal.nuScenesDiscoveredScenes) {
+    const thumbByName = new Map(
+      internal.nuScenesDiscoveredScenes.map(s => [s.name, s.thumbnailUrl ?? null]),
+    )
+    return (sceneName: string) => thumbByName.get(sceneName) ?? null
   }
 
   if (datasetId === 'nuscenes' && internal.nuScenesDb && internal.nuScenesSampleFiles) {
