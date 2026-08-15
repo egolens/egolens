@@ -21,6 +21,20 @@ let historyPushed = false
 /** Snapshot of the initial URL search string — captured before replaceState overwrites it */
 let initialSearch: string | null = null
 
+/**
+ * Page-level params (embed mode configuration) that must survive every URL
+ * rewrite — they describe the page, not the scene. Losing `embed=true` on a
+ * reload would turn an embed back into the full app.
+ */
+function withPageLevelParams(params: URLSearchParams): URLSearchParams {
+  const current = new URLSearchParams(window.location.search)
+  for (const key of ['embed', 'controls', 'origin'] as const) {
+    const value = current.get(key)
+    if (value !== null) params.set(key, value)
+  }
+  return params
+}
+
 export function setUrlSource(dataset: string, baseUrl: string) {
   sourceDataset = dataset
   sourceBaseUrl = baseUrl
@@ -38,6 +52,7 @@ export function setUrlSource(dataset: string, baseUrl: string) {
     const params = new URLSearchParams()
     params.set('dataset', dataset)
     params.set('data', baseUrl)
+    withPageLevelParams(params)
     window.history.pushState({ egolens: true }, '', `${window.location.pathname}?${params}`)
   }
 }
@@ -78,6 +93,8 @@ export function syncSegmentToUrl(segmentId: string) {
   params.set('data', sourceBaseUrl)
   params.set('scene', segmentId)
 
+  withPageLevelParams(params)
+
   const newUrl = `${window.location.pathname}?${params}`
   window.history.replaceState(null, '', newUrl)
 }
@@ -91,6 +108,9 @@ export interface ShareableState {
   baseUrl?: string
   scene?: string
   frame?: number
+  /** Playback time window bounds — int64 sensor timestamps as strings */
+  t0?: string
+  t1?: string
   colormap?: string
   boxMode?: string
   worldMode?: boolean
@@ -125,6 +145,7 @@ export function buildShareUrl(state: ShareableState): string {
   if (state.baseUrl) params.set('data', state.baseUrl)
   if (state.scene) params.set('scene', state.scene)
   if (state.frame != null && state.frame > 0) params.set('frame', String(state.frame))
+  if (state.t0 && state.t1) { params.set('t0', state.t0); params.set('t1', state.t1) }
   if (state.colormap && state.colormap !== 'intensity') params.set('colormap', state.colormap)
   if (state.boxMode && state.boxMode !== 'box') params.set('box', state.boxMode)
   if (state.worldMode === false) params.set('world', '0')
@@ -166,6 +187,14 @@ export function parseViewParams(search?: string): Partial<ShareableState> {
 
   const frame = params.get('frame')
   if (frame) { const n = parseInt(frame, 10); if (n >= 0) state.frame = n }
+
+  // Time window — int64 timestamps stay strings (they exceed 2^53)
+  const t0 = params.get('t0')
+  const t1 = params.get('t1')
+  if (t0 && t1 && /^\d{1,20}$/.test(t0) && /^\d{1,20}$/.test(t1)) {
+    state.t0 = t0
+    state.t1 = t1
+  }
 
   const colormap = params.get('colormap')
   if (colormap) state.colormap = colormap

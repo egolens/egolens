@@ -26,6 +26,7 @@ The hosted build at `https://egolens.org` is embeddable as-is — no need to run
 | `data` | URL | — | **Required.** Base URL to the dataset log directory |
 | `controls` | `full` \| `minimal` \| `none` | `full` | UI controls visibility |
 | `frame` | number | `0` | Initial frame index (0-based) |
+| `t0` / `t1` | int64 string | — | Playback time window (sensor timestamps, ns or µs). Auto-seeks to the window start and loops playback inside it; `t0` wins over `frame` |
 | `camera` | string | — | Initial camera POV (e.g., `FRONT`, `ring_front_center`) |
 | `autoplay` | `true` | `false` | Auto-start playback after first frame loads |
 | `colormap` | string | `intensity` | Initial colormap mode |
@@ -70,6 +71,11 @@ iframe.contentWindow.postMessage({ type: 'setColormap', colormap: 'height' }, '*
 // of the discovered scenes (unknown ids reply with an 'error' message).
 iframe.contentWindow.postMessage({ type: 'setScene', scene: 'scene-0103' }, '*')
 
+// Clip playback to a [t0, t1] sensor-time interval (int64 as strings).
+// Pass t0: null to clear the window.
+iframe.contentWindow.postMessage({ type: 'setWindow', t0: '1533151608548020', t1: '1533151613398020' }, '*')
+iframe.contentWindow.postMessage({ type: 'setWindow', t0: null }, '*')
+
 // Request current state (viewer replies with 'stateReply')
 iframe.contentWindow.postMessage({ type: 'getState' }, '*')
 ```
@@ -96,7 +102,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (type === 'stateReply') {
-    // Response to getState — { frame, totalFrames, isPlaying, colormap, status, scene }
+    // Response to getState — { frame, totalFrames, isPlaying, colormap, status, scene, window }
     console.log('State:', event.data)
   }
 

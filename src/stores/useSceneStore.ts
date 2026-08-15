@@ -85,6 +85,7 @@ import type {
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
 import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
@@ -154,6 +155,8 @@ interface SceneActions {
   pause: () => void
   togglePlayback: () => void
   setPlaybackSpeed: (speed: number) => void
+  /** Set the playback time window from raw t0/t1 timestamps (strings — int64). Null clears. */
+  setPlaybackWindow: (t0: string | null, t1?: string) => void
   toggleSensor: (laserName: number) => void
   cycleBoxMode: () => void
   setBoxMode: (mode: BoxMode) => void
@@ -202,6 +205,8 @@ export interface SceneState {
   currentFrameIndex: number
   isPlaying: boolean
   playbackSpeed: number
+  /** Playback time window (t0/t1 params, setWindow command) — playback loops inside [f0, f1]; null = full range */
+  playbackWindow: { f0: number; f1: number; t0: string; t1: string } | null
 
   // Current frame data
   currentFrame: FrameData | null
@@ -593,6 +598,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   currentFrameIndex: 0,
   isPlaying: false,
   playbackSpeed: 1,
+  playbackWindow: null,
   currentFrame: null,
   lidarCalibrations: new Map(),
   cameraCalibrations: [],
@@ -741,6 +747,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const intervalMs = (1000 / fps) / get().playbackSpeed
       internal.playIntervalId = setInterval(async () => {
         const next = get().currentFrameIndex + 1
+        // Time window: loop inside [f0, f1] instead of running to the end
+        const win = get().playbackWindow
+        if (win && next > win.f1) {
+          await get().actions.loadFrame(win.f0)
+          return
+        }
         if (next >= get().totalFrames) {
           get().actions.pause()
           return
@@ -786,9 +798,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (get().isPlaying) {
         get().actions.pause()
       } else {
-        // If at the end, rewind to start before playing
+        // If at the end, rewind to start (window start when one is active)
         if (get().currentFrameIndex >= get().totalFrames - 1) {
-          get().actions.loadFrame(0).then(() => get().actions.play())
+          get().actions.loadFrame(get().playbackWindow?.f0 ?? 0).then(() => get().actions.play())
         } else {
           get().actions.play()
         }
@@ -800,6 +812,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (wasPlaying) get().actions.pause()
       set({ playbackSpeed: speed })
       if (wasPlaying) get().actions.play()
+    },
+
+    setPlaybackWindow: (t0, t1) => {
+      if (t0 == null || t1 == null) {
+        set({ playbackWindow: null })
+        return
+      }
+      const resolved = resolveWindowToFrames(internal.timestamps, t0, t1)
+      if (!resolved) {
+        console.warn(`[playbackWindow] t0/t1 (${t0}..${t1}) don't resolve against this scene — window ignored`)
+        set({ playbackWindow: null })
+        return
+      }
+      set({ playbackWindow: { ...resolved, t0, t1 } })
+      void get().actions.seekFrame(resolved.f0)
     },
 
     toggleSensor: (laserName: number) => {
@@ -1363,6 +1390,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         currentFrameIndex: 0,
         isPlaying: false,
         playbackSpeed: 1,
+        playbackWindow: null,
         currentFrame: null,
         lidarCalibrations: new Map(),
         cameraCalibrations: [],

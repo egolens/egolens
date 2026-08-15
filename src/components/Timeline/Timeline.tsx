@@ -54,7 +54,18 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const isPlaying = useSceneStore((s) => s.isPlaying)
   const cachedFrames = useSceneStore((s) => s.cachedFrames)
   const cameraCachedFrames = useSceneStore((s) => s.cameraCachedFrames)
+  const playbackWindow = useSceneStore((s) => s.playbackWindow)
   const actions = useSceneStore((s) => s.actions)
+
+  const clearWindow = useCallback(() => {
+    actions.setPlaybackWindow(null)
+    // Drop the params too, so a reload doesn't resurrect the window
+    const params = new URLSearchParams(window.location.search)
+    params.delete('t0')
+    params.delete('t1')
+    const qs = params.toString()
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? '?' + qs : ''}`)
+  }, [actions])
 
   // Annotation frame markers
   const colormapMode = useSceneStore((s) => s.colormapMode)
@@ -175,6 +186,20 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
               )
             })}
 
+            {/* Time window band — playback loops inside [f0, f1] */}
+            {playbackWindow && maxFrame > 0 && (
+              <div style={{
+                position: 'absolute',
+                left: `${(playbackWindow.f0 / maxFrame) * 100}%`,
+                width: `${((playbackWindow.f1 - playbackWindow.f0) / maxFrame) * 100}%`,
+                height: '12px',
+                backgroundColor: 'rgba(240, 198, 116, 0.18)',
+                border: '1px solid rgba(240, 198, 116, 0.55)',
+                borderRadius: radius.pill,
+                pointerEvents: 'none',
+              }} />
+            )}
+
             {/* Played progress (gradient bar) */}
             <div style={{
               position: 'absolute',
@@ -276,6 +301,31 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
           </div>
         )}
       </div>
+
+      {playbackWindow && (
+        <button
+          onClick={clearWindow}
+          title={`Playback clipped to frames ${playbackWindow.f0 + 1}–${playbackWindow.f1 + 1} (t0/t1) — click to clear`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            padding: '2px 8px',
+            fontSize: '10px',
+            fontFamily: fonts.sans,
+            color: '#f0c674',
+            backgroundColor: 'rgba(240, 198, 116, 0.12)',
+            border: '1px solid rgba(240, 198, 116, 0.45)',
+            borderRadius: radius.pill,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            lineHeight: 1.6,
+          }}
+        >
+          {playbackWindow.f0 + 1}–{playbackWindow.f1 + 1}
+          <span aria-hidden="true">✕</span>
+        </button>
+      )}
 
       <span style={{
         fontFamily: fonts.mono,

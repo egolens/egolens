@@ -130,6 +130,10 @@ function useUrlViewRestore() {
       const f = Math.min(viewParams.frame, state.totalFrames - 1)
       actions.seekFrame(f)
     }
+    // Applied after `frame` so the window's auto-seek to f0 wins
+    if (viewParams.t0 && viewParams.t1) {
+      actions.setPlaybackWindow(viewParams.t0, viewParams.t1)
+    }
     if (viewParams.colormap) {
       actions.setColormapMode(viewParams.colormap as typeof state.colormapMode)
     }
@@ -475,6 +479,8 @@ function Header() {
       baseUrl: src?.baseUrl,
       scene: s.currentSegment ?? undefined,
       frame: s.currentFrameIndex,
+      t0: s.playbackWindow?.t0,
+      t1: s.playbackWindow?.t1,
       colormap: s.colormapMode,
       boxMode: s.boxMode,
       worldMode: s.worldMode,
