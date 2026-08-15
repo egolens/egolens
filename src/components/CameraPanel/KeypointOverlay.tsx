@@ -217,7 +217,6 @@ export default function KeypointOverlay({ cameraName }: KeypointOverlayProps) {
       }
     })
     return () => unsub()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draw])
 
   // ResizeObserver — update canvas dimensions + redraw

@@ -7,7 +7,6 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readFileSync, closeSync } from 'fs'
-import { openSync, readSync, fstatSync } from 'fs'
 import { resolve } from 'path'
 import type { AsyncBuffer } from 'hyparquet'
 import { openParquetFile, readAllRows } from '../parquet'

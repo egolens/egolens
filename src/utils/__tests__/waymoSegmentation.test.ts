@@ -102,7 +102,7 @@ describe('Waymo seg range image channel order', () => {
     const C = shape[2]
     const wrongSem0 = segValues[0 * C]     // -1 (instance!) — NOT a valid class
     const wrongSem1 = segValues[1 * C]     // 3  (instance!) — would show as "Bus"
-    const wrongSem2 = segValues[2 * C]     // -1 (instance!)
+    const _wrongSem2 = segValues[2 * C]     // -1 (instance!)
 
     expect(wrongSem0).toBe(-1) // Not a valid semantic class
     expect(wrongSem1).toBe(3)  // Instance ID 3, but would be misread as "Bus"

@@ -8,8 +8,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { parseKeypointRows, type KeypointObject } from '../KeypointSkeleton'
-import { WAYMO_SKELETON_BONES, KP, WAYMO_KEYPOINT_LABELS } from '../../../utils/waymoSemanticClasses'
+import { parseKeypointRows } from '../KeypointSkeleton'
+import { WAYMO_SKELETON_BONES, KP } from '../../../utils/waymoSemanticClasses'
 import type { ParquetRow } from '../../../utils/merge'
 
 // ---------------------------------------------------------------------------

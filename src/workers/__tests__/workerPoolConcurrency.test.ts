@@ -5,16 +5,21 @@
  * that the in-flight fetch limiter works correctly.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { WorkerPool } from '../workerPool'
 
 // Mock Worker that auto-responds to init, and responds to loadBatch on demand
+/** Subset of the pool→worker message protocol this mock reacts to */
+type PoolMessage =
+  | { type: 'init' }
+  | { type: 'loadBatch'; requestId: number; batchIndex: number }
+
 class MockWorker {
   onmessage: ((e: MessageEvent) => void) | null = null
   onerror: ((e: ErrorEvent) => void) | null = null
   private pendingBatches: Map<number, number> = new Map() // requestId → batchIndex
 
-  postMessage(msg: any) {
+  postMessage(msg: PoolMessage) {
     if (msg.type === 'init') {
       // Auto-respond ready after a microtask
       queueMicrotask(() => {

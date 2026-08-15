@@ -17,6 +17,33 @@
 import { getAllKnownComponents, detectDataset } from '../adapters/registry'
 
 // ---------------------------------------------------------------------------
+// File System Access API typings not yet in this project's lib.dom setup
+// ---------------------------------------------------------------------------
+
+declare global {
+  /**
+   * `FileSystemDirectoryHandle` is async-iterable at runtime, but the
+   * `DOM.AsyncIterable` lib is not enabled in tsconfig — declare the
+   * iterator here so `for await` over a handle type-checks.
+   */
+  interface FileSystemDirectoryHandle {
+    [Symbol.asyncIterator](): AsyncIterableIterator<
+      [string, FileSystemFileHandle | FileSystemDirectoryHandle]
+    >
+  }
+}
+
+/** `DataTransferItem.getAsFileSystemHandle()` — File System Access API, not in lib.dom yet */
+interface DataTransferItemWithHandle extends DataTransferItem {
+  getAsFileSystemHandle?: () => Promise<FileSystemHandle | null>
+}
+
+/** `window.showDirectoryPicker()` — File System Access API, not in lib.dom yet */
+interface WindowWithDirectoryPicker extends Window {
+  showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>
+}
+
+// ---------------------------------------------------------------------------
 // Scan result & rejection diagnostics
 // ---------------------------------------------------------------------------
 
@@ -122,7 +149,7 @@ export async function scanDirectoryHandle(
   // or if it CONTAINS component folders (user dropped a parent)
   const childDirs = new Map<string, FileSystemDirectoryHandle>()
 
-  for await (const [name, handle] of dirHandle as any) {
+  for await (const [name, handle] of dirHandle) {
     if (handle.kind === 'directory') {
       childDirs.set(name, handle as FileSystemDirectoryHandle)
     }
@@ -140,7 +167,7 @@ export async function scanDirectoryHandle(
     // Try one level deeper: look for a child that has component subdirs
     componentDirs = new Map()
     for (const [, childDir] of childDirs) {
-      for await (const [name, handle] of childDir as any) {
+      for await (const [name, handle] of childDir) {
         if (handle.kind === 'directory' && getAllKnownComponents().has(name)) {
           componentDirs.set(name, handle as FileSystemDirectoryHandle)
         }
@@ -171,7 +198,7 @@ export async function scanDirectoryHandle(
   // Scan each component directory for .parquet files
   for (const [component, compDir] of componentDirs) {
     if (!getAllKnownComponents().has(component)) continue
-    for await (const [fileName, fileHandle] of compDir as any) {
+    for await (const [fileName, fileHandle] of compDir) {
       if (fileHandle.kind !== 'file' || !fileName.endsWith('.parquet')) continue
       const segmentId = fileName.replace('.parquet', '')
       const file = await (fileHandle as FileSystemFileHandle).getFile()
@@ -218,7 +245,7 @@ async function scanNuScenesDirectoryHandle(
   for (const name of metaDirNames) {
     const dir = componentDirs.get(name)
     if (!dir) continue
-    for await (const [fileName, handle] of dir as any) {
+    for await (const [fileName, handle] of dir) {
       if ((handle as FileSystemHandle).kind === 'file' && fileName.endsWith('.json')) {
         allFiles.set(fileName, await (handle as FileSystemFileHandle).getFile())
       }
@@ -231,10 +258,10 @@ async function scanNuScenesDirectoryHandle(
     const dir = componentDirs.get(dirName)
     if (!dir) continue
     // One level: lidarseg/v1.0-mini/<token>_lidarseg.bin
-    for await (const [splitName, handle] of dir as any) {
+    for await (const [splitName, handle] of dir) {
       if ((handle as FileSystemHandle).kind !== 'directory') continue
       const splitDir = handle as FileSystemDirectoryHandle
-      for await (const [fileName, fileHandle] of splitDir as any) {
+      for await (const [fileName, fileHandle] of splitDir) {
         if ((fileHandle as FileSystemHandle).kind !== 'file') continue
         allFiles.set(
           `${dirName}/${splitName}/${fileName}`,
@@ -249,10 +276,10 @@ async function scanNuScenesDirectoryHandle(
   for (const dirName of ['samples'] as const) {
     const dir = componentDirs.get(dirName)
     if (!dir) continue
-    for await (const [sensorName, handle] of dir as any) {
+    for await (const [sensorName, handle] of dir) {
       if ((handle as FileSystemHandle).kind !== 'directory') continue
       const sensorDir = handle as FileSystemDirectoryHandle
-      for await (const [fileName, fileHandle] of sensorDir as any) {
+      for await (const [fileName, fileHandle] of sensorDir) {
         if ((fileHandle as FileSystemHandle).kind !== 'file') continue
         allFiles.set(
           `${dirName}/${sensorName}/${fileName}`,
@@ -309,11 +336,11 @@ async function scanAV2DirectoryHandle(
   const result = new Map<string, Map<string, File>>()
   const logDirs: [string, FileSystemDirectoryHandle][] = []
 
-  for await (const [name, handle] of dirHandle as any) {
+  for await (const [name, handle] of dirHandle) {
     if (handle.kind !== 'directory') continue
     // Check if this child has sensors/ and calibration/
     const childDirs = new Map<string, FileSystemDirectoryHandle>()
-    for await (const [childName, childHandle] of handle as any) {
+    for await (const [childName, childHandle] of handle) {
       if (childHandle.kind === 'directory') {
         childDirs.set(childName, childHandle as FileSystemDirectoryHandle)
       }
@@ -328,7 +355,7 @@ async function scanAV2DirectoryHandle(
   // For now, load first log only (multi-log support can be added later)
   const [logId, logHandle] = logDirs[0]
   const logComponentDirs = new Map<string, FileSystemDirectoryHandle>()
-  for await (const [name, handle] of logHandle as any) {
+  for await (const [name, handle] of logHandle) {
     if (handle.kind === 'directory') {
       logComponentDirs.set(name, handle as FileSystemDirectoryHandle)
     }
@@ -351,7 +378,7 @@ async function scanSingleAV2Log(
   const allFiles = new Map<string, File>()
 
   // Read top-level feather files (annotations, poses)
-  for await (const [fileName, handle] of logHandle as any) {
+  for await (const [fileName, handle] of logHandle) {
     if (handle.kind === 'file' && fileName.endsWith('.feather')) {
       allFiles.set(fileName, await (handle as FileSystemFileHandle).getFile())
     }
@@ -360,7 +387,7 @@ async function scanSingleAV2Log(
   // Read calibration files
   const calibDir = componentDirs.get('calibration')
   if (calibDir) {
-    for await (const [fileName, handle] of calibDir as any) {
+    for await (const [fileName, handle] of calibDir) {
       if (handle.kind === 'file' && fileName.endsWith('.feather')) {
         allFiles.set(`calibration/${fileName}`, await (handle as FileSystemFileHandle).getFile())
       }
@@ -370,13 +397,13 @@ async function scanSingleAV2Log(
   // Read sensor files: sensors/lidar/*.feather and sensors/cameras/{cam}/*.jpg
   const sensorsDir = componentDirs.get('sensors')
   if (sensorsDir) {
-    for await (const [sensorType, handle] of sensorsDir as any) {
+    for await (const [sensorType, handle] of sensorsDir) {
       if (handle.kind !== 'directory') continue
       const sensorTypeDir = handle as FileSystemDirectoryHandle
 
       if (sensorType === 'lidar') {
         // sensors/lidar/{timestamp_ns}.feather
-        for await (const [fileName, fileHandle] of sensorTypeDir as any) {
+        for await (const [fileName, fileHandle] of sensorTypeDir) {
           if (fileHandle.kind === 'file' && fileName.endsWith('.feather')) {
             allFiles.set(
               `sensors/lidar/${fileName}`,
@@ -386,10 +413,10 @@ async function scanSingleAV2Log(
         }
       } else if (sensorType === 'cameras') {
         // sensors/cameras/{cam_name}/{timestamp_ns}.jpg
-        for await (const [camName, camHandle] of sensorTypeDir as any) {
+        for await (const [camName, camHandle] of sensorTypeDir) {
           if (camHandle.kind !== 'directory') continue
           const camDir = camHandle as FileSystemDirectoryHandle
-          for await (const [fileName, fileHandle] of camDir as any) {
+          for await (const [fileName, fileHandle] of camDir) {
             if (fileHandle.kind === 'file' && fileName.endsWith('.jpg')) {
               allFiles.set(
                 `sensors/cameras/${camName}/${fileName}`,
@@ -424,7 +451,7 @@ export async function scanDataTransfer(
     if (item.kind !== 'file') continue
 
     // Try modern API first
-    const handle = await (item as any).getAsFileSystemHandle?.()
+    const handle = await (item as DataTransferItemWithHandle).getAsFileSystemHandle?.()
     if (handle && handle.kind === 'directory') {
       return scanDirectoryHandle(handle as FileSystemDirectoryHandle)
     }
@@ -524,11 +551,11 @@ async function scanFileSystemEntry(
  * Only works in Chrome/Edge (File System Access API).
  */
 export async function pickAndScanFolder(): Promise<ScanResult> {
-  const dirHandle = await (window as any).showDirectoryPicker()
+  const dirHandle = await (window as WindowWithDirectoryPicker).showDirectoryPicker!()
   return scanDirectoryHandle(dirHandle)
 }
 
 /** Check if the File System Access API is available */
 export function hasDirectoryPicker(): boolean {
-  return typeof (window as any).showDirectoryPicker === 'function'
+  return typeof (window as WindowWithDirectoryPicker).showDirectoryPicker === 'function'
 }

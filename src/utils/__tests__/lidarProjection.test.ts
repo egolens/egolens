@@ -326,7 +326,7 @@ describe('transformToCameraFrame', () => {
 
   it('consistent with projectPointsToCamera', () => {
     // A point at (0.5, 0.3, 10) with identity inv, optical frame — well within FOV
-    const [cx, cy, cz] = transformToCameraFrame(0.5, 0.3, 10, IDENTITY_4x4, true)
+    const [, , cz] = transformToCameraFrame(0.5, 0.3, 10, IDENTITY_4x4, true)
     // projectPointsToCamera should give same depth
     const positions = new Float32Array([0.5, 0.3, 10])
     const proj: CameraProjector = {

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { setupHiDpiCanvas, type CanvasSetupResult } from '../canvasUtils'
+import { setupHiDpiCanvas } from '../canvasUtils'
 
 // ---------------------------------------------------------------------------
 // Mock canvas + context
