@@ -55,6 +55,15 @@ describe('fetchNuScenesIndex', () => {
     expect(await fetchNuScenesIndex(BASE)).toBeNull()
   })
 
+  it('treats a 200 non-JSON response as absent (SPA-fallback hosts)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('Unexpected token <') },
+    })
+    expect(await fetchNuScenesIndex(BASE)).toBeNull()
+  })
+
   it('throws DataLoadError on other HTTP errors', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}, 500))
     await expect(fetchNuScenesIndex(BASE)).rejects.toThrow(DataLoadError)

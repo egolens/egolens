@@ -53,7 +53,15 @@ export async function fetchNuScenesIndex(baseUrl: string): Promise<NuScenesIndex
       throw classifyHttpError(res.status, url)
     }
 
-    const index = await res.json() as NuScenesIndex
+    // SPA-fallback hosts answer missing files with 200 + index.html — for a
+    // self-hosted classic directory that must mean "no index", not a failure
+    let index: NuScenesIndex
+    try {
+      index = await res.json() as NuScenesIndex
+    } catch {
+      console.warn(`[fetchNuScenesIndex] ${url} returned non-JSON — treating as absent`)
+      return null
+    }
 
     if (!index.version || !Array.isArray(index.scenes)) {
       throw new DataLoadError(

@@ -82,6 +82,15 @@ describe('fetchAV2Index', () => {
     await expect(fetchAV2Index(BASE)).rejects.toThrow(DataLoadError)
   })
 
+  it('treats a 200 non-JSON response as absent (SPA-fallback hosts)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('Unexpected token <') },
+    })
+    expect(await fetchAV2Index(BASE)).toBeNull()
+  })
+
   it('throws on schema-invalid index (missing logs array)', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ version: 1, dataset: 'argoverse2' }))
     await expect(fetchAV2Index(BASE)).rejects.toThrow(/Invalid index\.json/)

@@ -325,7 +325,15 @@ export async function fetchAV2Index(baseUrl: string): Promise<AV2Index | null> {
       throw classifyHttpError(res.status, url)
     }
 
-    const index = await res.json() as AV2Index
+    // SPA-fallback hosts answer missing files with 200 + index.html — for a
+    // self-hosted directory that must mean "no index", not a failure
+    let index: AV2Index
+    try {
+      index = await res.json() as AV2Index
+    } catch {
+      console.warn(`[fetchAV2Index] ${url} returned non-JSON — treating as absent`)
+      return null
+    }
 
     if (!index.version || !Array.isArray(index.logs)) {
       throw new DataLoadError(
