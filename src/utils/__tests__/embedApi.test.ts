@@ -16,11 +16,13 @@ vi.mock('../../stores/useSceneStore', () => {
     error: null,
     currentSegment: null,
     availableSegments: [],
+    playbackWindow: null,
     actions: {
       seekFrame: vi.fn(),
       togglePlayback: vi.fn(),
       setColormapMode: vi.fn(),
       selectSegment: vi.fn().mockResolvedValue(undefined),
+      setPlaybackWindow: vi.fn(),
     },
   }
   return {
@@ -44,11 +46,13 @@ vi.mock('../../stores/useSceneStore', () => {
           error: null,
           currentSegment: null,
           availableSegments: [],
+          playbackWindow: null,
           actions: {
             seekFrame: vi.fn(),
             togglePlayback: vi.fn(),
             setColormapMode: vi.fn(),
             selectSegment: vi.fn().mockResolvedValue(undefined),
+            setPlaybackWindow: vi.fn(),
           },
         }
         subscribers.clear()
@@ -247,6 +251,32 @@ describe('embedApi', () => {
     const replies = postMessageSpy.mock.calls.filter(([msg]: [{ type: string }]) => msg.type === 'stateReply')
     expect(replies.length).toBe(1)
     expect(replies[0][0].scene).toBe('scene-x')
+  })
+
+  it('handles setWindow inbound message', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setWindow', t0: '100', t1: '200' },
+    }))
+    const actions = store.getState().actions as { setPlaybackWindow: ReturnType<typeof vi.fn> }
+    expect(actions.setPlaybackWindow).toHaveBeenCalledWith('100', '200')
+  })
+
+  it('setWindow with t0: null clears the window', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setWindow', t0: null },
+    }))
+    const actions = store.getState().actions as { setPlaybackWindow: ReturnType<typeof vi.fn> }
+    expect(actions.setPlaybackWindow).toHaveBeenCalledWith(null)
+  })
+
+  it('stateReply includes the playback window', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    store._setState({ playbackWindow: { f0: 3, f1: 9, t0: '100', t1: '200' } })
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'getState' } }))
+    const replies = postMessageSpy.mock.calls.filter(([msg]: [{ type: string }]) => msg.type === 'stateReply')
+    expect(replies[0][0].window).toEqual({ f0: 3, f1: 9, t0: '100', t1: '200' })
   })
 
   it('ignores malformed messages', () => {

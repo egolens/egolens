@@ -196,7 +196,7 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
    * or queues the request if all workers are busy or the in-flight
    * fetch limit has been reached.
    */
-  requestBatch(batchIndex: number): Promise<TResult> {
+  requestBatch(batchIndex: number, opts?: { priority?: boolean }): Promise<TResult> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
 
@@ -204,6 +204,11 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
       const idle = this.workers.find((w) => w.ready && !w.busy)
       if (idle && this.inFlightCount < this.maxConcurrentFetches) {
         this.dispatchToWorker(idle, requestId, batchIndex, resolve, reject)
+      } else if (opts?.priority) {
+        // Frames someone is waiting to watch (a t0/t1 range) go to the head
+        // of the queue. Stating the intent here means callers never have to
+        // depend on having queued before the bulk prefetch.
+        this.waitQueue.unshift({ requestId, batchIndex, resolve, reject })
       } else {
         // All busy or fetch limit reached — queue it
         this.waitQueue.push({ requestId, batchIndex, resolve, reject })
@@ -212,8 +217,8 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
   }
 
   // Legacy alias
-  requestRowGroup(batchIndex: number): Promise<TResult> {
-    return this.requestBatch(batchIndex)
+  requestRowGroup(batchIndex: number, opts?: { priority?: boolean }): Promise<TResult> {
+    return this.requestBatch(batchIndex, opts)
   }
 
   /** Terminate all workers. */

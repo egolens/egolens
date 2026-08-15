@@ -39,6 +39,7 @@ export type InboundMessage =
   | { type: 'pause' }
   | { type: 'setColormap'; colormap: string }
   | { type: 'setScene'; scene: string }
+  | { type: 'setWindow'; t0: string | null; t1?: string }
   | { type: 'getState' }
 
 /** Outbound message types (viewer → host) */
@@ -46,7 +47,7 @@ export type OutboundMessage =
   | { type: 'ready' }
   | { type: 'frameChange'; frame: number; totalFrames: number }
   | { type: 'sceneChange'; scene: string; totalFrames: number }
-  | { type: 'stateReply'; frame: number; totalFrames: number; isPlaying: boolean; colormap: string; status: string; scene: string | null }
+  | { type: 'stateReply'; frame: number; totalFrames: number; isPlaying: boolean; colormap: string; status: string; scene: string | null; window: { f0: number; f1: number; t0: string; t1: string } | null }
   | { type: 'error'; message: string }
 
 // Valid colormap values for validation
@@ -113,6 +114,16 @@ function handleInbound(msg: InboundMessage): void {
       }
       break
     }
+    case 'setWindow': {
+      // Clip playback to a [t0, t1] sensor-time interval (strings — int64
+      // over JSON). t0: null clears the window.
+      if (msg.t0 === null) {
+        actions.setPlaybackWindow(null)
+      } else if (typeof msg.t0 === 'string' && typeof msg.t1 === 'string') {
+        actions.setPlaybackWindow(msg.t0, msg.t1)
+      }
+      break
+    }
     case 'getState': {
       // Reply will be sent by the frame change listener
       const reply: OutboundMessage = {
@@ -123,6 +134,7 @@ function handleInbound(msg: InboundMessage): void {
         colormap: state.colormapMode,
         status: state.status,
         scene: state.currentSegment,
+        window: state.playbackWindow,
       }
       // Need to access the origin from somewhere — we'll use the stored one
       sendToHost(reply, _storedOrigin)

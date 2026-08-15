@@ -43,6 +43,11 @@ class MockWorker {
     return [...this.pendingBatches.keys()]
   }
 
+  /** Batch indices currently dispatched to this worker */
+  getPendingBatchIndices(): number[] {
+    return [...this.pendingBatches.values()]
+  }
+
   terminate() {}
 }
 
@@ -154,5 +159,75 @@ describe('WorkerPool maxConcurrentFetches', () => {
 
     await Promise.all([p0, p1])
     expect(results).toEqual([0, 1])
+  })
+})
+
+describe('WorkerPool priority queueing', () => {
+  let mockWorkers: MockWorker[]
+
+  function createPool(concurrency: number, maxConcurrentFetches?: number) {
+    mockWorkers = []
+    const pool = new WorkerPool<Record<string, unknown>>(
+      concurrency,
+      () => {
+        const w = new MockWorker()
+        mockWorkers.push(w)
+        return w as unknown as Worker
+      },
+      maxConcurrentFetches,
+    )
+    return pool
+  }
+
+  const dispatchedBatches = () => mockWorkers.flatMap(w => w.getPendingBatchIndices())
+
+  /**
+   * The range-priority feature depends on this: a batch someone is waiting to
+   * watch must run before bulk prefetch work that was queued first. Pinning it
+   * here means a future queue rewrite fails loudly instead of silently
+   * degrading a t0/t1 deep link back to "load the whole log in order".
+   */
+  it('runs a priority request before earlier-queued ones', async () => {
+    const pool = createPool(1, 1)
+    await pool.init({})
+
+    void pool.requestBatch(0)   // dispatched immediately
+    void pool.requestBatch(1)   // queued
+    void pool.requestBatch(2)   // queued
+    void pool.requestBatch(9, { priority: true }) // must jump both
+
+    expect(dispatchedBatches()).toEqual([0])
+
+    const worker = mockWorkers[0]
+    worker.completeBatch(worker.getPendingRequestIds()[0])
+    await Promise.resolve()
+
+    expect(dispatchedBatches()).toEqual([9])
+  })
+
+  it('keeps FIFO order among non-priority requests', async () => {
+    const pool = createPool(1, 1)
+    await pool.init({})
+
+    void pool.requestBatch(0)
+    void pool.requestBatch(1)
+    void pool.requestBatch(2)
+
+    const worker = mockWorkers[0]
+    worker.completeBatch(worker.getPendingRequestIds()[0])
+    await Promise.resolve()
+    expect(dispatchedBatches()).toEqual([1])
+
+    worker.completeBatch(worker.getPendingRequestIds()[0])
+    await Promise.resolve()
+    expect(dispatchedBatches()).toEqual([2])
+  })
+
+  it('dispatches a priority request immediately when a worker is idle', async () => {
+    const pool = createPool(2, 2)
+    await pool.init({})
+
+    void pool.requestBatch(5, { priority: true })
+    expect(dispatchedBatches()).toEqual([5])
   })
 })

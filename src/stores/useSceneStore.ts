@@ -84,7 +84,8 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
-import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindowToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
@@ -154,6 +155,10 @@ interface SceneActions {
   pause: () => void
   togglePlayback: () => void
   setPlaybackSpeed: (speed: number) => void
+  /** Set the playback time window from raw t0/t1 timestamps (strings — int64). Null clears. */
+  setPlaybackWindow: (t0: string | null, t1?: string) => void
+  /** Set the window by frame indices (handle dragging). Derives t0/t1 from scene timestamps; no auto-seek. */
+  setPlaybackWindowFrames: (f0: number, f1: number) => void
   toggleSensor: (laserName: number) => void
   cycleBoxMode: () => void
   setBoxMode: (mode: BoxMode) => void
@@ -202,6 +207,8 @@ export interface SceneState {
   currentFrameIndex: number
   isPlaying: boolean
   playbackSpeed: number
+  /** Playback time window (t0/t1 params, setWindow command) — playback loops inside [f0, f1]; null = full range */
+  playbackWindow: { f0: number; f1: number; t0: string; t1: string } | null
 
   // Current frame data
   currentFrame: FrameData | null
@@ -367,6 +374,13 @@ const internal = {
   nuScenesSampleFiles: null as Map<string, File | string> | null,
   /** Discovered per-scene shards from an index.json root (sharded hosting mode) */
   nuScenesDiscoveredScenes: null as NuScenesDiscoveredScene[] | null,
+  /**
+   * Seek requested before its frame was cached (cold load). loadFrame drops
+   * cache misses so it never fights the prefetch queue, which would silently
+   * strand a deep link — `?frame=` or a t0/t1 range — at frame 0 while the
+   * user waits. Applied by syncCachedFrames once the frame arrives.
+   */
+  pendingSeekFrame: null as number | null,
   // -- Argoverse 2-specific state --
   /** Parsed AV2 log database */
   av2Db: null as AV2LogDatabase | null,
@@ -382,6 +396,7 @@ const internal = {
 function resetInternal() {
   internal.parquetFiles.clear()
   internal.timestamps = []
+  internal.pendingSeekFrame = null
   internal.timestampToFrame.clear()
   internal.lidarBoxByFrame.clear()
   internal.cameraBoxByFrame.clear()
@@ -437,11 +452,12 @@ function resetInternal() {
 
 function requestRowGroup(
   rowGroupIndex: number,
+  opts?: { priority?: boolean },
 ): Promise<LidarBatchResult> {
   if (!internal.workerPool) {
     return Promise.reject(new Error('Worker pool not initialized'))
   }
-  return internal.workerPool.requestRowGroup(rowGroupIndex)
+  return internal.workerPool.requestRowGroup(rowGroupIndex, opts)
 }
 
 /** Cache all frames from a row group result into internal.frameCache */
@@ -549,6 +565,14 @@ function cacheCameraRowGroupFrames(
 function syncCachedFrames(set: (partial: Partial<SceneState>) => void) {
   const indices = [...internal.frameCache.keys()].sort((a, b) => a - b)
   set({ cachedFrames: indices })
+
+  // A deep-linked seek that missed the cache lands here, the moment its
+  // frame arrives — otherwise a cold load strands the viewer at frame 0.
+  const pending = internal.pendingSeekFrame
+  if (pending !== null && internal.frameCache.has(pending)) {
+    internal.pendingSeekFrame = null
+    void useSceneStore.getState().actions.loadFrame(pending)
+  }
 }
 
 /** Update the cameraCachedFrames state for the camera buffer lane UI */
@@ -593,6 +617,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   currentFrameIndex: 0,
   isPlaying: false,
   playbackSpeed: 1,
+  playbackWindow: null,
   currentFrame: null,
   lidarCalibrations: new Map(),
   cameraCalibrations: [],
@@ -709,6 +734,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // Cache hit — instant (the common case after prefetch completes)
       const cached = internal.frameCache.get(frameIndex)
       if (cached) {
+        // An explicit landing supersedes any queued deep-link seek
+        internal.pendingSeekFrame = null
         // Merge camera images from separate cache (always create new Map for re-render)
         const camData = internal.cameraImageCache.get(frameIndex)
         const cameraImages = camData ? new Map(camData) : new Map<number, ArrayBuffer>()
@@ -725,9 +752,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      // Cache miss — frame not yet prefetched, ignore navigation.
-      // Prefetch loads all row groups sequentially; the frame will become
-      // available shortly. This avoids contention with the prefetch queue.
+      // Cache miss — frame not yet prefetched, so don't fight the prefetch
+      // queue; remember it and let syncCachedFrames land it on arrival.
+      internal.pendingSeekFrame = frameIndex
     },
 
     nextFrame: () => get().actions.loadFrame(get().currentFrameIndex + 1),
@@ -741,6 +768,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const intervalMs = (1000 / fps) / get().playbackSpeed
       internal.playIntervalId = setInterval(async () => {
         const next = get().currentFrameIndex + 1
+        // Time window: loop inside [f0, f1] instead of running to the end
+        const win = get().playbackWindow
+        if (win && next > win.f1) {
+          await get().actions.loadFrame(win.f0)
+          return
+        }
         if (next >= get().totalFrames) {
           get().actions.pause()
           return
@@ -786,9 +819,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (get().isPlaying) {
         get().actions.pause()
       } else {
-        // If at the end, rewind to start before playing
+        // If at the end, rewind to start (window start when one is active)
         if (get().currentFrameIndex >= get().totalFrames - 1) {
-          get().actions.loadFrame(0).then(() => get().actions.play())
+          get().actions.loadFrame(get().playbackWindow?.f0 ?? 0).then(() => get().actions.play())
         } else {
           get().actions.play()
         }
@@ -800,6 +833,36 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (wasPlaying) get().actions.pause()
       set({ playbackSpeed: speed })
       if (wasPlaying) get().actions.play()
+    },
+
+    setPlaybackWindow: (t0, t1) => {
+      if (t0 == null || t1 == null) {
+        set({ playbackWindow: null })
+        syncWindowToUrl(null)
+        return
+      }
+      const resolved = resolveWindowToFrames(internal.timestamps, t0, t1)
+      if (!resolved) {
+        console.warn(`[playbackWindow] t0/t1 (${t0}..${t1}) don't resolve against this scene — window ignored`)
+        set({ playbackWindow: null })
+        syncWindowToUrl(null)
+        return
+      }
+      const win = { ...resolved, t0, t1 }
+      set({ playbackWindow: win })
+      // syncSegmentToUrl rewrites the query on load and on every scene
+      // switch, dropping t0/t1 — re-assert them whenever the range is set,
+      // so a shared link survives its own load.
+      syncWindowToUrl(win)
+      void get().actions.seekFrame(resolved.f0)
+    },
+
+    setPlaybackWindowFrames: (f0, f1) => {
+      const ts = internal.timestamps
+      if (ts.length === 0) return
+      const lo = Math.max(0, Math.min(Math.floor(f0), ts.length - 1))
+      const hi = Math.max(lo, Math.min(Math.floor(f1), ts.length - 1))
+      set({ playbackWindow: { f0: lo, f1: hi, t0: String(ts[lo]), t1: String(ts[hi]) } })
     },
 
     toggleSensor: (laserName: number) => {
@@ -922,7 +985,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (internal.nuScenesDb) {
           await loadNuScenesScene(segmentId, set, get)
-          syncSegmentToUrl(segmentId)
+          syncSegmentToUrl(segmentId, get().playbackWindow)
           return
         }
       }
@@ -951,7 +1014,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (internal.av2Db) {
           await loadAV2Scene(segmentId, set, get)
-          syncSegmentToUrl(segmentId)
+          syncSegmentToUrl(segmentId, get().playbackWindow)
           return
         }
       }
@@ -972,7 +1035,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       await get().actions.loadDataset(sources as Map<string, File | string>)
 
       // Sync segment ID to URL bar (replaceState, no history pollution)
-      syncSegmentToUrl(segmentId)
+      syncSegmentToUrl(segmentId, get().playbackWindow)
     },
 
     toggleWorldMode: () => {
@@ -1363,6 +1426,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         currentFrameIndex: 0,
         isPlaying: false,
         playbackSpeed: 1,
+        playbackWindow: null,
         currentFrame: null,
         lidarCalibrations: new Map(),
         cameraCalibrations: [],
@@ -1415,12 +1479,13 @@ function getLidarColumns(): string[] {
 async function loadAndCacheRowGroup(
   rgIndex: number,
   set: (partial: Partial<SceneState>) => void,
+  opts?: { priority?: boolean },
 ): Promise<void> {
   if (internal.loadedRowGroups.has(rgIndex)) return
   internal.loadedRowGroups.add(rgIndex) // Mark as in-flight to prevent duplicates
 
   try {
-    const result = await requestRowGroup(rgIndex)
+    const result = await requestRowGroup(rgIndex, opts)
     cacheRowGroupFrames(result, set)
   } catch {
     // If loading failed, allow retry
@@ -2172,12 +2237,13 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
 async function loadAndCacheCameraRowGroup(
   rgIndex: number,
   set: (partial: Partial<SceneState>) => void,
+  opts?: { priority?: boolean },
 ): Promise<void> {
   if (internal.cameraLoadedRowGroups.has(rgIndex)) return
   internal.cameraLoadedRowGroups.add(rgIndex)
 
   try {
-    const result = await internal.cameraPool!.requestRowGroup(rgIndex)
+    const result = await internal.cameraPool!.requestRowGroup(rgIndex, opts)
     cacheCameraRowGroupFrames(result)
 
     // Update camera loading progress + buffer bar, and patch current frame
@@ -2305,39 +2371,100 @@ async function runPostWorkerPipeline(
   // Determine target frame from Share URL (if any)
   const initSearch = getInitialSearch()
   const viewParams = initSearch ? parseViewParams(initSearch) : {}
-  const targetFrame = viewParams.frame != null
-    ? Math.min(viewParams.frame, internal.timestamps.length - 1)
-    : 0
 
-  // Compute which batch contains the target frame
-  const framesPerBatch = internal.numBatches > 0
-    ? Math.ceil(internal.timestamps.length / internal.numBatches)
-    : internal.timestamps.length
-  const targetBatch = Math.floor(targetFrame / framesPerBatch)
+  // A t0/t1 link says "watch this interval", so its first frame — not frame
+  // 0 — is what the first paint should wait for.
+  const linkRange = viewParams.t0 && viewParams.t1
+    ? resolveWindowToFrames(internal.timestamps, viewParams.t0, viewParams.t1)
+    : null
 
-  // 1. Load batches: always batch 0 + target batch (+ neighbors)
+  const targetFrame = linkRange
+    ? linkRange.f0
+    : viewParams.frame != null
+      ? Math.min(viewParams.frame, internal.timestamps.length - 1)
+      : 0
+
+  /** Which batch of `numBatches` holds a frame (lidar and camera split differently). */
+  const batchIndexOf = (frame: number, numBatches: number): number => {
+    if (numBatches <= 0) return 0
+    const perBatch = Math.ceil(internal.timestamps.length / numBatches)
+    if (perBatch <= 0) return 0
+    return Math.min(Math.floor(frame / perBatch), numBatches - 1)
+  }
+
+  const targetBatch = batchIndexOf(targetFrame, internal.numBatches)
+  const camTargetBatch = batchIndexOf(targetFrame, internal.cameraNumBatches)
+
+  // Past a few batches, prioritising the range is the same as prioritising
+  // everything — so a wide range keeps the ordinary behaviour.
+  const RANGE_BATCH_CAP = 3
+  const rangeLastBatch = linkRange ? batchIndexOf(linkRange.f1, internal.numBatches) : targetBatch
+  const rangeIsNarrow = linkRange != null && rangeLastBatch - targetBatch + 1 <= RANGE_BATCH_CAP
+
   set({ loadStep: 'first-frame' as LoadStep })
   const rgT0 = performance.now()
   const firstFramePromises: Promise<void>[] = []
+  /** Queued right after the critical path — ordering only, never awaited. */
+  const queueAfterFirstPaint: (() => void)[] = []
 
   if (internal.workerPool?.isReady()) {
-    const batchesToLoad = new Set([0, targetBatch])
-    // Also load neighbor batch for smoother playback from target
-    if (targetBatch > 0) batchesToLoad.add(targetBatch - 1)
-    if (targetBatch + 1 < internal.numBatches) batchesToLoad.add(targetBatch + 1)
-    for (const b of batchesToLoad) {
-      firstFramePromises.push(loadAndCacheRowGroup(b, set))
+    if (linkRange) {
+      // Critical path is the range's own first batch. Batch 0 is dead weight
+      // for a link that points elsewhere, so it drops to the background —
+      // this makes the first paint faster than the no-range case, not slower.
+      firstFramePromises.push(loadAndCacheRowGroup(targetBatch, set, { priority: true }))
+      const rest: number[] = []
+      if (rangeIsNarrow) {
+        for (let b = targetBatch + 1; b <= rangeLastBatch; b++) rest.push(b)
+      } else if (targetBatch + 1 < internal.numBatches) {
+        rest.push(targetBatch + 1)
+      }
+      rest.push(0)
+      queueAfterFirstPaint.push(() => {
+        for (const b of rest) {
+          if (b >= 0 && b < internal.numBatches && !internal.loadedRowGroups.has(b)) {
+            void loadAndCacheRowGroup(b, set, { priority: true }).catch(() => {})
+          }
+        }
+      })
+    } else {
+      const batchesToLoad = new Set([0, targetBatch])
+      // Also load neighbor batch for smoother playback from target
+      if (targetBatch > 0) batchesToLoad.add(targetBatch - 1)
+      if (targetBatch + 1 < internal.numBatches) batchesToLoad.add(targetBatch + 1)
+      for (const b of batchesToLoad) {
+        firstFramePromises.push(loadAndCacheRowGroup(b, set))
+      }
     }
   } else if (mainThreadFallback) {
     firstFramePromises.push(mainThreadFallback())
   }
 
   if (internal.cameraPool?.isReady()) {
-    const camBatchesToLoad = new Set([0, targetBatch])
-    if (targetBatch > 0) camBatchesToLoad.add(targetBatch - 1)
-    if (targetBatch + 1 < internal.cameraNumBatches) camBatchesToLoad.add(targetBatch + 1)
-    for (const b of camBatchesToLoad) {
-      firstFramePromises.push(loadAndCacheCameraRowGroup(b, set))
+    if (linkRange) {
+      firstFramePromises.push(loadAndCacheCameraRowGroup(camTargetBatch, set, { priority: true }))
+      const camRest: number[] = []
+      const camLast = batchIndexOf(linkRange.f1, internal.cameraNumBatches)
+      if (rangeIsNarrow) {
+        for (let b = camTargetBatch + 1; b <= camLast; b++) camRest.push(b)
+      } else if (camTargetBatch + 1 < internal.cameraNumBatches) {
+        camRest.push(camTargetBatch + 1)
+      }
+      camRest.push(0)
+      queueAfterFirstPaint.push(() => {
+        for (const b of camRest) {
+          if (b >= 0 && b < internal.cameraNumBatches) {
+            void loadAndCacheCameraRowGroup(b, set, { priority: true }).catch(() => {})
+          }
+        }
+      })
+    } else {
+      const camBatchesToLoad = new Set([0, camTargetBatch])
+      if (camTargetBatch > 0) camBatchesToLoad.add(camTargetBatch - 1)
+      if (camTargetBatch + 1 < internal.cameraNumBatches) camBatchesToLoad.add(camTargetBatch + 1)
+      for (const b of camBatchesToLoad) {
+        firstFramePromises.push(loadAndCacheCameraRowGroup(b, set))
+      }
     }
   }
 
@@ -2347,8 +2474,16 @@ async function runPostWorkerPipeline(
     note: `${rgMs.toFixed(0)}ms, target frame ${targetFrame}`,
   })
 
+  // Queue the rest of the range (then batch 0). The range batches are
+  // flagged priority, so they jump the queue rather than relying on having
+  // been queued before the bulk prefetch.
+  for (const queue of queueAfterFirstPaint) queue()
+
   // 2. Show target frame (or frame 0 as fallback)
   const displayFrame = internal.frameCache.has(targetFrame) ? targetFrame : 0
+  // If neither is cached yet (a failed target batch), let the frame land as
+  // soon as it arrives rather than showing nothing.
+  if (!internal.frameCache.has(displayFrame)) internal.pendingSeekFrame = targetFrame
   const firstFrame = internal.frameCache.get(displayFrame)
   if (firstFrame) {
     const camData = internal.cameraImageCache.get(displayFrame)
