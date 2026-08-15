@@ -22,7 +22,7 @@ import CameraFrustums from './CameraFrustums'
 import WasdControls from './WasdControls'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
-import { useSceneStore, BG_PRESETS, ALL_COLORMAP_MODES, COLORMAP_LABELS } from '../../stores/useSceneStore'
+import { useSceneStore, BG_PRESETS, ALL_COLORMAP_MODES, COLORMAP_LABELS, getLoadedAV2HasAnnotations } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
 import { colors, fonts, radius } from '../../theme'
@@ -1591,6 +1591,23 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
               </div>
             )
           })()}
+
+          {/* ── PERCEPTION section (placeholder when the log ships without labels) ── */}
+          {!hasBoxData && getLoadedAV2HasAnnotations() === false && <>
+            <div style={{ height: '1px', backgroundColor: colors.border, margin: '4px 4px' }} />
+            <div style={{
+              fontSize: '9px', fontFamily: fonts.sans, fontWeight: 600,
+              color: colors.textDim, letterSpacing: '1.2px', textTransform: 'uppercase',
+              padding: '2px 4px 2px',
+            }}>
+              Perception
+            </div>
+            <div style={{ padding: '2px 4px 4px' }}>
+              <span style={{ fontSize: '8px', fontFamily: fonts.sans, color: colors.textDim, fontStyle: 'italic' }}>
+                No annotations
+              </span>
+            </div>
+          </>}
 
           {/* ── PERCEPTION section (hidden when no box data) ── */}
           {hasBoxData && <>
