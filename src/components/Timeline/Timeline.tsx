@@ -147,7 +147,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     }
   }, [actions, frameFromClientX])
 
-  const onHandlePointerUp = useCallback((e: React.PointerEvent) => {
+  const onHandlePointerUp = useCallback(() => {
     if (!dragEdgeRef.current) return
     dragEdgeRef.current = null
     const state = useSceneStore.getState()
@@ -504,14 +504,20 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
         )}
       </div>
 
-      {playbackWindow && !minimal && (
-        <button
-          onClick={clearWindow}
-          title="Reset playback range — play the full recording"
-          style={windowChipButtonStyle}
-        >
-          range <span aria-hidden="true">✕</span>
-        </button>
+      {/* Fixed-width slot whether or not a range is active — the chip
+          appearing mid-drag must not reflow the track under the cursor */}
+      {!minimal && (
+        <span style={{ width: '64px', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
+          {playbackWindow && (
+            <button
+              onClick={clearWindow}
+              title="Reset playback range — play the full recording"
+              style={windowChipButtonStyle}
+            >
+              range <span aria-hidden="true">✕</span>
+            </button>
+          )}
+        </span>
       )}
 
       <span style={{
