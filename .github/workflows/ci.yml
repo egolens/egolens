@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Tests
+        run: npx vitest run
+      - name: Lint (errors block, warnings reported)
+        run: npx eslint src
+      - name: Build (includes type-check)
+        run: npm run build
+      - name: Bundle size report
+        run: |
+          {
+            echo "## Bundle size"
+            echo ""
+            echo "| Asset | Size | Gzip |"
+            echo "|---|---|---|"
+            for f in dist/assets/*.js; do
+              name=$(basename "$f" | sed -E 's/-[A-Za-z0-9_-]{8}\./\./')
+              size=$(wc -c < "$f" | awk '{printf "%.1f KB", $1/1024}')
+              gzip=$(gzip -c "$f" | wc -c | awk '{printf "%.1f KB", $1/1024}')
+              echo "| $name | $size | $gzip |"
+            done
+            total=$(du -sk dist | cut -f1)
+            echo ""
+            echo "**Total dist**: ${total} KB"
+          } >> "$GITHUB_STEP_SUMMARY"

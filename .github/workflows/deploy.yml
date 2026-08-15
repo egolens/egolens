@@ -24,6 +24,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # A commit that fails tests must not reach egolens.org
+      - run: npx vitest run
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
