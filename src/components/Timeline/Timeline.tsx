@@ -48,13 +48,19 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
 // ---------------------------------------------------------------------------
 
 const windowChipButtonStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
   background: 'none',
-  border: 'none',
+  border: '1px solid rgba(0, 201, 219, 0.4)',
+  borderRadius: radius.pill,
   color: colors.accentBlue,
-  fontSize: '12px',
+  fontSize: '10px',
+  fontFamily: fonts.sans,
   cursor: 'pointer',
-  padding: '0 4px',
-  lineHeight: 1,
+  padding: '2px 8px',
+  lineHeight: 1.5,
+  whiteSpace: 'nowrap',
 }
 
 export default function Timeline({ minimal = false }: { minimal?: boolean } = {}) {
@@ -485,10 +491,11 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       {playbackWindow && !minimal && (
         <button
           onClick={clearWindow}
-          title="Clear window — play the full recording"
-          aria-label="Clear playback window"
+          title="Clear the playback window — play the full recording"
           style={windowChipButtonStyle}
-        >✕</button>
+        >
+          window <span aria-hidden="true">✕</span>
+        </button>
       )}
 
       <span style={{
