@@ -12,6 +12,7 @@ import {
   fetchAV2Index,
   discoverAV2Logs,
   discoverAV2AllSplits,
+  resolveAV2DirectLogUrl,
   splitFromUrl,
   isAV2SensorRootUrl,
   type AV2Index,
@@ -224,5 +225,47 @@ describe('discoverAV2AllSplits', () => {
   it('fails loudly when every split is empty', async () => {
     mockFetch.mockImplementation(async () => jsonResponse({}, 404))
     await expect(discoverAV2AllSplits(ROOT)).rejects.toThrow(DataLoadError)
+  })
+})
+
+describe('resolveAV2DirectLogUrl', () => {
+  const PARENT = 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/'
+  const SENSOR_ROOT = 'https://data.egolens.org/av2/sensor/'
+
+  it('resolves via manifest.json HEAD under a split parent, tagging the split', async () => {
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: url.endsWith('log-1/manifest.json'),
+      status: url.endsWith('log-1/manifest.json') ? 200 : 404,
+    }))
+    const direct = await resolveAV2DirectLogUrl(PARENT, 'log-1')
+    expect(direct).toEqual({ logId: 'log-1', logUrl: `${PARENT}log-1/`, split: 'val' })
+  })
+
+  it('falls back to the calibration feather when manifest.json is absent (raw S3)', async () => {
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: url.endsWith('calibration/egovehicle_SE3_sensor.feather'),
+      status: url.endsWith('calibration/egovehicle_SE3_sensor.feather') ? 200 : 403,
+    }))
+    const direct = await resolveAV2DirectLogUrl(PARENT, 'log-1')
+    expect(direct?.logUrl).toBe(`${PARENT}log-1/`)
+  })
+
+  it('probes every split under a sensor root and returns the responding one', async () => {
+    mockFetch.mockImplementation(async (url: string) => ({
+      ok: url.includes('/train/log-t/') && url.endsWith('manifest.json'),
+      status: url.includes('/train/log-t/') && url.endsWith('manifest.json') ? 200 : 404,
+    }))
+    const direct = await resolveAV2DirectLogUrl(SENSOR_ROOT, 'log-t')
+    expect(direct).toEqual({ logId: 'log-t', logUrl: `${SENSOR_ROOT}train/log-t/`, split: 'train' })
+  })
+
+  it('returns null when nothing responds (bad scene id)', async () => {
+    mockFetch.mockImplementation(async () => ({ ok: false, status: 404 }))
+    expect(await resolveAV2DirectLogUrl(PARENT, 'nope')).toBeNull()
+  })
+
+  it('returns null when probes reject (HEAD-blocked host)', async () => {
+    mockFetch.mockImplementation(async () => { throw new TypeError('Failed to fetch') })
+    expect(await resolveAV2DirectLogUrl(PARENT, 'log-1')).toBeNull()
   })
 })

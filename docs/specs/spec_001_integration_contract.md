@@ -1,6 +1,6 @@
 # Spec 001 — Integration Contract (Roadmap Phase 1)
 
-**Status**: planned · **Date**: 2026-08-15 · **Estimated effort**: ~1 week · **Depends on**: nothing (all enablers landed)
+**Status**: in-progress (landing 1 of 3) · **Date**: 2026-08-15 · **Estimated effort**: ~1 week · **Depends on**: nothing (all enablers landed)
 
 EgoLens is being integrated into downstream workflows through its URL and
 postMessage contract — telemetry shows integrators deep-linking scenes,

@@ -66,6 +66,7 @@ import {
   isAV2SensorRootUrl,
   discoverAV2Logs,
   discoverAV2AllSplits,
+  resolveAV2DirectLogUrl,
   fetchAV2ThumbnailUrl,
   type AV2DiscoveredLog,
   type AV2Split,
@@ -83,7 +84,7 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
-import { setUrlSource, clearUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
@@ -1120,6 +1121,31 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         try {
           // Check if this is a parent URL (e.g. .../sensor/ or .../train/) → multi-log discovery
           if (isAV2SensorRootUrl(baseUrl) || isAV2ParentUrl(baseUrl)) {
+            // Deep-link fast path: with a scene id we can construct the log
+            // URL directly and start loading now; discovery fills the
+            // selector in the background instead of blocking the first frame.
+            if (initialScene) {
+              const direct = await resolveAV2DirectLogUrl(baseUrl, initialScene)
+              if (direct) {
+                console.log(`[loadFromUrl] AV2 direct scene: ${direct.logUrl}`)
+                internal.datasetId = 'argoverse2'
+                internal.av2DiscoveredLogs = [direct]
+                internal.av2Db = null
+                internal.av2SampleFiles = null
+                internal.nuScenesDb = null
+                internal.nuScenesSampleFiles = null
+                internal.nuScenesDiscoveredScenes = null
+                setManifest(argoverse2Manifest)
+                set({ availableSegments: [initialScene], loadProgress: 0.05 })
+
+                void discoverAV2LogsInBackground(baseUrl, set)
+                await get().actions.selectSegment(initialScene)
+                return
+              }
+              // Probe failed (bad scene id or HEAD-blocked host) — fall
+              // through to discovery-first for the informative error.
+            }
+
             console.log('[loadFromUrl] AV2 parent URL detected — discovering logs...')
             const logs = isAV2SensorRootUrl(baseUrl)
               ? await discoverAV2AllSplits(baseUrl, 700)
@@ -1197,6 +1223,31 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
         try {
+          // Deep-link fast path: try the scene's shard directly and let
+          // index discovery fill the selector in the background. Falls
+          // through when the URL isn't a shard root (e.g. classic v1.0-mini
+          // dir + scene param) — the shard probe simply finds no version dir.
+          if (initialScene) {
+            const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+            const sceneUrl = `${base}${initialScene}/`
+            try {
+              const { db, sampleFiles } = await fetchNuScenesVersionData(sceneUrl, set)
+              if (db.scenes.some(s => s.name === initialScene)) {
+                console.log(`[loadFromUrl] nuScenes direct scene: ${sceneUrl}`)
+                internal.datasetId = 'nuscenes'
+                internal.nuScenesDiscoveredScenes = [{ name: initialScene, sceneUrl }]
+                internal.nuScenesDb = db
+                internal.nuScenesSampleFiles = sampleFiles
+                setManifest(nuScenesManifest)
+                set({ availableSegments: [initialScene], loadProgress: 0.25 })
+
+                void discoverNuScenesScenesInBackground(baseUrl, set)
+                await get().actions.selectSegment(initialScene)
+                return
+              }
+            } catch { /* not a shard root — fall through to discovery-first */ }
+          }
+
           // Sharded hosting: an index.json at the root lists per-scene shards
           // (see scripts/shard_nuscenes.py). Each shard loads on scene select.
           const discovered = await discoverNuScenesScenes(baseUrl)
@@ -1563,6 +1614,62 @@ async function initCameraWorker(
  * Load a nuScenes scene — the nuScenes equivalent of loadDataset.
  * Called from selectSegment when the active dataset is nuScenes.
  */
+/**
+ * Fill the scene selector after a deep-link fast path load. Runs detached:
+ * a failure leaves the selector single-scene (the loaded scene still works),
+ * and a stale result — the user switched dataset or URL mid-listing — is
+ * dropped rather than allowed to clobber current state.
+ */
+async function discoverAV2LogsInBackground(
+  baseUrl: string,
+  set: (partial: Partial<SceneState>) => void,
+): Promise<void> {
+  try {
+    const logs = isAV2SensorRootUrl(baseUrl)
+      ? await discoverAV2AllSplits(baseUrl, 700)
+      : await discoverAV2Logs(baseUrl, 700)
+    if (logs.length === 0) return
+
+    const src = getUrlSource()
+    if (internal.datasetId !== 'argoverse2' || src?.baseUrl !== baseUrl) return
+
+    // Keep the directly-loaded log even if discovery somehow missed it
+    const current = internal.av2DiscoveredLogs?.[0]
+    const merged = current && !logs.some(l => l.logId === current.logId)
+      ? [current, ...logs]
+      : logs
+    internal.av2DiscoveredLogs = merged
+    set({ availableSegments: merged.map(l => l.logId) })
+    console.log(`[loadFromUrl] Background discovery filled selector: ${merged.length} AV2 logs`)
+  } catch (e) {
+    console.warn('[loadFromUrl] Background AV2 discovery failed — selector stays single-scene:', e)
+  }
+}
+
+/** nuScenes counterpart of discoverAV2LogsInBackground. */
+async function discoverNuScenesScenesInBackground(
+  baseUrl: string,
+  set: (partial: Partial<SceneState>) => void,
+): Promise<void> {
+  try {
+    const discovered = await discoverNuScenesScenes(baseUrl)
+    if (!discovered || discovered.length === 0) return
+
+    const src = getUrlSource()
+    if (internal.datasetId !== 'nuscenes' || !internal.nuScenesDiscoveredScenes || src?.baseUrl !== baseUrl) return
+
+    const current = internal.nuScenesDiscoveredScenes[0]
+    const merged = current && !discovered.some(s => s.name === current.name)
+      ? [current, ...discovered]
+      : discovered
+    internal.nuScenesDiscoveredScenes = merged
+    set({ availableSegments: merged.map(s => s.name) })
+    console.log(`[loadFromUrl] Background discovery filled selector: ${merged.length} nuScenes scenes`)
+  } catch (e) {
+    console.warn('[loadFromUrl] Background nuScenes discovery failed — selector stays single-scene:', e)
+  }
+}
+
 /**
  * Largest metadata table the browser will attempt to parse. V8 caps strings
  * at ~512MB, so a full-split sample_data.json (~1.3GB for trainval) fails in

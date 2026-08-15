@@ -17,4 +17,4 @@ convention and keep their names.
 
 | # | Spec | Status |
 |---|------|--------|
-| 001 | [Integration contract — deep-link fast path, setScene, time window, collections](spec_001_integration_contract.md) | planned |
+| 001 | [Integration contract — deep-link fast path, setScene, time window, collections](spec_001_integration_contract.md) | in-progress |

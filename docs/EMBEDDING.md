@@ -42,6 +42,13 @@ The hosted build at `https://egolens.org` is embeddable as-is — no need to run
 
 `intensity` | `range` | `elongation` | `distance` | `segment` | `panoptic` | `camera`
 
+### Deep links are fast
+
+A `scene` parameter alongside a multi-scene `data` URL (an AV2 split/root, or
+a sharded nuScenes root) loads that scene **directly** — the scene list is
+discovered in the background and fills the selector afterwards. Embeds that
+point at one scene each start rendering without paying discovery cost.
+
 ## postMessage API
 
 The embed communicates with the host page via `window.postMessage`. All messages are JSON objects with a `type` field.
@@ -58,6 +65,10 @@ iframe.contentWindow.postMessage({ type: 'pause' }, '*')
 
 // Change colormap
 iframe.contentWindow.postMessage({ type: 'setColormap', colormap: 'height' }, '*')
+
+// Switch to another scene — no iframe reload needed. The scene must be one
+// of the discovered scenes (unknown ids reply with an 'error' message).
+iframe.contentWindow.postMessage({ type: 'setScene', scene: 'scene-0103' }, '*')
 
 // Request current state (viewer replies with 'stateReply')
 iframe.contentWindow.postMessage({ type: 'getState' }, '*')
@@ -79,8 +90,13 @@ window.addEventListener('message', (event) => {
     console.log(`Frame: ${event.data.frame} / ${event.data.totalFrames}`)
   }
 
+  if (type === 'sceneChange') {
+    // Scene switched (host- or user-initiated) — { scene: string, totalFrames: number }
+    console.log(`Scene: ${event.data.scene}`)
+  }
+
   if (type === 'stateReply') {
-    // Response to getState — { frame, totalFrames, isPlaying, colormap, status }
+    // Response to getState — { frame, totalFrames, isPlaying, colormap, status, scene }
     console.log('State:', event.data)
   }
 
