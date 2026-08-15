@@ -16,11 +16,14 @@ visible. An embed asking for minimal chrome gets most of the chrome.
 (`controls=none` is fine: `showTimeline` at App.tsx:362 already suppresses
 the footer, so only `minimal` is under-implemented.)
 
-**2. `cameras=` was invented by an integrator and silently ignored.** A
+**2. An integrator is already using a `cameras=` parameter we never had.** A
 scenario-mining team's embed URLs carry
-`…&embed=true&controls=minimal&cameras=false&…`. We never implemented
-`cameras`, so it does nothing — the same pattern as `miningStart`/`miningEnd`
-(adopted as `t0`/`t1` in spec_001).
+`…&embed=true&controls=minimal&cameras=false&…`, the same pattern as
+`miningStart`/`miningEnd` (adopted as `t0`/`t1` in spec_001). Their telemetry
+comes from a local dev server, i.e. they run this viewer from source, so the
+likeliest reading is that they **implemented the parameter in their own copy**
+— not that they sent it to us and were ignored. Either way the demand is
+demonstrated, and hiding the strip is a capability we want upstream.
 
 **3. `camera=` (singular) is worse: parsed, documented, never applied.**
 `embedParams.camera` is read at embedParams.ts:82 and documented in

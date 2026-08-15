@@ -15,7 +15,7 @@ Four work items, ordered by delivery:
 |---|------|-------------------------------|
 | 1 | Scene deep-link fast path | 10–20s first frame on every deep link; integrators reload anyway and abandon mid-load |
 | 2 | `setScene` postMessage command | full iframe reload to switch logs |
-| 3 | Time window (`t0`/`t1`) | integrator-invented `miningStart`/`miningEnd` params the app silently ignores |
+| 3 | Time window (`t0`/`t1`) | an integrator running from source uses `miningStart`/`miningEnd`, a vocabulary upstream does not have |
 | 4 | Collections (index.json metadata) | a downstream fork built a parallel scenario-index UI because ours can't carry curation metadata |
 
 Plus a docs pass (item 5).
