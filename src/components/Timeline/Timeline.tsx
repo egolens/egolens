@@ -491,10 +491,10 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       {playbackWindow && !minimal && (
         <button
           onClick={clearWindow}
-          title="Clear the playback window — play the full recording"
+          title="Reset playback range — play the full recording"
           style={windowChipButtonStyle}
         >
-          window <span aria-hidden="true">✕</span>
+          range <span aria-hidden="true">✕</span>
         </button>
       )}
 
