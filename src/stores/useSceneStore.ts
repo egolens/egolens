@@ -452,11 +452,12 @@ function resetInternal() {
 
 function requestRowGroup(
   rowGroupIndex: number,
+  opts?: { priority?: boolean },
 ): Promise<LidarBatchResult> {
   if (!internal.workerPool) {
     return Promise.reject(new Error('Worker pool not initialized'))
   }
-  return internal.workerPool.requestRowGroup(rowGroupIndex)
+  return internal.workerPool.requestRowGroup(rowGroupIndex, opts)
 }
 
 /** Cache all frames from a row group result into internal.frameCache */
@@ -1478,12 +1479,13 @@ function getLidarColumns(): string[] {
 async function loadAndCacheRowGroup(
   rgIndex: number,
   set: (partial: Partial<SceneState>) => void,
+  opts?: { priority?: boolean },
 ): Promise<void> {
   if (internal.loadedRowGroups.has(rgIndex)) return
   internal.loadedRowGroups.add(rgIndex) // Mark as in-flight to prevent duplicates
 
   try {
-    const result = await requestRowGroup(rgIndex)
+    const result = await requestRowGroup(rgIndex, opts)
     cacheRowGroupFrames(result, set)
   } catch {
     // If loading failed, allow retry
@@ -2235,12 +2237,13 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
 async function loadAndCacheCameraRowGroup(
   rgIndex: number,
   set: (partial: Partial<SceneState>) => void,
+  opts?: { priority?: boolean },
 ): Promise<void> {
   if (internal.cameraLoadedRowGroups.has(rgIndex)) return
   internal.cameraLoadedRowGroups.add(rgIndex)
 
   try {
-    const result = await internal.cameraPool!.requestRowGroup(rgIndex)
+    const result = await internal.cameraPool!.requestRowGroup(rgIndex, opts)
     cacheCameraRowGroupFrames(result)
 
     // Update camera loading progress + buffer bar, and patch current frame
@@ -2409,7 +2412,7 @@ async function runPostWorkerPipeline(
       // Critical path is the range's own first batch. Batch 0 is dead weight
       // for a link that points elsewhere, so it drops to the background —
       // this makes the first paint faster than the no-range case, not slower.
-      firstFramePromises.push(loadAndCacheRowGroup(targetBatch, set))
+      firstFramePromises.push(loadAndCacheRowGroup(targetBatch, set, { priority: true }))
       const rest: number[] = []
       if (rangeIsNarrow) {
         for (let b = targetBatch + 1; b <= rangeLastBatch; b++) rest.push(b)
@@ -2420,7 +2423,7 @@ async function runPostWorkerPipeline(
       queueAfterFirstPaint.push(() => {
         for (const b of rest) {
           if (b >= 0 && b < internal.numBatches && !internal.loadedRowGroups.has(b)) {
-            void loadAndCacheRowGroup(b, set).catch(() => {})
+            void loadAndCacheRowGroup(b, set, { priority: true }).catch(() => {})
           }
         }
       })
@@ -2439,7 +2442,7 @@ async function runPostWorkerPipeline(
 
   if (internal.cameraPool?.isReady()) {
     if (linkRange) {
-      firstFramePromises.push(loadAndCacheCameraRowGroup(camTargetBatch, set))
+      firstFramePromises.push(loadAndCacheCameraRowGroup(camTargetBatch, set, { priority: true }))
       const camRest: number[] = []
       const camLast = batchIndexOf(linkRange.f1, internal.cameraNumBatches)
       if (rangeIsNarrow) {
@@ -2451,7 +2454,7 @@ async function runPostWorkerPipeline(
       queueAfterFirstPaint.push(() => {
         for (const b of camRest) {
           if (b >= 0 && b < internal.cameraNumBatches) {
-            void loadAndCacheCameraRowGroup(b, set).catch(() => {})
+            void loadAndCacheCameraRowGroup(b, set, { priority: true }).catch(() => {})
           }
         }
       })
@@ -2471,8 +2474,9 @@ async function runPostWorkerPipeline(
     note: `${rgMs.toFixed(0)}ms, target frame ${targetFrame}`,
   })
 
-  // Queue the rest of the range (then batch 0) before the general prefetch,
-  // so they sit ahead of it in the pool's FIFO queue.
+  // Queue the rest of the range (then batch 0). The range batches are
+  // flagged priority, so they jump the queue rather than relying on having
+  // been queued before the bulk prefetch.
   for (const queue of queueAfterFirstPaint) queue()
 
   // 2. Show target frame (or frame 0 as fallback)
