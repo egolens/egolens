@@ -62,6 +62,17 @@ if (process.env.SKIP_GPU_TESTS) {
   }
 }
 
+// A GPU object can exist while no adapter does (headless CI runners have
+// dawn.node but neither a GPU nor a software rasterizer) — probe up front
+// so those environments skip instead of fail.
+if (gpu) {
+  const probeAdapter = await gpu.requestAdapter().catch(() => null)
+  if (!probeAdapter) {
+    skipReason = 'no WebGPU adapter available (headless environment)'
+    gpu = null
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
