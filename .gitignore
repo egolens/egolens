@@ -5,12 +5,13 @@ dist/
 *.local
 .git-rewrite/
 
-# Dataset folders
-waymo_data/
-waymo_data_/
-nuscenes/
-v1.0-mini/
-argo/
+# Dataset folders (root-anchored — a bare "nuscenes/" would also ignore
+# new source files under src/adapters/nuscenes/)
+/waymo_data/
+/waymo_data_/
+/nuscenes/
+/v1.0-mini/
+/argo/
 
 # Test / debug artifacts
 coverage/
