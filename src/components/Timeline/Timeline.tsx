@@ -47,20 +47,6 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
 // Component
 // ---------------------------------------------------------------------------
 
-const windowInputStyle: React.CSSProperties = {
-  width: '34px',
-  padding: '1px 2px',
-  fontSize: '10px',
-  fontFamily: fonts.mono,
-  color: colors.accentBlue,
-  backgroundColor: 'transparent',
-  border: '1px solid rgba(0, 201, 219, 0.35)',
-  borderRadius: radius.sm,
-  textAlign: 'center',
-  outline: 'none',
-  appearance: 'textfield',
-}
-
 const windowChipButtonStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
@@ -111,25 +97,6 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   // ── Handle dragging (full-controls mode only) ──
   const trackRef = useRef<HTMLDivElement>(null)
   const dragEdgeRef = useRef<'f0' | 'f1' | null>(null)
-
-  // The window as it arrived (URL or setWindow) — one-click restore after a
-  // drag, so editing a shared link is never destructive.
-  const sharedWindowRef = useRef<{ t0: string; t1: string } | null>(null)
-  if (playbackWindow && sharedWindowRef.current === null && dragEdgeRef.current === null) {
-    sharedWindowRef.current = { t0: playbackWindow.t0, t1: playbackWindow.t1 }
-  }
-  if (!playbackWindow && sharedWindowRef.current !== null) {
-    sharedWindowRef.current = null
-  }
-  const windowModified = playbackWindow != null && sharedWindowRef.current != null
-    && (playbackWindow.t0 !== sharedWindowRef.current.t0 || playbackWindow.t1 !== sharedWindowRef.current.t1)
-
-  const restoreSharedWindow = useCallback(() => {
-    const shared = sharedWindowRef.current
-    if (!shared) return
-    actions.setPlaybackWindow(shared.t0, shared.t1)
-    syncWindowParams(shared)
-  }, [actions, syncWindowParams])
 
 
   const frameFromClientX = useCallback((clientX: number, max: number): number => {
@@ -526,44 +493,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
           whiteSpace: 'nowrap',
         }}>
           <span title="Playback loops inside this window" aria-hidden="true">⟳</span>
-          <input
-            type="number"
-            min={1}
-            max={playbackWindow.f1 + 1}
-            value={playbackWindow.f0 + 1}
-            onChange={(e) => {
-              const v = parseInt(e.target.value, 10)
-              if (!isNaN(v)) {
-                actions.setPlaybackWindowFrames(v - 1, playbackWindow.f1)
-                syncWindowParams(useSceneStore.getState().playbackWindow)
-              }
-            }}
-            title="Window start frame — edit for precise adjustment"
-            style={windowInputStyle}
-          />
-          –
-          <input
-            type="number"
-            min={playbackWindow.f0 + 1}
-            max={totalFrames}
-            value={playbackWindow.f1 + 1}
-            onChange={(e) => {
-              const v = parseInt(e.target.value, 10)
-              if (!isNaN(v)) {
-                actions.setPlaybackWindowFrames(playbackWindow.f0, v - 1)
-                syncWindowParams(useSceneStore.getState().playbackWindow)
-              }
-            }}
-            title="Window end frame — edit for precise adjustment"
-            style={windowInputStyle}
-          />
-          {windowModified && (
-            <button
-              onClick={restoreSharedWindow}
-              title="Restore the window this link arrived with"
-              style={windowChipButtonStyle}
-            >↺</button>
-          )}
+          {playbackWindow.f0 + 1}–{playbackWindow.f1 + 1}
           <button
             onClick={clearWindow}
             title="Clear window — play the full recording"
