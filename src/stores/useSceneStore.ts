@@ -374,6 +374,13 @@ const internal = {
   nuScenesSampleFiles: null as Map<string, File | string> | null,
   /** Discovered per-scene shards from an index.json root (sharded hosting mode) */
   nuScenesDiscoveredScenes: null as NuScenesDiscoveredScene[] | null,
+  /**
+   * Seek requested before its frame was cached (cold load). loadFrame drops
+   * cache misses so it never fights the prefetch queue, which would silently
+   * strand a deep link — `?frame=` or a t0/t1 range — at frame 0 while the
+   * user waits. Applied by syncCachedFrames once the frame arrives.
+   */
+  pendingSeekFrame: null as number | null,
   // -- Argoverse 2-specific state --
   /** Parsed AV2 log database */
   av2Db: null as AV2LogDatabase | null,
@@ -389,6 +396,7 @@ const internal = {
 function resetInternal() {
   internal.parquetFiles.clear()
   internal.timestamps = []
+  internal.pendingSeekFrame = null
   internal.timestampToFrame.clear()
   internal.lidarBoxByFrame.clear()
   internal.cameraBoxByFrame.clear()
@@ -556,6 +564,14 @@ function cacheCameraRowGroupFrames(
 function syncCachedFrames(set: (partial: Partial<SceneState>) => void) {
   const indices = [...internal.frameCache.keys()].sort((a, b) => a - b)
   set({ cachedFrames: indices })
+
+  // A deep-linked seek that missed the cache lands here, the moment its
+  // frame arrives — otherwise a cold load strands the viewer at frame 0.
+  const pending = internal.pendingSeekFrame
+  if (pending !== null && internal.frameCache.has(pending)) {
+    internal.pendingSeekFrame = null
+    void useSceneStore.getState().actions.loadFrame(pending)
+  }
 }
 
 /** Update the cameraCachedFrames state for the camera buffer lane UI */
@@ -717,6 +733,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // Cache hit — instant (the common case after prefetch completes)
       const cached = internal.frameCache.get(frameIndex)
       if (cached) {
+        // An explicit landing supersedes any queued deep-link seek
+        internal.pendingSeekFrame = null
         // Merge camera images from separate cache (always create new Map for re-render)
         const camData = internal.cameraImageCache.get(frameIndex)
         const cameraImages = camData ? new Map(camData) : new Map<number, ArrayBuffer>()
@@ -733,9 +751,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return
       }
 
-      // Cache miss — frame not yet prefetched, ignore navigation.
-      // Prefetch loads all row groups sequentially; the frame will become
-      // available shortly. This avoids contention with the prefetch queue.
+      // Cache miss — frame not yet prefetched, so don't fight the prefetch
+      // queue; remember it and let syncCachedFrames land it on arrival.
+      internal.pendingSeekFrame = frameIndex
     },
 
     nextFrame: () => get().actions.loadFrame(get().currentFrameIndex + 1),
