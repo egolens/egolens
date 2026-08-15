@@ -84,7 +84,7 @@ import type {
 
 import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
-import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
+import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindowToUrl, getInitialSearch, parseViewParams } from '../utils/urlState'
 import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
@@ -819,15 +819,22 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     setPlaybackWindow: (t0, t1) => {
       if (t0 == null || t1 == null) {
         set({ playbackWindow: null })
+        syncWindowToUrl(null)
         return
       }
       const resolved = resolveWindowToFrames(internal.timestamps, t0, t1)
       if (!resolved) {
         console.warn(`[playbackWindow] t0/t1 (${t0}..${t1}) don't resolve against this scene — window ignored`)
         set({ playbackWindow: null })
+        syncWindowToUrl(null)
         return
       }
-      set({ playbackWindow: { ...resolved, t0, t1 } })
+      const win = { ...resolved, t0, t1 }
+      set({ playbackWindow: win })
+      // syncSegmentToUrl rewrites the query on load and on every scene
+      // switch, dropping t0/t1 — re-assert them whenever the range is set,
+      // so a shared link survives its own load.
+      syncWindowToUrl(win)
       void get().actions.seekFrame(resolved.f0)
     },
 
@@ -959,7 +966,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (internal.nuScenesDb) {
           await loadNuScenesScene(segmentId, set, get)
-          syncSegmentToUrl(segmentId)
+          syncSegmentToUrl(segmentId, get().playbackWindow)
           return
         }
       }
@@ -988,7 +995,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (internal.av2Db) {
           await loadAV2Scene(segmentId, set, get)
-          syncSegmentToUrl(segmentId)
+          syncSegmentToUrl(segmentId, get().playbackWindow)
           return
         }
       }
@@ -1009,7 +1016,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       await get().actions.loadDataset(sources as Map<string, File | string>)
 
       // Sync segment ID to URL bar (replaceState, no history pollution)
-      syncSegmentToUrl(segmentId)
+      syncSegmentToUrl(segmentId, get().playbackWindow)
     },
 
     toggleWorldMode: () => {

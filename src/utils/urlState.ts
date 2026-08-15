@@ -35,6 +35,23 @@ function withPageLevelParams(params: URLSearchParams): URLSearchParams {
   return params
 }
 
+/**
+ * Reflect the active playback range into the URL so reload and copy-paste
+ * carry what is on screen. Null removes the params.
+ */
+export function syncWindowToUrl(win: { t0: string; t1: string } | null) {
+  const params = new URLSearchParams(window.location.search)
+  if (win) {
+    params.set('t0', win.t0)
+    params.set('t1', win.t1)
+  } else {
+    params.delete('t0')
+    params.delete('t1')
+  }
+  const qs = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${qs ? '?' + qs : ''}`)
+}
+
 export function setUrlSource(dataset: string, baseUrl: string) {
   sourceDataset = dataset
   sourceBaseUrl = baseUrl
@@ -84,7 +101,10 @@ export function getInitialSearch(): string | null {
  * Update the browser URL with the current dataset + segment.
  * Uses replaceState to avoid polluting history.
  */
-export function syncSegmentToUrl(segmentId: string) {
+export function syncSegmentToUrl(
+  segmentId: string,
+  win?: { t0: string; t1: string } | null,
+) {
   // Only sync if we loaded from a URL (not drag & drop)
   if (!sourceDataset || !sourceBaseUrl) return
 
@@ -92,6 +112,13 @@ export function syncSegmentToUrl(segmentId: string) {
   params.set('dataset', sourceDataset)
   params.set('data', sourceBaseUrl)
   params.set('scene', segmentId)
+  // The range belongs to the scene being synced: carried when one is active,
+  // dropped on a scene switch (which clears the range anyway). Passed in
+  // rather than read from the store so this module stays store-agnostic.
+  if (win) {
+    params.set('t0', win.t0)
+    params.set('t1', win.t1)
+  }
 
   withPageLevelParams(params)
 

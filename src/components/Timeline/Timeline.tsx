@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { colors, fonts, radius, gradients } from '../../theme'
+import { syncWindowToUrl } from '../../utils/urlState'
 
 // ---------------------------------------------------------------------------
 // Buffer segment computation (pure function, exported for testing)
@@ -48,19 +49,13 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
 // ---------------------------------------------------------------------------
 
 const windowChipButtonStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '4px',
   background: 'none',
-  border: '1px solid rgba(0, 201, 219, 0.4)',
-  borderRadius: radius.pill,
+  border: 'none',
   color: colors.accentBlue,
-  fontSize: '10px',
-  fontFamily: fonts.sans,
+  fontSize: '12px',
   cursor: 'pointer',
-  padding: '2px 8px',
-  lineHeight: 1.5,
-  whiteSpace: 'nowrap',
+  padding: 0,
+  lineHeight: 1,
 }
 
 export default function Timeline({ minimal = false }: { minimal?: boolean } = {}) {
@@ -81,24 +76,10 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const disabled = status !== 'ready'
   const maxFrame = Math.max(totalFrames - 1, 0)
 
-  /** Reflect the current window into the URL so reload/share see what's on screen. */
-  const syncWindowParams = useCallback((win: { t0: string; t1: string } | null) => {
-    const params = new URLSearchParams(window.location.search)
-    if (win) {
-      params.set('t0', win.t0)
-      params.set('t1', win.t1)
-    } else {
-      params.delete('t0')
-      params.delete('t1')
-    }
-    const qs = params.toString()
-    window.history.replaceState(null, '', `${window.location.pathname}${qs ? '?' + qs : ''}`)
-  }, [])
-
   const clearWindow = useCallback(() => {
     actions.setPlaybackWindow(null)
-    syncWindowParams(null)
-  }, [actions, syncWindowParams])
+    syncWindowToUrl(null)
+  }, [actions])
 
   // ── Handle dragging (full-controls mode only) ──
   const trackRef = useRef<HTMLDivElement>(null)
@@ -162,11 +143,11 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     if (win && win.f0 === 0 && win.f1 === max) {
       // Spanning the whole recording is the same as no window
       state.actions.setPlaybackWindow(null)
-      syncWindowParams(null)
+      syncWindowToUrl(null)
       return
     }
-    syncWindowParams(win)
-  }, [syncWindowParams, frameFromClientX])
+    syncWindowToUrl(win)
+  }, [frameFromClientX])
 
   // Foxglove's exact trim shortcuts: Cmd/Ctrl+Shift+← snaps the window start
   // to the playhead, Cmd/Ctrl+Shift+→ snaps the end. With no window active,
@@ -189,11 +170,11 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       } else {
         s.actions.setPlaybackWindowFrames(win ? Math.min(win.f0, cur) : 0, cur)
       }
-      syncWindowParams(useSceneStore.getState().playbackWindow)
+      syncWindowToUrl(useSceneStore.getState().playbackWindow)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [minimal, disabled, syncWindowParams])
+  }, [minimal, disabled])
 
   // Annotation frame markers
   const colormapMode = useSceneStore((s) => s.colormapMode)
@@ -244,7 +225,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const showCameraBuffer = cameraCachedFrames.length > 0 && cameraCachedFrames.length < cachedFrames.length
 
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '14px', fontSize: '13px' }}>
+    <div onMouseEnter={() => setTrackHovered(true)} onMouseLeave={() => setTrackHovered(false)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '14px', fontSize: '13px' }}>
       <button
         onClick={() => actions.togglePlayback()}
         disabled={disabled || cachedFrames.length === 0}
@@ -278,7 +259,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       {/* Custom slider with buffer bar + annotation lanes */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0 }}>
         {/* Main track area — outer container keeps full width for hit area */}
-        <div onMouseEnter={() => setTrackHovered(true)} onMouseLeave={() => setTrackHovered(false)} style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
+        <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
           {/* Inset track container — padded by dot radius so playhead fits at 0% and 100% */}
           <div ref={trackRef} style={{ position: 'absolute', left: 6, right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center' }}>
             {/* Track background */}
@@ -507,21 +488,21 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       {/* Floating overlay — takes no layout space, so its appearance can
           never reflow the track under a mid-drag cursor, and costs nothing
           when idle */}
-      {playbackWindow && !minimal && (
-        <button
-          onClick={clearWindow}
-          title="Reset playback range — play the full recording"
-          style={{
-            ...windowChipButtonStyle,
-            position: 'absolute',
-            right: 0,
-            top: '-26px',
-            backgroundColor: 'rgba(15, 19, 38, 0.85)',
-            backdropFilter: 'blur(4px)',
-          }}
-        >
-          range <span aria-hidden="true">✕</span>
-        </button>
+      {/* Clear-range cell keeps its 20px whether or not a range is active, so
+          creating one mid-drag can never reflow the track under the cursor.
+          Lives beside the frame counter — inside the row, so nothing above
+          the timeline can intercept the click. */}
+      {!minimal && (
+        <span style={{ width: '20px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+          {playbackWindow && (
+            <button
+              onClick={clearWindow}
+              title="Reset playback range — play the full recording"
+              aria-label="Reset playback range"
+              style={windowChipButtonStyle}
+            >✕</button>
+          )}
+        </span>
       )}
 
       <span style={{
