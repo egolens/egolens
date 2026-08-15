@@ -112,16 +112,26 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     return Math.round(Math.max(0, Math.min(1, ratio)) * max)
   }, [])
 
+  const dragStartXRef = useRef(0)
+  const dragMovedRef = useRef(false)
+
   const onHandlePointerDown = useCallback((edge: 'f0' | 'f1') => (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
     dragEdgeRef.current = edge
+    dragStartXRef.current = e.clientX
+    dragMovedRef.current = false
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }, [])
 
   const onHandlePointerMove = useCallback((e: React.PointerEvent) => {
     const edge = dragEdgeRef.current
     if (!edge) return
+    // Click jitter must not create or move a range — the handles sit exactly
+    // where people click to seek to the recording edges. Only a deliberate
+    // drag (≥6px) engages.
+    if (!dragMovedRef.current && Math.abs(e.clientX - dragStartXRef.current) < 6) return
+    dragMovedRef.current = true
     const state = useSceneStore.getState()
     const max = Math.max(state.totalFrames - 1, 0)
     // No window yet: the handles rest at the recording edges, and dragging
@@ -137,12 +147,18 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
     }
   }, [actions, frameFromClientX])
 
-  const onHandlePointerUp = useCallback(() => {
+  const onHandlePointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragEdgeRef.current) return
     dragEdgeRef.current = null
     const state = useSceneStore.getState()
-    const win = state.playbackWindow
     const max = Math.max(state.totalFrames - 1, 0)
+    if (!dragMovedRef.current) {
+      // A plain click on a handle was almost certainly an edge-seek the
+      // handle intercepted — forward it instead of swallowing it
+      void state.actions.seekFrame(frameFromClientX(dragStartXRef.current, max))
+      return
+    }
+    const win = state.playbackWindow
     if (win && win.f0 === 0 && win.f1 === max) {
       // Spanning the whole recording is the same as no window
       state.actions.setPlaybackWindow(null)
@@ -150,7 +166,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
       return
     }
     syncWindowParams(win)
-  }, [syncWindowParams])
+  }, [syncWindowParams, frameFromClientX])
 
   // Foxglove's exact trim shortcuts: Cmd/Ctrl+Shift+← snaps the window start
   // to the playhead, Cmd/Ctrl+Shift+→ snaps the end. With no window active,
