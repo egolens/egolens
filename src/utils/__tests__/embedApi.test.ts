@@ -14,10 +14,13 @@ vi.mock('../../stores/useSceneStore', () => {
     colormapMode: 'intensity',
     status: 'idle',
     error: null,
+    currentSegment: null,
+    availableSegments: [],
     actions: {
       seekFrame: vi.fn(),
       togglePlayback: vi.fn(),
       setColormapMode: vi.fn(),
+      selectSegment: vi.fn().mockResolvedValue(undefined),
     },
   }
   return {
@@ -39,10 +42,13 @@ vi.mock('../../stores/useSceneStore', () => {
           colormapMode: 'intensity',
           status: 'idle',
           error: null,
+          currentSegment: null,
+          availableSegments: [],
           actions: {
             seekFrame: vi.fn(),
             togglePlayback: vi.fn(),
             setColormapMode: vi.fn(),
+            selectSegment: vi.fn().mockResolvedValue(undefined),
           },
         }
         subscribers.clear()
@@ -190,6 +196,57 @@ describe('embedApi', () => {
     }))
     const actions = store.getState().actions as { setColormapMode: ReturnType<typeof vi.fn> }
     expect(actions.setColormapMode).not.toHaveBeenCalled()
+  })
+
+  it('handles setScene inbound message for a known scene', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    store._setState({ availableSegments: ['scene-a', 'scene-b'], currentSegment: 'scene-a' })
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setScene', scene: 'scene-b' },
+    }))
+    const actions = store.getState().actions as { selectSegment: ReturnType<typeof vi.fn> }
+    expect(actions.selectSegment).toHaveBeenCalledWith('scene-b')
+  })
+
+  it('setScene for an unknown scene replies with an error, no switch', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    store._setState({ availableSegments: ['scene-a'], currentSegment: 'scene-a' })
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setScene', scene: 'nope' },
+    }))
+    const actions = store.getState().actions as { selectSegment: ReturnType<typeof vi.fn> }
+    expect(actions.selectSegment).not.toHaveBeenCalled()
+    const errors = postMessageSpy.mock.calls.filter(([msg]: [{ type: string }]) => msg.type === 'error')
+    expect(errors.length).toBe(1)
+    expect(errors[0][0].message).toContain('nope')
+  })
+
+  it('setScene to the current scene is a no-op', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    store._setState({ availableSegments: ['scene-a'], currentSegment: 'scene-a' })
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setScene', scene: 'scene-a' },
+    }))
+    const actions = store.getState().actions as { selectSegment: ReturnType<typeof vi.fn> }
+    expect(actions.selectSegment).not.toHaveBeenCalled()
+  })
+
+  it('emits sceneChange when the segment switches and is ready', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    store._setState({ currentSegment: 'scene-a', status: 'ready', totalFrames: 40 })
+    store._setState({ currentSegment: 'scene-b', status: 'ready', totalFrames: 157 })
+    const changes = postMessageSpy.mock.calls.filter(([msg]: [{ type: string }]) => msg.type === 'sceneChange')
+    expect(changes.map(([msg]: [{ scene: string }]) => msg.scene)).toContain('scene-b')
+    expect(changes[changes.length - 1][0]).toEqual({ type: 'sceneChange', scene: 'scene-b', totalFrames: 157 })
+  })
+
+  it('stateReply includes the current scene', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    store._setState({ currentSegment: 'scene-x' })
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'getState' } }))
+    const replies = postMessageSpy.mock.calls.filter(([msg]: [{ type: string }]) => msg.type === 'stateReply')
+    expect(replies.length).toBe(1)
+    expect(replies[0][0].scene).toBe('scene-x')
   })
 
   it('ignores malformed messages', () => {

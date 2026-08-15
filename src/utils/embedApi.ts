@@ -38,13 +38,15 @@ export type InboundMessage =
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'setColormap'; colormap: string }
+  | { type: 'setScene'; scene: string }
   | { type: 'getState' }
 
 /** Outbound message types (viewer → host) */
 export type OutboundMessage =
   | { type: 'ready' }
   | { type: 'frameChange'; frame: number; totalFrames: number }
-  | { type: 'stateReply'; frame: number; totalFrames: number; isPlaying: boolean; colormap: string; status: string }
+  | { type: 'sceneChange'; scene: string; totalFrames: number }
+  | { type: 'stateReply'; frame: number; totalFrames: number; isPlaying: boolean; colormap: string; status: string; scene: string | null }
   | { type: 'error'; message: string }
 
 // Valid colormap values for validation
@@ -98,6 +100,19 @@ function handleInbound(msg: InboundMessage): void {
       }
       break
     }
+    case 'setScene': {
+      // Scene switching reuses the in-app path (shard/log loads included),
+      // so hosts never need to reload the iframe to change scenes.
+      if (typeof msg.scene !== 'string' || msg.scene.length === 0) break
+      if (!state.availableSegments.includes(msg.scene)) {
+        sendToHost({ type: 'error', message: `Unknown scene: ${msg.scene}` }, _storedOrigin)
+        break
+      }
+      if (msg.scene !== state.currentSegment) {
+        void actions.selectSegment(msg.scene)
+      }
+      break
+    }
     case 'getState': {
       // Reply will be sent by the frame change listener
       const reply: OutboundMessage = {
@@ -107,6 +122,7 @@ function handleInbound(msg: InboundMessage): void {
         isPlaying: state.isPlaying,
         colormap: state.colormapMode,
         status: state.status,
+        scene: state.currentSegment,
       }
       // Need to access the origin from somewhere — we'll use the stored one
       sendToHost(reply, _storedOrigin)
@@ -141,16 +157,24 @@ export function initEmbedApi(embedParams: EmbedParams): () => void {
 
   window.addEventListener('message', onMessage)
 
-  // Subscribe to store changes — emit frameChange and ready events
+  // Subscribe to store changes — emit frameChange, sceneChange, and ready events
   let readySent = false
   let prevFrame = useSceneStore.getState().currentFrameIndex
   let prevStatus = useSceneStore.getState().status
+  let prevScene = useSceneStore.getState().currentSegment
 
   const unsub = useSceneStore.subscribe((state) => {
     // Frame change
     if (state.currentFrameIndex !== prevFrame) {
       prevFrame = state.currentFrameIndex
       sendToHost({ type: 'frameChange', frame: state.currentFrameIndex, totalFrames: state.totalFrames }, allowedOrigin)
+    }
+
+    // Scene change — fired for host- and user-initiated switches alike, once
+    // the new scene is actually ready (hosts track navigation either way)
+    if (state.currentSegment !== prevScene && state.status === 'ready' && state.currentSegment) {
+      prevScene = state.currentSegment
+      sendToHost({ type: 'sceneChange', scene: state.currentSegment, totalFrames: state.totalFrames }, allowedOrigin)
     }
 
     // Status change

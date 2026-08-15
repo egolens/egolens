@@ -408,6 +408,57 @@ export async function discoverAV2AllSplits(
 }
 
 // ---------------------------------------------------------------------------
+// Direct scene resolution (deep-link fast path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a candidate log URL actually holds an AV2 log, without
+ * listing anything: HEAD manifest.json first (mirrors), then the one file
+ * every AV2 log must have (raw buckets, where manifest.json 403/404s).
+ */
+async function probeAV2LogUrl(logUrl: string): Promise<boolean> {
+  for (const probe of ['manifest.json', 'calibration/egovehicle_SE3_sensor.feather']) {
+    try {
+      const res = await fetch(`${logUrl}${probe}`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (res.ok) return true
+    } catch { /* try next probe */ }
+  }
+  return false
+}
+
+/**
+ * Resolve a deep-linked scene to its log URL without running discovery.
+ *
+ * A deep link arrives as parent-or-root URL + log id; discovery-first costs
+ * a listing round-trip (and for a sensor root, three) before the scene even
+ * starts loading. This probes the constructed child URL directly — for a
+ * sensor root, all splits in parallel — so the scene load can begin
+ * immediately and discovery can fill the selector in the background.
+ *
+ * Returns null when no candidate responds (bad scene id, or a host where
+ * HEAD is blocked) — callers must then fall back to discovery-first, which
+ * produces the informative error.
+ */
+export async function resolveAV2DirectLogUrl(
+  parentUrl: string,
+  logId: string,
+): Promise<AV2DiscoveredLog | null> {
+  const base = ensureTrailingSlash(parentUrl)
+
+  const candidates: AV2DiscoveredLog[] = isAV2SensorRootUrl(base)
+    ? AV2_SPLITS.map((split) => ({ logId, logUrl: `${base}${split}/${logId}/`, split }))
+    : [{ logId, logUrl: `${base}${logId}/`, split: splitFromUrl(base) ?? undefined }]
+
+  const probed = await Promise.all(
+    candidates.map(async (c) => ((await probeAV2LogUrl(c.logUrl)) ? c : null)),
+  )
+  return probed.find((c) => c !== null) ?? null
+}
+
+// ---------------------------------------------------------------------------
 // Multi-log discovery (parent directory listing)
 // ---------------------------------------------------------------------------
 
