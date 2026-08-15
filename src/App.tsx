@@ -299,8 +299,12 @@ function App() {
       // Blur focused buttons so Space doesn't re-click them
       if (tag === 'BUTTON') (el as HTMLButtonElement).blur()
 
-      // Shift+Arrow: segment navigation (works even during loading)
-      if (e.shiftKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+      // Shift+Arrow: segment navigation (works even during loading).
+      // Bare Shift only — Cmd/Ctrl+Shift+Arrow belongs to the playback-range
+      // trim shortcut (Timeline), and matching it here would switch scenes
+      // mid-trim.
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey
+          && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
         e.preventDefault()
         const { availableSegments: segs, currentSegment: cur, status: st } = useSceneStore.getState()
         if (st === 'loading' || !cur || segs.length <= 1) return
@@ -311,6 +315,10 @@ function App() {
       }
 
       if (status !== 'ready') return
+
+      // The bare-key shortcuts below must not swallow modifier combos —
+      // Cmd/Ctrl+Shift+Arrow (range trim) would otherwise also step a frame.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
 
       switch (e.code) {
         case 'Space':
