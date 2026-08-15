@@ -157,6 +157,8 @@ interface SceneActions {
   setPlaybackSpeed: (speed: number) => void
   /** Set the playback time window from raw t0/t1 timestamps (strings — int64). Null clears. */
   setPlaybackWindow: (t0: string | null, t1?: string) => void
+  /** Set the window by frame indices (handle dragging). Derives t0/t1 from scene timestamps; no auto-seek. */
+  setPlaybackWindowFrames: (f0: number, f1: number) => void
   toggleSensor: (laserName: number) => void
   cycleBoxMode: () => void
   setBoxMode: (mode: BoxMode) => void
@@ -827,6 +829,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
       set({ playbackWindow: { ...resolved, t0, t1 } })
       void get().actions.seekFrame(resolved.f0)
+    },
+
+    setPlaybackWindowFrames: (f0, f1) => {
+      const ts = internal.timestamps
+      if (ts.length === 0) return
+      const lo = Math.max(0, Math.min(Math.floor(f0), ts.length - 1))
+      const hi = Math.max(lo, Math.min(Math.floor(f1), ts.length - 1))
+      set({ playbackWindow: { f0: lo, f1: hi, t0: String(ts[lo]), t1: String(ts[hi]) } })
     },
 
     toggleSensor: (laserName: number) => {

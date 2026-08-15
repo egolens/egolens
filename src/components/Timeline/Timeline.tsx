@@ -8,7 +8,7 @@
  * with annotation frame markers (segmentation, keypoints).
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { colors, fonts, radius, gradients } from '../../theme'
 
@@ -47,6 +47,30 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
 // Component
 // ---------------------------------------------------------------------------
 
+const windowInputStyle: React.CSSProperties = {
+  width: '34px',
+  padding: '1px 2px',
+  fontSize: '10px',
+  fontFamily: fonts.mono,
+  color: colors.accentBlue,
+  backgroundColor: 'transparent',
+  border: '1px solid rgba(0, 201, 219, 0.35)',
+  borderRadius: radius.sm,
+  textAlign: 'center',
+  outline: 'none',
+  appearance: 'textfield',
+}
+
+const windowChipButtonStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: colors.textDim,
+  fontSize: '11px',
+  cursor: 'pointer',
+  padding: '0 2px',
+  lineHeight: 1,
+}
+
 export default function Timeline({ minimal = false }: { minimal?: boolean } = {}) {
   const status = useSceneStore((s) => s.status)
   const currentFrameIndex = useSceneStore((s) => s.currentFrameIndex)
@@ -57,15 +81,112 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const playbackWindow = useSceneStore((s) => s.playbackWindow)
   const actions = useSceneStore((s) => s.actions)
 
-  const clearWindow = useCallback(() => {
-    actions.setPlaybackWindow(null)
-    // Drop the params too, so a reload doesn't resurrect the window
+  const disabled = status !== 'ready'
+  const maxFrame = Math.max(totalFrames - 1, 0)
+
+  /** Reflect the current window into the URL so reload/share see what's on screen. */
+  const syncWindowParams = useCallback((win: { t0: string; t1: string } | null) => {
     const params = new URLSearchParams(window.location.search)
-    params.delete('t0')
-    params.delete('t1')
+    if (win) {
+      params.set('t0', win.t0)
+      params.set('t1', win.t1)
+    } else {
+      params.delete('t0')
+      params.delete('t1')
+    }
     const qs = params.toString()
     window.history.replaceState(null, '', `${window.location.pathname}${qs ? '?' + qs : ''}`)
-  }, [actions])
+  }, [])
+
+  const clearWindow = useCallback(() => {
+    actions.setPlaybackWindow(null)
+    syncWindowParams(null)
+  }, [actions, syncWindowParams])
+
+  // The window as it arrived (URL or setWindow) — one-click restore after a
+  // drag, so editing a shared link is never destructive.
+  const sharedWindowRef = useRef<{ t0: string; t1: string } | null>(null)
+  if (playbackWindow && sharedWindowRef.current === null) {
+    sharedWindowRef.current = { t0: playbackWindow.t0, t1: playbackWindow.t1 }
+  }
+  if (!playbackWindow && sharedWindowRef.current !== null) {
+    sharedWindowRef.current = null
+  }
+  const windowModified = playbackWindow != null && sharedWindowRef.current != null
+    && (playbackWindow.t0 !== sharedWindowRef.current.t0 || playbackWindow.t1 !== sharedWindowRef.current.t1)
+
+  const restoreSharedWindow = useCallback(() => {
+    const shared = sharedWindowRef.current
+    if (!shared) return
+    actions.setPlaybackWindow(shared.t0, shared.t1)
+    syncWindowParams(shared)
+  }, [actions, syncWindowParams])
+
+  // ── Handle dragging (full-controls mode only) ──
+  const trackRef = useRef<HTMLDivElement>(null)
+  const dragEdgeRef = useRef<'f0' | 'f1' | null>(null)
+
+  const frameFromClientX = useCallback((clientX: number, max: number): number => {
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0) return 0
+    const ratio = (clientX - rect.left) / rect.width
+    return Math.round(Math.max(0, Math.min(1, ratio)) * max)
+  }, [])
+
+  const onHandlePointerDown = useCallback((edge: 'f0' | 'f1') => (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragEdgeRef.current = edge
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }, [])
+
+  const onHandlePointerMove = useCallback((e: React.PointerEvent) => {
+    const edge = dragEdgeRef.current
+    const win = useSceneStore.getState().playbackWindow
+    const max = Math.max(useSceneStore.getState().totalFrames - 1, 0)
+    if (!edge || !win) return
+    const frame = frameFromClientX(e.clientX, max)
+    if (edge === 'f0') {
+      const f0 = Math.min(frame, win.f1)
+      if (f0 !== win.f0) actions.setPlaybackWindowFrames(f0, win.f1)
+    } else {
+      const f1 = Math.max(frame, win.f0)
+      if (f1 !== win.f1) actions.setPlaybackWindowFrames(win.f0, f1)
+    }
+  }, [actions, frameFromClientX])
+
+  const onHandlePointerUp = useCallback(() => {
+    if (!dragEdgeRef.current) return
+    dragEdgeRef.current = null
+    syncWindowParams(useSceneStore.getState().playbackWindow)
+  }, [syncWindowParams])
+
+  // Foxglove's exact trim shortcuts: Cmd/Ctrl+Shift+← snaps the window start
+  // to the playhead, Cmd/Ctrl+Shift+→ snaps the end. With no window active,
+  // the other bound is the recording edge.
+  useEffect(() => {
+    if (minimal || disabled) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      e.preventDefault()
+      const s = useSceneStore.getState()
+      if (s.totalFrames === 0) return
+      const max = s.totalFrames - 1
+      const cur = s.currentFrameIndex
+      const win = s.playbackWindow
+      if (e.key === 'ArrowLeft') {
+        s.actions.setPlaybackWindowFrames(cur, win ? Math.max(win.f1, cur) : max)
+      } else {
+        s.actions.setPlaybackWindowFrames(win ? Math.min(win.f0, cur) : 0, cur)
+      }
+      syncWindowParams(useSceneStore.getState().playbackWindow)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [minimal, disabled, syncWindowParams])
 
   // Annotation frame markers
   const colormapMode = useSceneStore((s) => s.colormapMode)
@@ -78,8 +199,6 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const cameraKeypointFrames = useSceneStore((s) => s.cameraKeypointFrames)
   const cameraSegFrames = useSceneStore((s) => s.cameraSegFrames)
 
-  const disabled = status !== 'ready'
-  const maxFrame = Math.max(totalFrames - 1, 0)
 
 
   const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -154,7 +273,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
         {/* Main track area — outer container keeps full width for hit area */}
         <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
           {/* Inset track container — padded by dot radius so playhead fits at 0% and 100% */}
-          <div style={{ position: 'absolute', left: 6, right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center' }}>
+          <div ref={trackRef} style={{ position: 'absolute', left: 6, right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center' }}>
             {/* Track background */}
             <div style={{
               position: 'absolute',
@@ -186,20 +305,6 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
               )
             })}
 
-            {/* Time window band — playback loops inside [f0, f1] */}
-            {playbackWindow && maxFrame > 0 && (
-              <div style={{
-                position: 'absolute',
-                left: `${(playbackWindow.f0 / maxFrame) * 100}%`,
-                width: `${((playbackWindow.f1 - playbackWindow.f0) / maxFrame) * 100}%`,
-                height: '12px',
-                backgroundColor: 'rgba(240, 198, 116, 0.18)',
-                border: '1px solid rgba(240, 198, 116, 0.55)',
-                borderRadius: radius.pill,
-                pointerEvents: 'none',
-              }} />
-            )}
-
             {/* Played progress (gradient bar) */}
             <div style={{
               position: 'absolute',
@@ -227,6 +332,86 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                 pointerEvents: 'none',
               }} />
             )}
+
+            {/* Time window — dim everything outside [f0, f1]; the window keeps
+                the track's own colors (Perfetto/DevTools brush idiom) */}
+            {playbackWindow && maxFrame > 0 && (() => {
+              const leftPct = (playbackWindow.f0 / maxFrame) * 100
+              const rightPct = (playbackWindow.f1 / maxFrame) * 100
+              return (
+                <>
+                  {playbackWindow.f0 > 0 && (
+                    <div style={{
+                      position: 'absolute',
+                      left: 0,
+                      width: `${leftPct}%`,
+                      height: '16px',
+                      backgroundColor: 'rgba(10, 13, 26, 0.72)',
+                      borderRadius: `${radius.pill} 0 0 ${radius.pill}`,
+                      pointerEvents: 'none',
+                    }} />
+                  )}
+                  {playbackWindow.f1 < maxFrame && (
+                    <div style={{
+                      position: 'absolute',
+                      left: `${rightPct}%`,
+                      right: 0,
+                      height: '16px',
+                      backgroundColor: 'rgba(10, 13, 26, 0.72)',
+                      borderRadius: `0 ${radius.pill} ${radius.pill} 0`,
+                      pointerEvents: 'none',
+                    }} />
+                  )}
+                  {minimal ? (
+                    // Minimal/embed: boundary ticks only — the window is host-controlled
+                    <>
+                      <div style={{ position: 'absolute', left: `${leftPct}%`, width: '1.5px', height: '16px', backgroundColor: colors.accentBlue, transform: 'translateX(-50%)', pointerEvents: 'none' }} />
+                      <div style={{ position: 'absolute', left: `${rightPct}%`, width: '1.5px', height: '16px', backgroundColor: colors.accentBlue, transform: 'translateX(-50%)', pointerEvents: 'none' }} />
+                    </>
+                  ) : (
+                    // Full controls: draggable in/out handles (Foxglove idiom)
+                    <>
+                      <div
+                        onPointerDown={onHandlePointerDown('f0')}
+                        onPointerMove={onHandlePointerMove}
+                        onPointerUp={onHandlePointerUp}
+                        title="Window start — drag to adjust"
+                        style={{
+                          position: 'absolute',
+                          left: `${leftPct}%`,
+                          width: '6px',
+                          height: '18px',
+                          backgroundColor: colors.accentBlue,
+                          borderRadius: '2px',
+                          transform: 'translateX(-50%)',
+                          cursor: 'ew-resize',
+                          zIndex: 2,
+                          touchAction: 'none',
+                        }}
+                      />
+                      <div
+                        onPointerDown={onHandlePointerDown('f1')}
+                        onPointerMove={onHandlePointerMove}
+                        onPointerUp={onHandlePointerUp}
+                        title="Window end — drag to adjust"
+                        style={{
+                          position: 'absolute',
+                          left: `${rightPct}%`,
+                          width: '6px',
+                          height: '18px',
+                          backgroundColor: colors.accentBlue,
+                          borderRadius: '2px',
+                          transform: 'translateX(-50%)',
+                          cursor: 'ew-resize',
+                          zIndex: 2,
+                          touchAction: 'none',
+                        }}
+                      />
+                    </>
+                  )}
+                </>
+              )
+            })()}
           </div>
 
           {/* Invisible range input — matches inset track area */}
@@ -302,29 +487,61 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
         )}
       </div>
 
-      {playbackWindow && (
-        <button
-          onClick={clearWindow}
-          title={`Playback clipped to frames ${playbackWindow.f0 + 1}–${playbackWindow.f1 + 1} (t0/t1) — click to clear`}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '2px 8px',
-            fontSize: '10px',
-            fontFamily: fonts.sans,
-            color: '#f0c674',
-            backgroundColor: 'rgba(240, 198, 116, 0.12)',
-            border: '1px solid rgba(240, 198, 116, 0.45)',
-            borderRadius: radius.pill,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            lineHeight: 1.6,
-          }}
-        >
-          {playbackWindow.f0 + 1}–{playbackWindow.f1 + 1}
-          <span aria-hidden="true">✕</span>
-        </button>
+      {playbackWindow && !minimal && (
+        <span style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          fontSize: '10px',
+          fontFamily: fonts.mono,
+          color: colors.accentBlue,
+          whiteSpace: 'nowrap',
+        }}>
+          <span title="Playback loops inside this window" aria-hidden="true">⟳</span>
+          <input
+            type="number"
+            min={1}
+            max={playbackWindow.f1 + 1}
+            value={playbackWindow.f0 + 1}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10)
+              if (!isNaN(v)) {
+                actions.setPlaybackWindowFrames(v - 1, playbackWindow.f1)
+                syncWindowParams(useSceneStore.getState().playbackWindow)
+              }
+            }}
+            title="Window start frame — edit for precise adjustment"
+            style={windowInputStyle}
+          />
+          –
+          <input
+            type="number"
+            min={playbackWindow.f0 + 1}
+            max={totalFrames}
+            value={playbackWindow.f1 + 1}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10)
+              if (!isNaN(v)) {
+                actions.setPlaybackWindowFrames(playbackWindow.f0, v - 1)
+                syncWindowParams(useSceneStore.getState().playbackWindow)
+              }
+            }}
+            title="Window end frame — edit for precise adjustment"
+            style={windowInputStyle}
+          />
+          {windowModified && (
+            <button
+              onClick={restoreSharedWindow}
+              title="Restore the window this link arrived with"
+              style={windowChipButtonStyle}
+            >↺</button>
+          )}
+          <button
+            onClick={clearWindow}
+            title="Clear window — play the full recording"
+            style={windowChipButtonStyle}
+          >✕</button>
+        </span>
       )}
 
       <span style={{

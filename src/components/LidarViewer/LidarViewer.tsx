@@ -1206,6 +1206,7 @@ export default function LidarViewer({ hideControls = false }: { hideControls?: b
                   <div><span style={{ color: colors.textPrimary }}>← →</span>{' '} ±1 frame</div>
                   <div><span style={{ color: colors.textPrimary }}>[ ]</span>{' '}  ±10 frames</div>
                   <div><span style={{ color: colors.textPrimary }}>Space</span> play/pause</div>
+                  <div><span style={{ color: colors.textPrimary }}>⌘⇧←→</span> trim window</div>
                   <div><span style={{ color: colors.textPrimary }}>/</span>{' '}     search scene</div>
                 </div>
               </div>,
