@@ -19,4 +19,5 @@ convention and keep their names.
 |---|------|--------|
 | 001 | [Integration contract — deep-link fast path, setScene, time window, collections](spec_001_integration_contract.md) | in-progress (item 4 → spec 002) |
 | 002 | [Collections — index.json curation metadata](spec_002_collections.md) | planned |
-| 003 | [Embed view composition — controls, cameras](spec_003_embed_view_composition.md) | in-progress |
+| 003 | [Embed view composition — controls, cameras](spec_003_embed_view_composition.md) | shipped |
+| 004 | [BYO data — a checkable contract, not a silent one](spec_004_byo_schema_contract.md) | planned |
