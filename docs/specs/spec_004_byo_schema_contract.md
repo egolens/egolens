@@ -62,12 +62,28 @@ two cannot drift.
 - Narrow `NuScenesSensor.channel` from `string` (nuscenes.ts:49) to a union of
   the 12 keys in `NUSCENES_CHANNEL_TO_ID` (manifest.ts:49). This is worth doing
   for TypeScript alone, and it is what makes the schema's `enum` possible.
-- Generate `schema/nuscenes-tables.v1.json` (candidate:
-  `ts-json-schema-generator`; must be verified to emit `minItems`/`maxItems`
-  for tuple types — if it does not, the schema is hand-written and the types
-  are checked against it instead).
+- Generate `schema/nuscenes-tables.v1.json` with `ts-json-schema-generator`.
 - Commit it, publish it at a versioned URL, and add a CI step that regenerates
   and fails on diff.
+- Add a `pattern` to `NuScenesSampleData.filename` (relative, under `samples/`
+  or `sweeps/`). Free, and it converts one of the blind spots below into a
+  caught one.
+
+**Verified on 2026-08-15, before committing to the approach:**
+
+- Tuple types emit correctly — `translation` becomes `minItems: 3, maxItems: 3`
+  and `rotation` `minItems: 4, maxItems: 4`. This was the gate; it passes.
+- JSDoc becomes the schema `description`, so "Quaternion is scalar-first:
+  [w, x, y, z]" travels with the artifact. The schema cannot *enforce* that
+  convention (see below) but it can at least state it where the converter
+  author is looking.
+- The narrowed `channel` union emits as a 12-value `enum`.
+- The generated schema validates **all 10 tables of the hosted v1.0-mini —
+  82,449 rows — with `additionalProperties: false`**, so our interfaces are an
+  exact match for real nuScenes, not a subset. Keep the strict setting, but
+  have the validator report `additionalProperties` violations as a *warning*:
+  it usefully flags a converter emitting fields that do nothing, while not
+  hard-failing on version drift we have not seen.
 
 ### 2. `scripts/validate_nuscenes.py`
 
@@ -83,17 +99,29 @@ Exit code plus a flat list of problems, shaped to run in someone else's CI.
 It consumes the schema rather than reimplementing it — this is a derivative,
 not the second parser rejected under Non-goals.
 
-### 3. What neither can catch — and why 4 and 5 exist
+### 3. What the schema catches, and what it cannot — measured
 
-| Mistake | Why it slips through |
+Ten realistic converter mistakes, applied to real hosted rows and run against
+the generated schema:
+
+| Mistake | Schema |
 |---|---|
-| Quaternion written `[x,y,z,w]` | Identical to `[w,x,y,z]`: four floats |
-| `size` written `[l,w,h]` | Identical to `[w,l,h]`: three floats |
-| Points in world frame, not sensor frame | Does not appear in JSON at all |
-| `.pcd.bin` wrong stride or dtype | Binary payload |
+| `channel: "lidar_roof"` (their own sensor name) | **caught** — lists the 12 accepted |
+| `modality: "LIDAR"` (uppercase) | **caught** |
+| `rotation` with 3 elements | **caught** — "is too short" |
+| `translation` missing | **caught** — "is a required property" |
+| `is_key_frame: "true"` (string) | **caught** — "is not of type 'boolean'" |
+| `filename` absolute instead of relative | blind → **caught** once the `pattern` above is added |
+| `ego_pose_token` dangling | blind — cross-document, out of JSON Schema's reach → item 2 |
+| Quaternion written `[x,y,z,w]` | blind — identical to `[w,x,y,z]`: four floats |
+| `size` written `[l,w,h]` | blind — identical to `[w,l,h]`: three floats |
+| `translation` in millimetres | blind — a number is a number → validator plausibility check, warning tier |
+| Points in world frame, not sensor frame | blind — does not appear in JSON at all |
+| `.pcd.bin` wrong stride or dtype | blind — binary payload |
 
-This class renders *without error and wrong*, which is worse than a blank
-screen. Only a working reference makes it cheap to spot.
+The blind residue is one coherent class: **same types, different meaning.** It
+renders *without error and wrong*, which is worse than a blank screen, and no
+static contract can reach it. That is what items 4 and 5 are for.
 
 ### 4. Runtime errors — demoted to second, still required
 
@@ -144,7 +172,7 @@ rather than adding a second field.
 
 - `src/types/nuscenes.ts` — narrow `channel`
 - `schema/nuscenes-tables.v1.json` (new) + generation script + CI drift check
-- `scripts/validate_nuscenes.py` (new)
+- `scripts/validate_nuscenes.py` (new) + `jsonschema` as its only dependency
 - `src/adapters/nuscenes/metadata.ts` — `allSettled`, required set, parse
   guard, cycle guard
 - `src/stores/useSceneStore.ts` — zero-sensor error
@@ -191,16 +219,17 @@ rather than adding a second field.
   `v1.0-test` acceptance case.
 - **Schema drift** if generation is not enforced. The CI diff check is not
   optional.
-- **Tuple generation is unverified.** If the generator flattens
-  `[number, number, number]` to `number[]`, the schema loses its most useful
-  shape checks and the approach needs revisiting before the rest is built.
+- **A new dev dependency** (`ts-json-schema-generator`) that runs in CI. It is
+  build-time only and never ships, but it is a supply-chain surface the project
+  did not have. Pin it.
 - **Item 5 is justified by inference**, not measurement: we know they built a
   reference by hand, not that a shipped one would have stopped them.
 
 ## Landings
 
-1. Narrow `channel`; generate and commit the schema; CI drift check.
-   (Verify tuple emission first — this gates the rest.)
+1. Narrow `channel`; generate and commit the schema; `filename` pattern;
+   CI drift check. (The generator was verified against real data first — see
+   Design 1.)
 2. `validate_nuscenes.py` with cross-file checks.
 3. Runtime: `allSettled`, required set, parse guard, zero-sensor error, cycle
    guard. Tests per failure mode.
