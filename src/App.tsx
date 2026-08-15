@@ -179,10 +179,20 @@ function useEmbedInitialState(embedParams: EmbedParams) {
   const appliedRef = useRef(false)
 
   useEffect(() => {
-    if (!embedParams.embed || status !== 'ready' || appliedRef.current) return
+    // `autoplay` is honoured outside embed mode too: a scene or range link
+    // pasted into a chat should be able to ask for playback. The rest of the
+    // initial state below stays embed-only.
+    if (status !== 'ready' || appliedRef.current) return
+    if (!embedParams.embed && !embedParams.autoplay) return
     appliedRef.current = true
 
     const actions = useSceneStore.getState().actions
+
+    if (!embedParams.embed) {
+      // Normal mode: autoplay is the only initial-state param honoured
+      if (embedParams.autoplay) actions.play()
+      return
+    }
 
     // Apply initial frame
     if (embedParams.frame !== null) {
@@ -196,9 +206,11 @@ function useEmbedInitialState(embedParams: EmbedParams) {
       actions.setColormapMode(embedParams.colormap)
     }
 
-    // Apply autoplay
+    // Apply autoplay. Explicit play(), not togglePlayback(): with no view
+    // params the store already started playback on load, and a toggle there
+    // would pause the very embed that asked to autoplay.
     if (embedParams.autoplay) {
-      actions.togglePlayback()
+      actions.play()
     }
   }, [embedParams, status])
 }
