@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useSceneStore, getThumbnailResolver } from './stores/useSceneStore'
+import { useSceneStore, getThumbnailResolver, getSegmentSplits, getLoadedAV2HasAnnotations } from './stores/useSceneStore'
 import LidarViewer from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
@@ -449,6 +449,10 @@ function Header() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const thumbResolver = useMemo(() => getThumbnailResolver(), [availableSegments, status])
 
+  // AV2 multi-split mode: per-log split for selector badges/filter chips
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const segmentSplits = useMemo(() => getSegmentSplits(), [availableSegments, status])
+
   // Sync document title with active dataset + segment
   useEffect(() => {
     if (status === 'ready' && currentSegment) {
@@ -573,7 +577,14 @@ function Header() {
               if (loc) parts.push(loc)
               if (meta.timeOfDay) parts.push(meta.timeOfDay)
             }
-            return { value: seg, label: parts.join(' · ') }
+            const split = segmentSplits?.get(seg)
+            return {
+              value: seg,
+              label: parts.join(' · '),
+              tag: split,
+              // test split ships without annotations — flag it before the user opens it
+              tagTone: split === 'test' ? 'warning' : 'default',
+            }
           })}
           value={currentSegment}
           onChange={(val) => actions.selectSegment(val)}
@@ -1019,17 +1030,20 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         {/* Quick start — try with hosted data */}
         <div style={{ display: 'flex', gap: isMobile ? '8px' : '10px', flexWrap: isMobile ? 'nowrap' : 'wrap', justifyContent: 'center', marginTop: '8px', width: '100%' }}>
           {PRESETS.map((preset) => {
-            const isActive = urlDataset === preset.dataset && urlInput === preset.url
+            // Active when the URL form holds the card URL or any of its split URLs
+            const isActive = urlDataset === preset.dataset
+              && (urlInput === preset.url || (preset.splits?.some((s) => s.url === urlInput) ?? false))
+            const applyPreset = (url: string) => {
+              trackPresetClick(preset.dataset)
+              setUrlDataset(preset.dataset)
+              setUrlInput(url)
+              setUrlSegment('')
+              setUrlError(null)
+            }
             return (
               <button
-                key={preset.dataset}
-                onClick={() => {
-                  trackPresetClick(preset.dataset)
-                  setUrlDataset(preset.dataset)
-                  setUrlInput(preset.url)
-                  setUrlSegment('')
-                  setUrlError(null)
-                }}
+                key={`${preset.dataset}-${preset.url}`}
+                onClick={() => applyPreset(preset.url)}
                 disabled={urlLoading}
                 title={preset.note}
                 style={{
@@ -1050,6 +1064,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                   opacity: urlLoading ? 0.5 : 1,
                   flex: isMobile ? 1 : undefined,
                   minWidth: isMobile ? 0 : '180px',
+                  boxSizing: 'border-box',
                 }}
                 onMouseEnter={(e) => {
                   if (!urlLoading && !isActive) {
@@ -1586,8 +1601,69 @@ function CameraStripSkeleton() {
 
 // ShortcutHints removed — ? key now toggles Keys popup in LidarViewer
 
+/**
+ * One-line notice for logs that ship without annotations (AV2 test split).
+ * Without it, missing boxes read as a bug rather than a property of the data.
+ */
+function NoAnnotationsBanner() {
+  const status = useSceneStore((s) => s.status)
+  const currentSegment = useSceneStore((s) => s.currentSegment)
+  const [dismissed, setDismissed] = useState(false)
+
+  const hasAnnotations = status === 'ready' ? getLoadedAV2HasAnnotations() : null
+  if (hasAnnotations !== false || dismissed) return null
+
+  const split = currentSegment ? getSegmentSplits()?.get(currentSegment) : undefined
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '12px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: 20,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '6px 8px 6px 14px',
+      maxWidth: 'calc(100% - 24px)',
+      fontSize: '12px',
+      fontFamily: fonts.sans,
+      color: colors.textPrimary,
+      backgroundColor: 'rgba(26, 31, 53, 0.92)',
+      border: '1px solid rgba(240, 198, 116, 0.45)',
+      borderRadius: radius.md,
+      backdropFilter: 'blur(4px)',
+    }}>
+      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span style={{ color: '#f0c674', fontWeight: 600 }}>
+          {split === 'test' ? 'Test split' : 'No labels'}
+        </span>
+        {' — this log ships without ground-truth annotations, so boxes and overlays are unavailable.'}
+      </span>
+      <button
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss"
+        style={{
+          background: 'none',
+          border: 'none',
+          color: colors.textDim,
+          fontSize: '14px',
+          cursor: 'pointer',
+          padding: '2px 6px',
+          lineHeight: 1,
+          flexShrink: 0,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
 function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'minimal' | 'none' }) {
   const status = useSceneStore((s) => s.status)
+  const currentSegment = useSceneStore((s) => s.currentSegment)
   const hideOverlays = embedControls === 'none'
 
   return (
@@ -1602,6 +1678,8 @@ function SensorView({ embedControls = 'full' }: { embedControls?: 'full' | 'mini
               <ErrorBoundary feature="LidarViewer" variant="root">
                 <LidarViewer hideControls={hideOverlays} />
               </ErrorBoundary>
+              {/* key remounts the banner per log, re-arming dismissal */}
+              {!hideOverlays && <NoAnnotationsBanner key={currentSegment ?? ''} />}
               {/* ShortcutHints removed — ? key now toggles Keys popup in LidarViewer */}
             </>
           ) : status === 'loading' ? (

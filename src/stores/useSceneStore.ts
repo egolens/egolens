@@ -59,8 +59,12 @@ import {
   fetchAV2Manifest,
   loadAV2FromUrl,
   isAV2ParentUrl,
-  discoverAV2LogsFromS3,
+  isAV2SensorRootUrl,
+  discoverAV2Logs,
+  discoverAV2AllSplits,
   fetchAV2ThumbnailUrl,
+  type AV2DiscoveredLog,
+  type AV2Split,
 } from '../adapters/argoverse2/remote'
 import {
   fetchWaymoManifest as fetchWaymoRemoteManifest,
@@ -362,7 +366,7 @@ const internal = {
   /** AV2 sensor data files keyed by relative path (File for local, string URL for remote) */
   av2SampleFiles: null as Map<string, File | string> | null,
   /** Discovered AV2 logs from parent URL (multi-log mode) */
-  av2DiscoveredLogs: null as { logId: string; logUrl: string }[] | null,
+  av2DiscoveredLogs: null as AV2DiscoveredLog[] | null,
   // -- Waymo-specific remote state --
   /** Base URL for remote Waymo loading (e.g. https://bucket.s3.../waymo_data/) */
   waymoBaseUrl: null as string | null,
@@ -1074,10 +1078,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
         try {
-          // Check if this is a parent URL (e.g. .../train/) → multi-log discovery
-          if (isAV2ParentUrl(baseUrl)) {
+          // Check if this is a parent URL (e.g. .../sensor/ or .../train/) → multi-log discovery
+          if (isAV2SensorRootUrl(baseUrl) || isAV2ParentUrl(baseUrl)) {
             console.log('[loadFromUrl] AV2 parent URL detected — discovering logs...')
-            const logs = await discoverAV2LogsFromS3(baseUrl, 700)
+            const logs = isAV2SensorRootUrl(baseUrl)
+              ? await discoverAV2AllSplits(baseUrl, 700)
+              : await discoverAV2Logs(baseUrl, 700)
             console.log(`[loadFromUrl] Found ${logs.length} AV2 logs`)
 
             if (logs.length === 0) {
@@ -2206,13 +2212,38 @@ export function getPoseByFrameIndex(): Map<number, number[]> {
  * - nuScenes: extracts from loaded database (first sample's CAM_FRONT)
  * - Waymo: returns null (images locked in Parquet)
  */
+/**
+ * Split of each discovered AV2 log, for selector badges/filtering.
+ * Null when not in AV2 multi-log mode or no split info was discovered.
+ */
+export function getSegmentSplits(): Map<string, AV2Split> | null {
+  const logs = internal.av2DiscoveredLogs
+  if (!logs) return null
+  const map = new Map<string, AV2Split>()
+  for (const log of logs) {
+    if (log.split) map.set(log.logId, log.split)
+  }
+  return map.size > 0 ? map : null
+}
+
+/**
+ * Whether the currently loaded AV2 log carries annotations.
+ * Test-split logs ship without labels; the viewer uses this to say so
+ * instead of silently showing no boxes. Null when no AV2 log is loaded.
+ */
+export function getLoadedAV2HasAnnotations(): boolean | null {
+  const db = internal.av2Db
+  if (!db) return null
+  return db.annotationsByTimestamp.size > 0
+}
+
 export function getThumbnailResolver(): ((segmentId: string) => Promise<string | null> | string | null) | null {
   const datasetId = internal.datasetId
 
   if (datasetId === 'argoverse2') {
     // Multi-log mode: discovered logs have per-log URLs
     if (internal.av2DiscoveredLogs && internal.av2DiscoveredLogs.length > 0) {
-      const logMap = new Map(internal.av2DiscoveredLogs.map(l => [l.logId, l.logUrl]))
+      const logMap = new Map(internal.av2DiscoveredLogs.map(l => [l.logId, l]))
 
       return async (segmentId: string) => {
         // If this is the currently loaded log, try the db first
@@ -2225,11 +2256,14 @@ export function getThumbnailResolver(): ((segmentId: string) => Promise<string |
           }
         }
 
-        // For unloaded logs: S3 ListObjects with max-keys=1 on ring_front_center prefix
-        const logUrl = logMap.get(segmentId)
-        if (!logUrl) return null
+        const log = logMap.get(segmentId)
+        if (!log) return null
 
-        return fetchAV2ThumbnailUrl(logUrl)
+        // index.json mirrors publish a thumbnail per log — no listing needed
+        if (log.thumbnailUrl) return log.thumbnailUrl
+
+        // For unloaded logs: S3 ListObjects with max-keys=1 on ring_front_center prefix
+        return fetchAV2ThumbnailUrl(log.logUrl)
       }
     }
 

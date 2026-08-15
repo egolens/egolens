@@ -36,6 +36,39 @@ const SCROLLBAR_CSS = `
 export interface SelectItem {
   value: string
   label: string
+  /**
+   * Optional group tag (e.g. AV2 split "train"/"val"/"test"). Rendered as a
+   * pill on the row; when any item carries a tag, filter chips appear above
+   * the list.
+   */
+  tag?: string
+  /** Pill emphasis — 'warning' for tags that flag missing data (e.g. no labels) */
+  tagTone?: 'default' | 'warning'
+}
+
+const TAG_COLORS = {
+  default: { text: '#7dd3c8', border: 'rgba(125, 211, 200, 0.4)' },
+  warning: { text: '#f0c674', border: 'rgba(240, 198, 116, 0.45)' },
+} as const
+
+function TagPill({ tag, tone }: { tag: string; tone: 'default' | 'warning' }) {
+  const c = TAG_COLORS[tone]
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        padding: '1px 7px',
+        fontSize: '10px',
+        fontFamily: fonts.sans,
+        color: c.text,
+        border: `1px solid ${c.border}`,
+        borderRadius: '999px',
+        lineHeight: 1.5,
+      }}
+    >
+      {tag}
+    </span>
+  )
 }
 
 interface Props {
@@ -206,6 +239,7 @@ export default function SearchableSelect({
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [highlightIdx, setHighlightIdx] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -219,14 +253,32 @@ export default function SearchableSelect({
   // Thumbnail cache
   const { getThumbnail, requestThumbnail } = useThumbnailCache(thumbnailResolver)
 
-  // Filter items by query (case-insensitive substring match)
+  // Distinct tags (in first-appearance order) with counts — chips shown when present
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of items) {
+      if (item.tag) counts.set(item.tag, (counts.get(item.tag) ?? 0) + 1)
+    }
+    return counts
+  }, [items])
+
+  // A stale tag filter from a previous dataset would silently hide everything,
+  // so reset it when the item list is swapped (render-time state adjustment)
+  const [prevItems, setPrevItems] = useState(items)
+  if (items !== prevItems) {
+    setPrevItems(items)
+    setTagFilter(null)
+  }
+
+  // Filter items by tag chip, then by query (case-insensitive substring match)
   const filtered = useMemo(() => {
-    if (!query) return items
+    const tagged = tagFilter ? items.filter((item) => item.tag === tagFilter) : items
+    if (!query) return tagged
     const q = query.toLowerCase()
-    return items.filter(
+    return tagged.filter(
       (item) => item.label.toLowerCase().includes(q) || item.value.toLowerCase().includes(q),
     )
-  }, [items, query])
+  }, [items, query, tagFilter])
 
   // Reset highlight when filter changes
   useEffect(() => {
@@ -321,7 +373,7 @@ export default function SearchableSelect({
 
   // Item count indicator for large lists
   const countLabel =
-    items.length > 20 && query
+    items.length > 20 && (query || tagFilter)
       ? `${filtered.length}/${items.length}`
       : items.length > 20
         ? `${items.length} items`
@@ -396,6 +448,49 @@ export default function SearchableSelect({
       </div>
     </div>
   )
+
+  // ── Tag filter chips (shown only when items carry tags) ──
+  const renderTagChips = () => {
+    if (tagCounts.size === 0) return null
+    const chips: { key: string | null; text: string }[] = [
+      { key: null, text: `All · ${items.length}` },
+      ...[...tagCounts.entries()].map(([tag, n]) => ({ key: tag as string | null, text: `${tag} · ${n}` })),
+    ]
+    return (
+      <div style={{
+        display: 'flex',
+        gap: '6px',
+        flexWrap: 'wrap',
+        padding: isMobile ? '8px 16px' : '6px 8px',
+        borderBottom: `1px solid ${colors.borderSubtle}`,
+      }}>
+        {chips.map((chip) => {
+          const active = tagFilter === chip.key
+          return (
+            <button
+              key={chip.key ?? '__all__'}
+              onClick={() => setTagFilter(chip.key)}
+              style={{
+                padding: '3px 10px',
+                fontSize: '11px',
+                fontFamily: fonts.sans,
+                fontWeight: active ? 600 : 400,
+                color: active ? '#000' : colors.textSecondary,
+                backgroundColor: active ? colors.accent : 'transparent',
+                border: `1px solid ${active ? colors.accent : colors.border}`,
+                borderRadius: '999px',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                lineHeight: 1.4,
+              }}
+            >
+              {chip.text}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
 
   // ── Virtualized list renderer ──
   const renderList = (maxHeight: number) => (
@@ -543,6 +638,7 @@ export default function SearchableSelect({
               </button>
             </div>
             {renderSearch()}
+            {renderTagChips()}
             {renderList(window.innerHeight - 200)}
           </div>
         </div>
@@ -614,6 +710,7 @@ export default function SearchableSelect({
               </button>
             </div>
             {renderSearch()}
+            {renderTagChips()}
             {/* Desktop list area: cap at ~55% viewport height */}
             {renderList(Math.min(filtered.length * rowHeight, Math.round(window.innerHeight * 0.55)))}
           </div>
@@ -666,7 +763,7 @@ function RowItem({
         ...style,
         display: 'flex',
         alignItems: 'center',
-        gap: hasThumbnails ? '10px' : '0',
+        gap: hasThumbnails || item.tag ? '10px' : '0',
         padding: isMobile
           ? (hasThumbnails ? '6px 16px' : '10px 16px')
           : (hasThumbnails ? '6px 12px' : '5px 12px'),
@@ -697,6 +794,7 @@ function RowItem({
       }}>
         {item.label}
       </div>
+      {item.tag && <TagPill tag={item.tag} tone={item.tagTone ?? 'default'} />}
     </div>
   )
 }

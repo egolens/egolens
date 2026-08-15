@@ -9,13 +9,28 @@
  * page and the load handler share one list so the two can never disagree.
  */
 
+export interface PresetSplit {
+  /** Chip label (e.g. "val · 150") */
+  label: string
+  url: string
+}
+
 export interface Preset {
   dataset: 'nuscenes' | 'argoverse2' | 'waymo'
   label: string
   url: string
   note: string
   shortNote: string
+  /**
+   * Split-level URLs under this preset. Not rendered on the landing page —
+   * split choice lives in the scene selector's filter chips — but kept here
+   * so old bookmarks and shared links to a single split still classify as
+   * preset visits in analytics.
+   */
+  splits?: readonly PresetSplit[]
 }
+
+const AV2_S3 = 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor'
 
 export const PRESETS: readonly Preset[] = [
   {
@@ -28,9 +43,16 @@ export const PRESETS: readonly Preset[] = [
   {
     dataset: 'argoverse2',
     label: 'Try Argoverse 2',
-    url: 'https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/val/',
-    note: 'Via Argoverse S3 · validation split',
-    shortNote: 'validation split',
+    url: `${AV2_S3}/`,
+    note: 'Via Argoverse S3 · 1,000 logs',
+    shortNote: '1,000 logs',
+    splits: [
+      { label: 'val · 150', url: `${AV2_S3}/val/` },
+      { label: 'train · 700', url: `${AV2_S3}/train/` },
+      // test ships without annotations — the viewer explains that with a
+      // banner instead of us hiding the split.
+      { label: 'test · 150', url: `${AV2_S3}/test/` },
+    ],
   },
 ]
 
@@ -48,5 +70,9 @@ function canonical(url: string): string {
  */
 export function isPresetUrl(url: string): boolean {
   const target = canonical(url)
-  return PRESETS.some((preset) => canonical(preset.url) === target)
+  return PRESETS.some(
+    (preset) =>
+      canonical(preset.url) === target ||
+      preset.splits?.some((split) => canonical(split.url) === target),
+  )
 }

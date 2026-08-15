@@ -20,9 +20,12 @@ describe('PRESETS', () => {
     }
   })
 
-  it('recognises each of its own URLs', () => {
+  it('recognises each of its own URLs, including split chips', () => {
     for (const preset of PRESETS) {
       expect(isPresetUrl(preset.url)).toBe(true)
+      for (const split of preset.splits ?? []) {
+        expect(isPresetUrl(split.url)).toBe(true)
+      }
     }
   })
 })
@@ -47,12 +50,13 @@ describe('isPresetUrl', () => {
     expect(isPresetUrl('http://localhost:8000/waymo_data/')).toBe(false)
   })
 
-  it('rejects a different split of a bucket a preset happens to live in', () => {
-    // The Argoverse bucket is public and holds every split. Someone browsing
-    // train/ brought their own target and must not be counted as a demo visit,
-    // which is why the match is exact rather than a prefix.
-    expect(isPresetUrl('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/train/')).toBe(false)
-    expect(isPresetUrl('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/sensor/')).toBe(false)
+  it('rejects a different dataset in a bucket a preset happens to live in', () => {
+    // The Argoverse bucket is public and holds more than the sensor dataset.
+    // Someone browsing the lidar dataset brought their own target and must not
+    // be counted as a demo visit, which is why the match is exact rather than
+    // a prefix.
+    expect(isPresetUrl('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/lidar/train/')).toBe(false)
+    expect(isPresetUrl('https://argoverse.s3.us-east-1.amazonaws.com/datasets/av2/')).toBe(false)
   })
 
   it('rejects a preset URL extended with a specific log', () => {
