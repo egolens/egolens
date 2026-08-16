@@ -1,91 +1,172 @@
 /**
  * EgoLens design tokens
  *
- * Color palette: teal accent on dark blue backgrounds
- * - Dark backgrounds with subtle blue undertones
- * - High-contrast teal accent for interactive elements
+ * Tokens fall into three groups, and the distinction decides how each one is
+ * delivered — not just what a theme may change:
  *
- * Tokens fall into three groups, and the distinction is load-bearing:
- *
- *   CHROME  panels, text, borders, buttons — the UI around the view. A theme
- *           may change these freely.
- *   SCENE   grid, gizmo, vehicle marker — 3D orientation aids. A theme may
- *           change these, but they are consumed by THREE.Color, which cannot
- *           parse `var()` or `rgba()`; they must stay literal hex.
- *   DATA    sensor, radar and camera identities. A theme must NOT change
- *           these: they encode which sensor a point came from, and the same
- *           colour has to mean the same thing across screenshots and docs.
+ *   CHROME  panels, text, borders, buttons. Delivered as `var(--el-*)` so a
+ *           theme switch repaints with no React re-render and no first-paint
+ *           flash. Every consumer is CSS: an inline style, a template string,
+ *           or a `style.color =` assignment, all of which resolve `var()`.
+ *   SCENE   grid, gizmo, vehicle marker. These reach THREE.Color through JSX
+ *           props, and THREE cannot parse `var()` — it would throw or render
+ *           black. Delivered as literal hex via `sceneColors(theme)`, which
+ *           callers must resolve at render time.
+ *   DATA    sensor, radar and camera identity. Never themed: the colour
+ *           encodes which sensor a point came from and has to mean the same
+ *           thing across screenshots, docs and both themes.
  *
  * Object class colours are not here at all — they live in each adapter's
- * manifest (`boxTypes[].color`), which is the right place for the same reason.
+ * manifest (`boxTypes[].color`), for the same reason as DATA.
  */
 
-// ---------------------------------------------------------------------------
-// Core palette
-// ---------------------------------------------------------------------------
+export type ThemeName = 'dark' | 'light'
 
-const ACCENT = '#00E89D'
-const ACCENT_BLUE = '#00C9DB'
+// ---------------------------------------------------------------------------
+// Chrome — themed, delivered as CSS custom properties
+// ---------------------------------------------------------------------------
 
 /**
- * An alpha variant of a token colour.
- *
- * Hand-written `rgba()` literals do not follow the token they were copied
- * from. Six sites had drifted to `rgba(0, 200, 219, …)` against an
- * `accentBlue` of `#00C9DB` — off by one in green — and one of them sat in the
- * same declaration as the correct token.
+ * Both palettes must carry the same keys; `CHROME_KEYS` is derived from dark
+ * and a test asserts light matches, so a token added to one cannot be
+ * forgotten in the other.
  */
-export function alpha(hex: string, a: number): string {
-  const n = parseInt(hex.slice(1), 16)
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`
-}
-
-export const colors = {
-  // -- CHROME ---------------------------------------------------------------
-
-  /** Primary accent — teal */
-  accent: ACCENT,
-  accentDim: alpha(ACCENT, 0.3),
-  accentGlow: alpha(ACCENT, 0.15),
-
-  /** Secondary accent — blue */
-  accentBlue: ACCENT_BLUE,
-
-  /** Failure states. Shares a hex with radarFront today; separate on purpose,
-   *  so a theme can move one without moving the other. */
+const CHROME_DARK = {
+  accent: '#00E89D',
+  accentBlue: '#00C9DB',
   danger: '#FF6B6B',
 
-  /** Background tiers */
-  bgDeep: '#0C0F1A',      // deepest layer (canvas, 3D scene)
-  bgBase: '#111628',       // main app background
-  bgSurface: '#1A1F35',    // header, footer, cards
-  bgOverlay: '#232940',    // buttons, overlays
-  bgHover: '#2D3350',      // hover states
+  bgDeep: '#0C0F1A',
+  bgBase: '#111628',
+  bgSurface: '#1A1F35',
+  bgOverlay: '#232940',
+  bgHover: '#2D3350',
 
-  /** Borders */
   border: '#2A3050',
   borderSubtle: '#1E2440',
 
-  /** Text */
   textPrimary: '#E8ECF4',
   textSecondary: '#8892A8',
   textDim: '#5A6378',
 
-  // -- DATA -----------------------------------------------------------------
+  /** A raised surface, one step from its parent. Lightens on dark, darkens on
+   *  light — the eight hand-written `rgba(255,255,255,α)` tints assumed the
+   *  first and would have stayed white-on-white. */
+  tintRaise: 'rgba(255, 255, 255, 0.06)',
+  tintRaiseStrong: 'rgba(255, 255, 255, 0.14)',
+  /** A recessed well, e.g. behind a camera label, and the text that sits on
+   *  it. They flip together: a dark scrim needs light text and vice versa. */
+  tintSink: 'rgba(0, 0, 0, 0.55)',
+  tintSinkText: 'rgba(255, 255, 255, 0.82)',
+  /** Drop-shadow ink. A black shadow is invisible on dark and heavy on light. */
+  shadowInk: 'rgba(0, 0, 0, 0.55)',
+} as const
 
+const CHROME_LIGHT: Record<keyof typeof CHROME_DARK, string> = {
+  // Accents are darkened until they carry text on white: the dark-theme teal
+  // is 1.6:1 there, which is not a colour, it is a rumour.
+  accent: '#008C5E',
+  accentBlue: '#00808F',
+  danger: '#E03131',
+
+  bgDeep: '#FFFFFF',
+  bgBase: '#F2F5F9',
+  bgSurface: '#FFFFFF',
+  bgOverlay: '#E9EEF5',
+  bgHover: '#DCE3EC',
+
+  border: '#CBD5E1',
+  borderSubtle: '#E2E8F0',
+
+  textPrimary: '#1A2030',
+  textSecondary: '#4A5568',
+  textDim: '#6B7688',
+
+  tintRaise: 'rgba(15, 23, 42, 0.05)',
+  tintRaiseStrong: 'rgba(15, 23, 42, 0.11)',
+  tintSink: 'rgba(255, 255, 255, 0.78)',
+  tintSinkText: 'rgba(15, 23, 42, 0.86)',
+  shadowInk: 'rgba(15, 23, 42, 0.16)',
+}
+
+export const CHROME_PALETTES: Record<ThemeName, Record<string, string>> = {
+  dark: CHROME_DARK,
+  light: CHROME_LIGHT,
+}
+
+export const CHROME_KEYS = Object.keys(CHROME_DARK) as (keyof typeof CHROME_DARK)[]
+
+/** `--el-bg-deep` from `bgDeep`. */
+export function cssVarName(token: string): string {
+  return `--el-${token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`
+}
+
+/** Every chrome token as `var(--el-x, <dark value>)`. The fallback means the
+ *  app still renders correctly if the bootstrap never ran. */
+const chromeVars = Object.fromEntries(
+  CHROME_KEYS.map((k) => [k, `var(${cssVarName(k)}, ${CHROME_DARK[k]})`]),
+) as Record<keyof typeof CHROME_DARK, string>
+
+// ---------------------------------------------------------------------------
+// Scene — themed, but must stay literal hex for THREE.Color
+// ---------------------------------------------------------------------------
+
+const SCENE_PALETTES: Record<ThemeName, Record<string, string>> = {
+  dark: {
+    gridMajor: '#2E3550',
+    gridMinor: '#252B42',
+    vehicleMarker: '#00E89D',
+    gizmoX: '#FF5757',
+    gizmoY: '#00E89D',
+    gizmoZ: '#4DA8FF',
+  },
+  light: {
+    gridMajor: '#C2CBD9',
+    gridMinor: '#DEE4EC',
+    vehicleMarker: '#008C5E',
+    gizmoX: '#D32F2F',
+    gizmoY: '#008C5E',
+    gizmoZ: '#2563EB',
+  },
+}
+
+/**
+ * Scene colours as literal hex.
+ *
+ * Callers must read the active theme and pass it in, so the value is resolved
+ * at render time rather than frozen at import. A `var()` string here would
+ * make THREE.Color throw, or silently paint black.
+ */
+export function sceneColors(theme: ThemeName): Record<string, string> {
+  return SCENE_PALETTES[theme]
+}
+
+/**
+ * The viewport clear colour for a theme, as literal hex.
+ * `setClearColor` is a THREE call and cannot take `var()`.
+ */
+export function viewportBg(theme: ThemeName): string {
+  return CHROME_PALETTES[theme].bgDeep
+}
+
+// ---------------------------------------------------------------------------
+// Data — never themed
+// ---------------------------------------------------------------------------
+
+const DATA = {
   /** Semantic — sensor LiDAR (cool-tone family) */
-  sensorTop: '#00E89D',       // teal (primary)
-  sensorFront: '#00C9DB',     // cyan
-  sensorSideL: '#4DA8FF',     // sky blue
-  sensorSideR: '#7B6FFF',     // indigo
-  sensorRear: '#B490FF',      // lavender
+  sensorTop: '#00E89D',
+  sensorFront: '#00C9DB',
+  sensorSideL: '#4DA8FF',
+  sensorSideR: '#7B6FFF',
+  sensorRear: '#B490FF',
 
   /** Semantic — radar sensors (warm-tone family to distinguish from LiDAR) */
-  radarFront: '#FF6B6B',       // coral red
-  radarFrontLeft: '#FF9F43',   // orange
-  radarFrontRight: '#FECA57',  // yellow
-  radarBackLeft: '#FF6348',    // tomato
-  radarBackRight: '#EE5A24',   // vermilion
+  radarFront: '#FF6B6B',
+  radarFrontLeft: '#FF9F43',
+  radarFrontRight: '#FECA57',
+  radarBackLeft: '#FF6348',
+  radarBackRight: '#EE5A24',
 
   /** Semantic — cameras (harmonized with sensors) */
   camFront: '#FFFFFF',
@@ -93,26 +174,77 @@ export const colors = {
   camFrontRight: '#00C9DB',
   camSideLeft: '#4DA8FF',
   camSideRight: '#B490FF',
-
-  // Object class colours used to live here as box{Vehicle,Pedestrian,Sign,
-  // Cyclist,Unknown}. They were superseded by each adapter's
-  // `manifest.boxTypes[].color` — which is correct, since the class set differs
-  // per dataset — and then sat unreferenced. Removed rather than left to rot.
-
-  // -- SCENE ----------------------------------------------------------------
-  // Consumed by THREE.Color. Literal hex only: `var()` throws and `rgba()`
-  // silently loses the alpha.
-
-  /** 3D scene — subtle so LiDAR points dominate */
-  gridMajor: '#2E3550',
-  gridMinor: '#252B42',
-  vehicleMarker: '#00E89D',
-
-  /** Gizmo */
-  gizmoX: '#FF5757',
-  gizmoY: '#00E89D',
-  gizmoZ: '#4DA8FF',
 } as const
+
+/**
+ * The palette every component reads.
+ *
+ * Chrome entries are `var()` strings; data entries are literal hex. Scene
+ * colours are deliberately absent — see `sceneColors()`.
+ */
+export const colors = {
+  ...chromeVars,
+  ...DATA,
+  /** Derived from the accent, so they follow it through a theme switch. */
+  get accentDim() { return alpha(chromeVars.accent, 0.3) },
+  get accentGlow() { return alpha(chromeVars.accent, 0.15) },
+}
+
+// ---------------------------------------------------------------------------
+// Applying a theme
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a theme's chrome tokens onto an element as custom properties.
+ *
+ * Called once before React mounts so the first paint is already correct, and
+ * again on every switch. Nothing re-renders: the browser repaints from the
+ * cascade.
+ */
+export function applyTheme(theme: ThemeName, root: HTMLElement): void {
+  const palette = CHROME_PALETTES[theme]
+  for (const key of CHROME_KEYS) root.style.setProperty(cssVarName(key), palette[key])
+  // A dark drop shadow is invisible on dark; the two themes need different ones.
+  root.style.setProperty('--el-shadow-card', SHADOWS[theme])
+  root.dataset.theme = theme
+  root.style.colorScheme = theme
+}
+
+/**
+ * The theme to start in: an explicit choice, else the OS preference.
+ *
+ * Resolved before React mounts so the first paint is already right — a theme
+ * that arrives after mount is a visible flash.
+ */
+export function initialTheme(): ThemeName {
+  if (typeof window === 'undefined') return 'dark'
+  try {
+    const saved = localStorage.getItem('egolens-theme')
+    if (saved === 'light' || saved === 'dark') return saved
+  } catch { /* private mode */ }
+  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+const SHADOWS: Record<ThemeName, string> = {
+  dark: '0 2px 8px rgba(0, 0, 0, 0.3)',
+  light: '0 2px 8px rgba(15, 23, 42, 0.10)',
+}
+
+// ---------------------------------------------------------------------------
+// Alpha variants
+// ---------------------------------------------------------------------------
+
+/**
+ * An alpha variant of a colour, including a `var()` one.
+ *
+ * `color-mix` is what makes this work against a custom property — the old
+ * implementation parsed a hex, which a `var()` string is not. Hand-written
+ * `rgba()` literals are the thing being avoided: they do not follow the token
+ * they were copied from, and six had already drifted by one in green.
+ */
+export function alpha(cssColor: string, a: number): string {
+  return `color-mix(in srgb, ${cssColor} ${(a * 100).toFixed(1)}%, transparent)`
+}
 
 // ---------------------------------------------------------------------------
 // Typography
@@ -141,9 +273,9 @@ export const radius = {
 // ---------------------------------------------------------------------------
 
 export const shadows = {
-  card: '0 2px 8px rgba(0, 0, 0, 0.3)',
-  glow: `0 0 12px ${colors.accentGlow}`,
-  glowStrong: `0 0 20px ${alpha(ACCENT, 0.25)}`,
+  card: 'var(--el-shadow-card, 0 2px 8px rgba(0, 0, 0, 0.3))',
+  glow: `0 0 12px ${alpha(chromeVars.accent, 0.15)}`,
+  glowStrong: `0 0 20px ${alpha(chromeVars.accent, 0.25)}`,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -152,7 +284,7 @@ export const shadows = {
 
 export const gradients = {
   /** Timeline progress bar */
-  accent: `linear-gradient(90deg, ${colors.accent}, ${colors.accentBlue})`,
+  accent: `linear-gradient(90deg, ${chromeVars.accent}, ${chromeVars.accentBlue})`,
   /** Subtle header/footer background */
-  surface: `linear-gradient(180deg, ${colors.bgSurface} 0%, ${colors.bgBase} 100%)`,
+  surface: `linear-gradient(180deg, ${chromeVars.bgSurface} 0%, ${chromeVars.bgBase} 100%)`,
 } as const

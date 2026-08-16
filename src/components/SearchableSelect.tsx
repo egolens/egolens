@@ -16,7 +16,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties, type ReactElement } from 'react'
 import { List, type ListImperativeAPI } from 'react-window'
-import { colors, fonts, radius } from '../theme'
+import { colors, fonts, radius, alpha } from '../theme'
 import { trackKeyboardShortcut } from '../utils/analytics'
 import {
   useThumbnailCache,
@@ -28,9 +28,9 @@ import {
 const SCROLLBAR_CSS = `
 .ss-list::-webkit-scrollbar { width: 4px; height: 4px; }
 .ss-list::-webkit-scrollbar-track { background: transparent; }
-.ss-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
-.ss-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
-.ss-list { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+.ss-list::-webkit-scrollbar-thumb { background: var(--el-tint-raise-strong); border-radius: 4px; }
+.ss-list::-webkit-scrollbar-thumb:hover { background: var(--el-tint-raise-strong); }
+.ss-list { scrollbar-width: thin; scrollbar-color: var(--el-tint-raise-strong) transparent; }
 `
 
 export interface SelectItem {
@@ -582,7 +582,7 @@ export default function SearchableSelect({
             zIndex: 9999,
             display: 'flex',
             flexDirection: 'column',
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: colors.tintSink,
             backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => {
@@ -599,7 +599,7 @@ export default function SearchableSelect({
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
-              background: 'rgba(26, 31, 53, 0.97)',
+              background: alpha(colors.bgSurface, 0.97),
               border: `1px solid ${colors.border}`,
               borderRadius: radius.lg,
               overflow: 'hidden',
@@ -654,7 +654,7 @@ export default function SearchableSelect({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(0, 0, 0, 0.5)',
+            background: colors.tintSink,
             backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => {
@@ -671,10 +671,10 @@ export default function SearchableSelect({
               maxHeight: '70vh',
               display: 'flex',
               flexDirection: 'column',
-              background: 'rgba(26, 31, 53, 0.97)',
+              background: alpha(colors.bgSurface, 0.97),
               border: `1px solid ${colors.border}`,
               borderRadius: radius.lg,
-              boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
+              boxShadow: `0 16px 48px ${colors.shadowInk}`,
               overflow: 'hidden',
             }}
           >

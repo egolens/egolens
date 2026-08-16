@@ -88,10 +88,10 @@ import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindo
 import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { getEmbedParams } from '../utils/embedParams'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
-import { colors } from '../theme'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
+import { applyTheme, initialTheme, type ThemeName } from '../theme'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -129,7 +129,7 @@ export type PointShape = 'square' | 'circle'
 /** Background color presets for 3D viewport */
 export const BG_PRESETS = [
   { id: 'black',     label: 'Black',     color: '#000000' },
-  { id: 'dark',      label: 'Dark',      color: colors.bgDeep },
+  { id: 'dark',      label: 'Dark',      color: '#0C0F1A' },  // theme-exempt: consumed by THREE.setClearColor, and a viewport preset is not a UI theme
   { id: 'charcoal',  label: 'Charcoal',  color: '#1a1a1a' },
   { id: 'midgray',   label: 'Mid Gray',  color: '#4d4d4d' },
   { id: 'navy',      label: 'Navy',      color: '#0d1117' },
@@ -184,6 +184,7 @@ interface SceneActions {
   toggleCameraSeg: () => void
   // Display settings
   setBgPreset: (id: BgPresetId) => void
+  setTheme: (theme: ThemeName) => void
   setPointShape: (shape: PointShape) => void
   setPointSize: (size: number) => void
   setFollowCam: (follow: boolean) => void
@@ -285,6 +286,9 @@ export interface SceneState {
   // -- Display settings (rendering style, not perception data) ----------------
   /** Background color preset for 3D viewport */
   bgPreset: BgPresetId
+  /** UI theme. Chrome follows via CSS custom properties; scene colours are
+   *  resolved from this at render time, because THREE cannot read var(). */
+  theme: ThemeName
   /** Point rendering shape: square (GL default) or circle (discard outside radius) */
   pointShape: PointShape
   /** Point world-space size (default 0.08) */
@@ -789,6 +793,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   cameraSegFrames: new Set<number>(),
   // Display settings
   bgPreset: 'dark' as BgPresetId,
+  theme: initialTheme(),
   pointShape: 'circle' as PointShape,
   pointSize: 0.08,
   followCam: false,
@@ -1209,6 +1214,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     // Display settings
     setBgPreset: (id: BgPresetId) => set({ bgPreset: id }),
+
+    setTheme: (theme: ThemeName) => {
+      applyTheme(theme, document.documentElement)
+      try { localStorage.setItem('egolens-theme', theme) } catch { /* private mode */ }
+      set({ theme })
+    },
     setPointShape: (shape: PointShape) => set({ pointShape: shape }),
     setPointSize: (size: number) => set({ pointSize: size }),
     setFollowCam: (follow: boolean) => set({ followCam: follow }),

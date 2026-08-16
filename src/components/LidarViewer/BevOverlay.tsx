@@ -42,7 +42,7 @@ export default function BevOverlay({
         border: `1px solid ${hovered ? colors.accentBlue : colors.border}`,
         boxShadow: hovered
           ? `0 2px 12px ${alpha(colors.accentBlue, 0.25)}, 0 0 0 1px ${colors.accentBlue}`
-          : '0 2px 8px rgba(0, 0, 0, 0.3)',
+          : `0 2px 8px ${colors.shadowInk}`,
         transition: 'border-color 0.2s, box-shadow 0.2s',
       }}
     >

@@ -198,7 +198,8 @@ export default function KeypointOverlay({ cameraName }: KeypointOverlayProps) {
         ctx.fillStyle = `rgba(${Math.round(rgb[0] * 255)}, ${Math.round(rgb[1] * 255)}, ${Math.round(rgb[2] * 255)}, ${j.occluded ? OCCLUDED_ALPHA : 1.0})`
         ctx.fill()
 
-        // White outline for visibility against any background
+        // White outline for visibility against any background — drawn on a
+        // photograph, not on the theme's background. theme-exempt
         ctx.strokeStyle = `rgba(255, 255, 255, ${j.occluded ? 0.2 : 0.6})`
         ctx.lineWidth = 1.0 * t.scale
         ctx.stroke()

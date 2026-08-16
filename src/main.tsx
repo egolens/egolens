@@ -5,12 +5,17 @@ import ErrorBoundary from './components/ErrorBoundary.tsx'
 import { installAnalytics } from './utils/analyticsBootstrap'
 import { installGlobalErrorHandlers } from './utils/errorReporting'
 import { installLoadTelemetry } from './utils/loadTelemetry'
+import { applyTheme, initialTheme } from './theme'
 
 // Global reset
 document.documentElement.style.margin = '0'
 document.documentElement.style.padding = '0'
 document.body.style.margin = '0'
 document.body.style.padding = '0'
+
+// Theme before render. Chrome tokens are `var(--el-*)` with a dark fallback, so
+// a late apply is not a broken page — it is a visible flash from dark to light.
+applyTheme(initialTheme(), document.documentElement)
 
 // Analytics first: the error handlers below report through it.
 installAnalytics()

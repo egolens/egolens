@@ -709,7 +709,7 @@ function Header() {
                 fontSize: '10px',
                 fontFamily: fonts.sans,
                 color: colors.accent,
-                backgroundColor: 'rgba(26, 31, 53, 0.95)',
+                backgroundColor: alpha(colors.bgSurface, 0.95),
                 border: `1px solid ${colors.accent}`,
                 borderRadius: radius.sm,
                 whiteSpace: 'nowrap',
@@ -762,7 +762,7 @@ function Header() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: colors.tintSink,
             backdropFilter: 'blur(4px)',
             padding: '24px',
           }}
@@ -771,7 +771,7 @@ function Header() {
             maxWidth: '340px',
             width: '100%',
             padding: '28px 24px',
-            backgroundColor: 'rgba(26, 31, 53, 0.97)',
+            backgroundColor: alpha(colors.bgSurface, 0.97),
             border: `1px solid ${colors.border}`,
             borderRadius: '16px',
             display: 'flex',
@@ -995,9 +995,9 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       <style>{`
         .dropzone-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .dropzone-scroll::-webkit-scrollbar-track { background: transparent; }
-        .dropzone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
-        .dropzone-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
-        .dropzone-scroll { scrollbar-color: rgba(255,255,255,0.15) transparent; scrollbar-width: thin; }
+        .dropzone-scroll::-webkit-scrollbar-thumb { background: var(--el-tint-raise-strong); border-radius: 3px; }
+        .dropzone-scroll::-webkit-scrollbar-thumb:hover { background: var(--el-tint-raise-strong); }
+        .dropzone-scroll { scrollbar-color: var(--el-tint-raise-strong) transparent; scrollbar-width: thin; }
       `}</style>
       {/* Safari warning — hidden on landing page for cleaner UX */}
 
@@ -1125,7 +1125,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 <span style={{
                   fontSize: '10px',
                   fontWeight: 400,
-                  color: isActive ? 'rgba(0,0,0,0.6)' : colors.textDim,
+                  color: isActive ? colors.tintSink : colors.textDim,
                 }}>{isMobile ? preset.shortNote : preset.note}</span>
               </button>
             )
@@ -1303,7 +1303,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
             fontFamily: fonts.sans,
             color: colors.danger,
             padding: '6px 10px',
-            backgroundColor: 'rgba(255, 107, 107, 0.1)',
+            backgroundColor: alpha(colors.danger, 0.1),
             borderRadius: radius.sm,
             lineHeight: 1.5,
           }}>
@@ -1423,7 +1423,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 color: colors.danger,
                 textAlign: 'center',
                 padding: '8px 16px',
-                backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                backgroundColor: alpha(colors.danger, 0.1),
                 borderRadius: radius.sm,
               }}>
                 {error}

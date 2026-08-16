@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import type { ParquetRow } from '../../utils/merge'
-import { colors, fonts, radius, shadows } from '../../theme'
+import { colors, fonts, radius, shadows, alpha } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import ErrorBoundary from '../ErrorBoundary'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
@@ -260,7 +260,7 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
         overflow: 'hidden',
         minWidth: 0,
         cursor: 'pointer',
-        border: active ? `2px solid ${accentColor}` : hovered ? '2px solid rgba(255,255,255,0.45)' : `2px solid ${colors.borderSubtle}`,
+        border: active ? `2px solid ${accentColor}` : hovered ? `2px solid ${alpha(colors.textPrimary, 0.45)}` : `2px solid ${colors.borderSubtle}`,
         boxShadow: active ? `0 0 12px ${accentColor}33` : shadows.card,
         transition: 'border-color 0.2s, box-shadow 0.2s',
       }}
@@ -343,8 +343,8 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
         fontSize: '9px',
         fontFamily: fonts.sans,
         fontWeight: 500,
-        color: 'rgba(255, 255, 255, 0.75)',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        color: colors.tintSinkText,
+        backgroundColor: colors.tintSink,
         padding: '2px 5px',
         borderRadius: radius.sm,
         pointerEvents: 'none',

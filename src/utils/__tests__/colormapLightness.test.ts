@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { COLORMAP_STOPS } from '../colormaps'
-import { colors } from '../../theme'
+import { viewportBg } from '../../theme'
 
 /** Relative luminance, per WCAG. */
 function luminance([r, g, b]: [number, number, number]): number {
@@ -63,7 +63,7 @@ describe.each(RAMPS)('%s ramp', (mode) => {
     // Not a WCAG text threshold — 3:1 is unreachable at both ends at once (see
     // the note in colormaps.ts). This asserts "distinguishable from the
     // background", which is what 1.00:1 was not.
-    const bg = hexToRgb(colors.bgDeep)
+    const bg = hexToRgb(viewportBg('dark'))
     const worst = Math.min(...stops.map((s) => contrast(s, bg)))
     expect(worst).toBeGreaterThan(1.9)
   })
