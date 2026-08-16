@@ -13,47 +13,75 @@ import type { ColormapMode } from '../stores/useSceneStore'
 // Colormap gradient stops  (each array = 6 evenly-spaced RGB stops [0..1])
 // ---------------------------------------------------------------------------
 
-/** Cool-tinted white ramp for intensity (dark navy → near-white) */
+/**
+ * Every ramp's darkest stop is held at L* ≥ 30.
+ *
+ * They used to start at L* 3.8–15, against a viewport background of L* 3.8 —
+ * contrast ratios of 1.00:1 to 1.26:1. `elongation` was exactly 1.00:1: its
+ * lowest stop was, to the eye, the background. Weak returns should be quiet,
+ * not absent.
+ *
+ * The ceiling is L* 92 rather than pure white, following Kovesi's advice to
+ * keep a map's lightness inside its background rather than running to the
+ * extremes (https://arxiv.org/abs/1509.03700). Note the constraint is
+ * arithmetic: reaching 3:1 at both ends against BOTH a near-black and a white
+ * background would confine a ramp to L* ∈ [40, 61]. No single ramp serves both
+ * backgrounds, which is why no tool ships one that tries.
+ */
+
+/**
+ * Intensity — hue-carrying (blue → cyan → green → amber → warm).
+ *
+ * Was a cool-tinted greyscale, near-black → near-white, which put the whole
+ * signal in the luminance channel: the low end read 1.08:1 against the dark
+ * viewport and the high end would read 1.07:1 against a light one. Lane paint,
+ * signs and retroreflectors live at that high end.
+ *
+ * Hue survives a background change; luminance does not. RViz reaches for a
+ * rainbow on intensity for the same reason. Lightness still rises
+ * monotonically (L* 50 → 78) so the ordering cue is intact — unlike turbo and
+ * jet, which fall dark again at the top and would disappear here.
+ */
 const INTENSITY_STOPS: [number, number, number][] = [
-  [0.08, 0.09, 0.16],  // 0.0 — near-black (dark navy)
-  [0.16, 0.20, 0.32],  // ~0.2 — dark slate
-  [0.30, 0.38, 0.52],  // ~0.4 — cool gray
-  [0.52, 0.60, 0.72],  // ~0.6 — silver blue
-  [0.78, 0.84, 0.90],  // ~0.8 — light gray
-  [0.95, 0.97, 1.00],  // 1.0 — near-white
+  [0.01, 0.47, 0.84],  // 0.0 — #0378D6
+  [0.00, 0.58, 0.63],  // 0.2 — #0094A1
+  [0.00, 0.67, 0.37],  // 0.4 — #00AB5E
+  [0.67, 0.66, 0.00],  // 0.6 — #ABA800
+  [1.00, 0.60, 0.29],  // 0.8 — #FF994A
+  [1.00, 0.67, 0.65],  // 1.0 — #FFABA6
 ]
 
-/** Warm ramp for range (dark → amber → bright yellow) */
+/** Warm ramp for range (slate → plum → crimson → amber → pale gold) */
 const RANGE_STOPS: [number, number, number][] = [
-  [0.06, 0.04, 0.12],  // 0.0 — near-black
-  [0.28, 0.08, 0.26],  // 0.2 — dark magenta
-  [0.60, 0.15, 0.20],  // 0.4 — crimson
-  [0.88, 0.40, 0.10],  // 0.6 — orange
-  [0.98, 0.72, 0.15],  // 0.8 — amber
-  [1.00, 0.98, 0.60],  // 1.0 — bright yellow
+  [0.28, 0.27, 0.35],  // 0.0 — #474559
+  [0.50, 0.28, 0.47],  // 0.2 — #804778
+  [0.79, 0.32, 0.34],  // 0.4 — #C95257
+  [0.98, 0.49, 0.19],  // 0.6 — #FA7D30
+  [1.00, 0.73, 0.17],  // 0.8 — #FFBA2B
+  [0.94, 0.93, 0.55],  // 1.0 — #F0ED8C
 ]
 
-/** Green ramp for elongation (dark → emerald → bright lime) */
+/** Green ramp for elongation (slate → teal → emerald → pale lime) */
 const ELONGATION_STOPS: [number, number, number][] = [
-  [0.04, 0.06, 0.10],  // 0.0 — near-black
-  [0.06, 0.18, 0.22],  // 0.2 — dark teal
-  [0.08, 0.38, 0.30],  // 0.4 — forest
-  [0.20, 0.62, 0.35],  // 0.6 — emerald
-  [0.50, 0.84, 0.40],  // 0.8 — lime-green
-  [0.80, 0.98, 0.55],  // 1.0 — bright lime
+  [0.26, 0.28, 0.32],  // 0.0 — #424752
+  [0.26, 0.38, 0.42],  // 0.2 — #42616B
+  [0.26, 0.54, 0.45],  // 0.4 — #428A73
+  [0.31, 0.72, 0.44],  // 0.6 — #4FB870
+  [0.54, 0.88, 0.43],  // 0.8 — #8AE06E
+  [0.79, 0.97, 0.54],  // 1.0 — #C9F78A
 ]
 
 /**
  * Viridis-inspired ramp for distance (ego center → world).
- * Dark purple (close) → teal → yellow-green (far).
+ * Purple (close) → teal → yellow (far).
  */
 const DISTANCE_STOPS: [number, number, number][] = [
-  [0.27, 0.00, 0.33],  // 0.0 — dark purple (close to ego)
-  [0.28, 0.17, 0.50],  // 0.2 — indigo
-  [0.13, 0.37, 0.56],  // 0.4 — teal blue
-  [0.15, 0.56, 0.46],  // 0.6 — teal green
-  [0.48, 0.76, 0.24],  // 0.8 — lime green
-  [0.99, 0.91, 0.14],  // 1.0 — bright yellow (far from ego)
+  [0.42, 0.17, 0.48],  // 0.0 — #6B2B7A
+  [0.41, 0.29, 0.64],  // 0.2 — #694AA3
+  [0.26, 0.47, 0.67],  // 0.4 — #4278AB
+  [0.25, 0.64, 0.54],  // 0.6 — #40A38A
+  [0.53, 0.81, 0.29],  // 0.8 — #87CF4A
+  [1.00, 0.92, 0.30],  // 1.0 — #FFEB4C
 ]
 
 /** All colormap gradient stops indexed by mode.
