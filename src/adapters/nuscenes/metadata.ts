@@ -30,6 +30,7 @@ import { NUSCENES_CATEGORY_MAP } from '../../types/nuscenes'
 import { NUSCENES_CHANNEL_TO_ID, nuScenesManifest } from './manifest'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import { multiplyRowMajor4x4, invertRowMajor4x4 } from '../../utils/matrix'
+import { DataLoadError } from '../../utils/errors'
 
 // ---------------------------------------------------------------------------
 // Parsed database — built once, reused across scene switches
@@ -74,26 +75,127 @@ export interface NuScenesDatabase {
 // ---------------------------------------------------------------------------
 
 /**
- * Read a JSON file from a Map of filename → source.
+ * The outcome of reading one metadata table.
  *
- * Supports two source types:
- * - File  (local drag-and-drop) → calls file.text()
- * - string (pre-fetched JSON text from URL mode) → uses directly
- *
- * This dual-source design enables URL loading without changing any call sites
- * that pass Map<string, File> — TypeScript accepts it as Map<string, File | string>.
+ * Sources are `File` (local drag-and-drop) or `string` (pre-fetched JSON text
+ * from URL mode); call sites passing `Map<string, File>` are accepted as
+ * `Map<string, File | string>` without change.
  */
-export async function readJsonFile<T>(
+export type TableRead<T> =
+  | { status: 'ok'; rows: T[] }
+  | { status: 'missing' }
+  | { status: 'unreadable'; reason: string }
+
+/**
+ * @returns why the table could not be read, rather than an empty array. The
+ *   old signature returned `[]` with a console warning for anything it could
+ *   not find, so a missing table, a typo'd filename and an SPA-fallback host
+ *   answering 200 + index.html all produced the same blank viewer.
+ */
+export async function readJsonTable<T>(
   jsonFiles: Map<string, File | string>,
   filename: string,
-): Promise<T[]> {
+): Promise<TableRead<T>> {
   const entry = jsonFiles.get(filename)
-  if (!entry) {
-    console.warn(`[nuScenes] JSON file not found: ${filename}`)
-    return []
+  if (entry === undefined) return { status: 'missing' }
+
+  let text: string
+  try {
+    text = typeof entry === 'string' ? entry : await entry.text()
+  } catch (e) {
+    return { status: 'unreadable', reason: e instanceof Error ? e.message : String(e) }
   }
-  const text = typeof entry === 'string' ? entry : await entry.text()
-  return JSON.parse(text) as T[]
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    // A host that answers missing files with its index.html lands here. Quote
+    // the opening bytes — "starts with <!doctype html" tells the whole story.
+    const head = text.trimStart().slice(0, 40).replace(/\s+/g, ' ')
+    return { status: 'unreadable', reason: `not JSON (starts with "${head}…")` }
+  }
+  if (!Array.isArray(parsed)) {
+    return { status: 'unreadable', reason: `expected a JSON array, got ${typeof parsed}` }
+  }
+  return { status: 'ok', rows: parsed as T[] }
+}
+
+/** The six tables without which nothing renders, and what each one drives. */
+const REQUIRED_TABLES: Record<string, string> = {
+  'scene.json': 'the list of scenes',
+  'sample.json': 'the frame sequence',
+  'sample_data.json': 'which file belongs to which frame and sensor',
+  'ego_pose.json': 'vehicle position — without it every frame renders at the origin',
+  'calibrated_sensor.json': 'sensor extrinsics and camera intrinsics',
+  'sensor.json': 'sensor channel names',
+}
+
+/** Tables that gate a feature. Absent is a normal state, not a failure. */
+const OPTIONAL_TABLES: Record<string, string> = {
+  'sample_annotation.json': '3D boxes',
+  'instance.json': '3D box tracking',
+  'category.json': '3D box class colours',
+  'log.json': 'location and time-of-day labels',
+  'lidarseg.json': 'LiDAR segmentation colouring',
+  'panoptic.json': 'panoptic colouring',
+}
+
+/**
+ * Turn the per-table read results into one error naming every problem.
+ *
+ * Reporting them together matters: a converter missing four tables should
+ * learn that in one load, not in four.
+ */
+function assertRequiredTables(reads: Map<string, TableRead<unknown>>): void {
+  const problems: string[] = []
+  for (const [filename, drives] of Object.entries(REQUIRED_TABLES)) {
+    const read = reads.get(filename)
+    if (!read || read.status === 'ok') continue
+    const why = read.status === 'missing' ? 'missing' : read.reason
+    problems.push(`  • ${filename} — ${why} (${drives})`)
+  }
+  if (problems.length === 0) return
+
+  throw new DataLoadError(
+    `nuScenes metadata is incomplete — ${problems.length} of `
+    + `${Object.keys(REQUIRED_TABLES).length} required tables could not be read:\n`
+    + `${problems.join('\n')}\n`
+    + `Required: ${Object.keys(REQUIRED_TABLES).join(', ')}. `
+    + `See docs/NUSCENES_BYO.md for the full contract.`,
+    'MANIFEST',
+  )
+}
+
+/**
+ * Sensor channels are matched against a fixed list (see NUSCENES_CHANNEL_TO_ID);
+ * anything else is dropped. For a team converting their own recordings that is
+ * the first wall they hit, and until now it was silent — the viewer simply had
+ * no sensors and said nothing.
+ */
+function assertChannelsRecognised(sensors: NuScenesSensor[]): void {
+  if (sensors.length === 0) return
+  const accepted = Object.keys(NUSCENES_CHANNEL_TO_ID)
+  const unknown = [...new Set(
+    sensors.map((s) => s.channel).filter((c) => NUSCENES_CHANNEL_TO_ID[c] === undefined),
+  )]
+  if (unknown.length === 0) return
+
+  // Compare against how many sensors actually resolved, not against the count
+  // of distinct unknown names — two sensors can share a channel.
+  const recognised = sensors.filter((s) => NUSCENES_CHANNEL_TO_ID[s.channel] !== undefined)
+  if (recognised.length === 0) {
+    throw new DataLoadError(
+      `None of the ${sensors.length} sensor channels in sensor.json are recognised: `
+      + `${unknown.join(', ')}.\nEgoLens matches these exact names: ${accepted.join(', ')}.\n`
+      + `Rename your channels to match, or see docs/NUSCENES_BYO.md.`,
+      'MANIFEST',
+    )
+  }
+  console.warn(
+    `[nuScenes] ${unknown.length} sensor channel(s) not recognised and will not be `
+    + `displayed: ${unknown.join(', ')}. Accepted: ${accepted.join(', ')}.`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -107,34 +209,45 @@ export async function readJsonFile<T>(
 export async function buildNuScenesDatabase(
   jsonFiles: Map<string, File | string>,
 ): Promise<NuScenesDatabase> {
-  // Parse all JSON tables in parallel
-  const [
-    scenes,
-    samples,
-    sampleDatas,
-    egoPoses,
-    annotations,
-    calibratedSensors,
-    sensors,
-    instances,
-    categories,
-    logs,
-    lidarsegEntries,
-    panopticEntries,
-  ] = await Promise.all([
-    readJsonFile<NuScenesScene>(jsonFiles, 'scene.json'),
-    readJsonFile<NuScenesSample>(jsonFiles, 'sample.json'),
-    readJsonFile<NuScenesSampleData>(jsonFiles, 'sample_data.json'),
-    readJsonFile<NuScenesEgoPose>(jsonFiles, 'ego_pose.json'),
-    readJsonFile<NuScenesSampleAnnotation>(jsonFiles, 'sample_annotation.json'),
-    readJsonFile<NuScenesCalibratedSensor>(jsonFiles, 'calibrated_sensor.json'),
-    readJsonFile<NuScenesSensor>(jsonFiles, 'sensor.json'),
-    readJsonFile<NuScenesInstance>(jsonFiles, 'instance.json'),
-    readJsonFile<NuScenesCategory>(jsonFiles, 'category.json'),
-    readJsonFile<NuScenesLog>(jsonFiles, 'log.json'),
-    readJsonFile<NuScenesLidarsegEntry>(jsonFiles, 'lidarseg.json'),
-    readJsonFile<NuScenesLidarsegEntry>(jsonFiles, 'panoptic.json'),  // same schema as lidarseg.json
-  ])
+  // Read every table before judging any of them, so one load reports every
+  // problem rather than stopping at the first.
+  const names = [...Object.keys(REQUIRED_TABLES), ...Object.keys(OPTIONAL_TABLES)]
+  const reads = new Map<string, TableRead<unknown>>(
+    await Promise.all(names.map(async (n) =>
+      [n, await readJsonTable<unknown>(jsonFiles, n)] as const,
+    )),
+  )
+
+  assertRequiredTables(reads)
+
+  const rowsOf = <T>(filename: string): T[] => {
+    const read = reads.get(filename)
+    return read?.status === 'ok' ? (read.rows as T[]) : []
+  }
+  const absentOptional = Object.keys(OPTIONAL_TABLES)
+    .filter((n) => reads.get(n)?.status !== 'ok')
+  if (absentOptional.length > 0) {
+    console.info(
+      `[nuScenes] unavailable: `
+      + absentOptional.map((n) => `${OPTIONAL_TABLES[n]} (no ${n})`).join(', '),
+    )
+  }
+
+  const scenes = rowsOf<NuScenesScene>('scene.json')
+  const samples = rowsOf<NuScenesSample>('sample.json')
+  const sampleDatas = rowsOf<NuScenesSampleData>('sample_data.json')
+  const egoPoses = rowsOf<NuScenesEgoPose>('ego_pose.json')
+  const annotations = rowsOf<NuScenesSampleAnnotation>('sample_annotation.json')
+  const calibratedSensors = rowsOf<NuScenesCalibratedSensor>('calibrated_sensor.json')
+  const sensors = rowsOf<NuScenesSensor>('sensor.json')
+  const instances = rowsOf<NuScenesInstance>('instance.json')
+  const categories = rowsOf<NuScenesCategory>('category.json')
+  const logs = rowsOf<NuScenesLog>('log.json')
+  const lidarsegEntries = rowsOf<NuScenesLidarsegEntry>('lidarseg.json')
+  // panoptic.json shares lidarseg.json's schema
+  const panopticEntries = rowsOf<NuScenesLidarsegEntry>('panoptic.json')
+
+  assertChannelsRecognised(sensors)
 
   // Build token → entry maps
   const sampleByToken = new Map(samples.map((s) => [s.token, s]))
@@ -264,14 +377,24 @@ export function loadNuScenesSceneMetadata(
   const scene = db.scenes.find((s) => s.token === sceneToken)
   if (!scene) throw new Error(`Scene not found: ${sceneToken}`)
 
-  // 1. Walk sample linked list to get ordered keyframe samples
+  // 1. Walk sample linked list to get ordered keyframe samples.
+  // A dangling `next` ends the walk; a cycle would not, so track what we have
+  // already visited — otherwise a converter that closes the loop hangs the tab.
   const orderedSamples: NuScenesSample[] = []
+  const visited = new Set<string>()
   let currentToken = scene.first_sample_token
-  while (currentToken) {
+  while (currentToken && !visited.has(currentToken)) {
+    visited.add(currentToken)
     const sample = db.sampleByToken.get(currentToken)
     if (!sample) break
     orderedSamples.push(sample)
     currentToken = sample.next
+  }
+  if (currentToken && visited.has(currentToken)) {
+    console.warn(
+      `[nuScenes] sample.json has a cycle in its prev/next chain at token `
+      + `${currentToken}; stopped after ${orderedSamples.length} frames.`,
+    )
   }
 
   // 2. Build timestamp list (microseconds → bigint for compatibility with Waymo)
