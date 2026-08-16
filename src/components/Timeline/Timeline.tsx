@@ -319,7 +319,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                       left: 0,
                       width: `${leftPct}%`,
                       height: '16px',
-                      backgroundColor: 'rgba(10, 13, 26, 0.72)',
+                      backgroundColor: colors.scrimOut,
                       borderRadius: `${radius.pill} 0 0 ${radius.pill}`,
                       pointerEvents: 'none',
                     }} />
@@ -330,7 +330,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                       left: `${rightPct}%`,
                       right: 0,
                       height: '16px',
-                      backgroundColor: 'rgba(10, 13, 26, 0.72)',
+                      backgroundColor: colors.scrimOut,
                       borderRadius: `0 ${radius.pill} ${radius.pill} 0`,
                       pointerEvents: 'none',
                     }} />

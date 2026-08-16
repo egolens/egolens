@@ -273,3 +273,47 @@ describe('canvases that repaint from a manual subscription list', () => {
     expect(watches(file, 'bgPreset')).toBe(true)
   })
 })
+
+describe('surfaces cannot be hardcoded near-black or near-white', () => {
+  // The class this catches: a scrim. The playback range dimmed everything
+  // outside it with `rgba(10, 13, 26, 0.72)`, which reads as de-emphasis on
+  // dark and as a black bar on light. It was not a copy of any token, so the
+  // duplicate rules above could not see it — but a near-black surface is
+  // always theme-blind, whatever its exact value.
+  //
+  // Deliberately narrow: brand colours, dataset colours and annotation marker
+  // colours are literals too, and must stay literals. Only the extremes of the
+  // lightness range are a surface that has to flip.
+  const luminance = (css: string): number | null => {
+    const rgb = css.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+    let ch: number[]
+    if (rgb) ch = [1, 2, 3].map((i) => +rgb[i] / 255)
+    else {
+      let h = css.replace('#', '')
+      if (h.length === 3) h = [...h].map((c) => c + c).join('')
+      if (h.length < 6) return null
+      ch = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+    }
+    const f = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+    const [r, g, b] = ch.map(f)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+
+  it('no component paints a surface in a hardcoded extreme', () => {
+    const rx = /\b(background|backgroundColor)\s*:\s*['"`](rgba?\([^)]*\)|#[0-9a-fA-F]{3,8})/
+    const offenders: string[] = []
+    for (const f of files) {
+      const lines = readFileSync(f, 'utf8').split('\n')
+      for (const [i, line] of lines.entries()) {
+        if (line.includes('theme-exempt') || (i > 0 && lines[i - 1].includes('theme-exempt'))) continue
+        const m = rx.exec(line)
+        if (!m) continue
+        const L = luminance(m[2])
+        if (L !== null && (L < 0.06 || L > 0.85)) {
+          offenders.push(`${rel(f)}:${i + 1} ${m[2]} (luminance ${L.toFixed(3)})`)
+        }
+      }
+    }
+    expect(offenders, 'use a chrome token — this surface must flip with the theme').toEqual([])
+  })
+})
