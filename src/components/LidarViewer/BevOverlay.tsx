@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react'
-import { colors, fonts } from '../../theme'
+import { colors, fonts, alpha } from '../../theme'
 import { BEV_SIZE, BEV_ZOOM_LABELS } from './BevMinimap'
 
 const MARGIN_TOP = 12
@@ -41,7 +41,7 @@ export default function BevOverlay({
         cursor: 'pointer',
         border: `1px solid ${hovered ? colors.accentBlue : colors.border}`,
         boxShadow: hovered
-          ? `0 2px 12px rgba(0, 200, 219, 0.25), 0 0 0 1px ${colors.accentBlue}`
+          ? `0 2px 12px ${alpha(colors.accentBlue, 0.25)}, 0 0 0 1px ${colors.accentBlue}`
           : '0 2px 8px rgba(0, 0, 0, 0.3)',
         transition: 'border-color 0.2s, box-shadow 0.2s',
       }}

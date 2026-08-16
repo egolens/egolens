@@ -3,7 +3,7 @@ import { useSceneStore, getThumbnailResolver, getSegmentSplits } from './stores/
 import LidarViewer, { type ViewerChrome } from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
-import { colors, fonts, radius, gradients } from './theme'
+import { colors, fonts, radius, gradients, alpha } from './theme'
 import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
 import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
@@ -989,7 +989,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         padding: isMobile ? '20px 16px' : '40px',
         overflow: 'auto',
         transition: 'background-color 0.2s',
-        backgroundColor: dragging ? 'rgba(0, 232, 157, 0.05)' : 'transparent',
+        backgroundColor: dragging ? alpha(colors.accent, 0.05) : 'transparent',
       }}
     >
       <style>{`
@@ -1111,7 +1111,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 onMouseEnter={(e) => {
                   if (!urlLoading && !isActive) {
                     e.currentTarget.style.borderColor = colors.accent
-                    e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.08)'
+                    e.currentTarget.style.backgroundColor = alpha(colors.accent, 0.08)
                   }
                 }}
                 onMouseLeave={(e) => {
@@ -1215,7 +1215,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               fontFamily: fonts.mono,
               backgroundColor: colors.bgOverlay,
               color: colors.textPrimary,
-              border: `1px solid ${urlError ? '#FF6B6B' : colors.border}`,
+              border: `1px solid ${urlError ? colors.danger : colors.border}`,
               borderRadius: radius.sm,
               outline: 'none',
               transition: 'border-color 0.15s',
@@ -1301,7 +1301,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           <div style={{
             fontSize: '11px',
             fontFamily: fonts.sans,
-            color: '#FF6B6B',
+            color: colors.danger,
             padding: '6px 10px',
             backgroundColor: 'rgba(255, 107, 107, 0.1)',
             borderRadius: radius.sm,
@@ -1347,7 +1347,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         padding: isMobile ? '20px 16px' : '32px 40px',
         borderRadius: isMobile ? '12px' : '16px',
         border: `2px dashed ${dragging ? colors.accent : colors.border}`,
-        backgroundColor: dragging ? 'rgba(0, 232, 157, 0.08)' : colors.bgSurface,
+        backgroundColor: dragging ? alpha(colors.accent, 0.08) : colors.bgSurface,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -1397,7 +1397,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                       transition: 'all 0.15s',
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'rgba(0, 232, 157, 0.1)'
+                      e.currentTarget.style.backgroundColor = alpha(colors.accent, 0.1)
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'transparent'
@@ -1420,7 +1420,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               <div style={{
                 fontSize: '12px',
                 fontFamily: fonts.sans,
-                color: '#FF6B6B',
+                color: colors.danger,
                 textAlign: 'center',
                 padding: '8px 16px',
                 backgroundColor: 'rgba(255, 107, 107, 0.1)',
