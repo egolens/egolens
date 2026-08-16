@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
-import { colors, fonts, radius, gradients } from '../../theme'
+import { colors, fonts, radius, gradients, alpha } from '../../theme'
 import { syncWindowToUrl } from '../../utils/urlState'
 
 // ---------------------------------------------------------------------------
@@ -361,7 +361,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                     left: `${((playbackWindow?.f0 ?? 0) / maxFrame) * 100}%`,
                     width: '6px',
                     height: '18px',
-                    backgroundColor: playbackWindow ? colors.accentBlue : 'rgba(0, 201, 219, 0.45)',
+                    backgroundColor: playbackWindow ? colors.accentBlue : alpha(colors.accentBlue, 0.45),
                     borderRadius: '2px',
                     transform: 'translateX(-50%)',
                     cursor: 'ew-resize',
@@ -382,7 +382,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                     left: `${((playbackWindow?.f1 ?? maxFrame) / maxFrame) * 100}%`,
                     width: '6px',
                     height: '18px',
-                    backgroundColor: playbackWindow ? colors.accentBlue : 'rgba(0, 201, 219, 0.45)',
+                    backgroundColor: playbackWindow ? colors.accentBlue : alpha(colors.accentBlue, 0.45),
                     borderRadius: '2px',
                     transform: 'translateX(-50%)',
                     cursor: 'ew-resize',

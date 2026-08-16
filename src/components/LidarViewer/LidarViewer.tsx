@@ -26,7 +26,7 @@ import BevOverlay from './BevOverlay'
 import { useSceneStore, BG_PRESETS, ALL_COLORMAP_MODES, COLORMAP_LABELS, getLoadedAV2HasAnnotations } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
-import { colors, fonts, radius } from '../../theme'
+import { colors, fonts, radius, alpha } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
 import { trackKeyboardShortcut } from '../../utils/analytics'
@@ -682,7 +682,7 @@ function BgColorSync() {
   const { gl } = useThree()
   const bgPreset = useSceneStore((s) => s.bgPreset)
   useEffect(() => {
-    const hex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? '#0C0F1A'
+    const hex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? colors.bgDeep
     gl.setClearColor(hex)
   }, [gl, bgPreset])
   return null
@@ -1039,7 +1039,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                 border: 'none',
                 borderRadius: radius.sm,
                 cursor: 'pointer',
-                backgroundColor: followCam ? 'rgba(0, 200, 219, 0.12)' : 'transparent',
+                backgroundColor: followCam ? alpha(colors.accentBlue, 0.12) : 'transparent',
                 transition: 'background-color 0.15s',
               }}
             >
@@ -1112,7 +1112,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
               border: 'none',
               borderRadius: radius.sm,
               cursor: followCam ? 'default' : 'pointer',
-              backgroundColor: pinCamera && !followCam ? 'rgba(0, 232, 157, 0.12)' : 'transparent',
+              backgroundColor: pinCamera && !followCam ? alpha(colors.accent, 0.12) : 'transparent',
               transition: 'background-color 0.15s',
               opacity: followCam ? 0.35 : 1,
             }}
@@ -1158,7 +1158,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                 border: 'none',
                 borderRadius: radius.sm,
                 cursor: 'pointer',
-                backgroundColor: showKeyHints ? 'rgba(0, 232, 157, 0.12)' : 'transparent',
+                backgroundColor: showKeyHints ? alpha(colors.accent, 0.12) : 'transparent',
                 transition: 'background-color 0.15s',
               }}
             >
@@ -1344,7 +1344,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                     flex: 1, padding: '4px 0', fontSize: '10px',
                     fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
                     border: 'none', cursor: active ? 'default' : 'pointer',
-                    backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
+                    backgroundColor: active ? alpha(colors.accentBlue, 0.15) : 'transparent',
                     color: active ? colors.accentBlue : colors.textDim,
                     transition: 'all 0.15s', letterSpacing: '0.3px',
                   }}
@@ -1481,7 +1481,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                           flex: 1, padding: '4px 0', fontSize: '10px',
                           fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
                           border: 'none', cursor: 'pointer',
-                          backgroundColor: active ? 'rgba(0, 200, 219, 0.15)' : 'transparent',
+                          backgroundColor: active ? alpha(colors.accentBlue, 0.15) : 'transparent',
                           color: active ? colors.accentBlue : colors.textDim,
                           transition: 'all 0.15s', letterSpacing: '0.3px',
                         }}
@@ -1654,7 +1654,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                       fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
                       border: 'none', cursor: 'pointer',
                       backgroundColor: active
-                        ? (isOn ? 'rgba(0, 200, 219, 0.15)' : 'rgba(255,255,255,0.06)')
+                        ? (isOn ? alpha(colors.accentBlue, 0.15) : 'rgba(255,255,255,0.06)')
                         : 'transparent',
                       color: active
                         ? (isOn ? colors.accentBlue : colors.textPrimary)
@@ -1676,7 +1676,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                 width: '100%', padding: '4px 8px',
                 fontSize: '10px', fontFamily: fonts.sans, fontWeight: 500,
                 border: 'none', cursor: 'pointer',
-                backgroundColor: showLidarOverlay ? 'rgba(0, 200, 219, 0.1)' : 'transparent',
+                backgroundColor: showLidarOverlay ? alpha(colors.accentBlue, 0.1) : 'transparent',
                 color: showLidarOverlay ? colors.accentBlue : colors.textDim,
                 transition: 'all 0.15s', textAlign: 'left',
               }}

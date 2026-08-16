@@ -88,6 +88,7 @@ import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindo
 import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { getEmbedParams } from '../utils/embedParams'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
+import { colors } from '../theme'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
@@ -128,7 +129,7 @@ export type PointShape = 'square' | 'circle'
 /** Background color presets for 3D viewport */
 export const BG_PRESETS = [
   { id: 'black',     label: 'Black',     color: '#000000' },
-  { id: 'dark',      label: 'Dark',      color: '#0C0F1A' },
+  { id: 'dark',      label: 'Dark',      color: colors.bgDeep },
   { id: 'charcoal',  label: 'Charcoal',  color: '#1a1a1a' },
   { id: 'midgray',   label: 'Mid Gray',  color: '#4d4d4d' },
   { id: 'navy',      label: 'Navy',      color: '#0d1117' },

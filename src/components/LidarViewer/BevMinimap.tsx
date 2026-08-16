@@ -80,7 +80,7 @@ export function BevMinimapRenderer({
 
       const { worldMode, currentFrame, bgPreset } = useSceneStore.getState()
       // Sync background color with 3D viewport
-      const bgHex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? '#0C0F1A'
+      const bgHex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? colors.bgDeep
       gl.setClearColor(bgHex)
       const pose = currentFrame?.vehiclePose ?? null
       const radius = BEV_ZOOM_LEVELS[zoomRef.current] ?? BEV_ZOOM_LEVELS[0]
