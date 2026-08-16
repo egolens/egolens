@@ -23,10 +23,10 @@ import CameraFrustums from './CameraFrustums'
 import WasdControls from './WasdControls'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
-import { useSceneStore, BG_PRESETS, ALL_COLORMAP_MODES, COLORMAP_LABELS, getLoadedAV2HasAnnotations } from '../../stores/useSceneStore'
+import { useSceneStore, ALL_COLORMAP_MODES, COLORMAP_LABELS, getLoadedAV2HasAnnotations, resolveViewportBg } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
-import { colors, fonts, radius, alpha, sceneColors, viewportBg } from '../../theme'
+import { colors, fonts, radius, alpha, sceneColors } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
 import { trackKeyboardShortcut } from '../../utils/analytics'
@@ -685,7 +685,7 @@ function BgColorSync() {
   useEffect(() => {
     // viewportBg, not colors.bgDeep — that is a var() string now, and
     // setClearColor would take it as black without complaining.
-    const hex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? viewportBg(theme)
+    const hex = resolveViewportBg(bgPreset, theme)
     gl.setClearColor(hex)
   }, [gl, bgPreset, theme])
   return null
@@ -912,7 +912,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
         raycaster={{ params: { Line: { threshold: 0.15 } } as never }}
         style={{ width: '100%', height: '100%' }}
         onCreated={({ gl }) => {
-          gl.setClearColor(BG_PRESETS.find(p => p.id === bgPreset)?.color ?? viewportBg(theme))
+          gl.setClearColor(resolveViewportBg(bgPreset, theme))
         }}
       >
         <BgColorSync />

@@ -91,7 +91,7 @@ import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayTo
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
-import { applyTheme, initialTheme, type ThemeName } from '../theme'
+import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,6 +128,7 @@ export type PointShape = 'square' | 'circle'
 
 /** Background color presets for 3D viewport */
 export const BG_PRESETS = [
+  { id: 'auto',      label: 'Match theme', color: '' },  // theme-exempt: resolved from the theme, see resolveViewportBg
   { id: 'black',     label: 'Black',     color: '#000000' },
   { id: 'dark',      label: 'Dark',      color: '#0C0F1A' },  // theme-exempt: consumed by THREE.setClearColor, and a viewport preset is not a UI theme
   { id: 'charcoal',  label: 'Charcoal',  color: '#1a1a1a' },
@@ -136,6 +137,20 @@ export const BG_PRESETS = [
   { id: 'white',     label: 'White',     color: '#ffffff' },
 ] as const
 export type BgPresetId = typeof BG_PRESETS[number]['id']
+
+/**
+ * The viewport clear colour, as literal hex for THREE.
+ *
+ * `auto` is the default and follows the UI theme, which is the whole point of
+ * the light theme: a figure destined for a white page should not have a black
+ * rectangle in it. An explicit preset always wins — a light-theme user who
+ * finds the point cloud hard to read on white can still choose a dark
+ * viewport, and the ramps do read better there.
+ */
+export function resolveViewportBg(bgPreset: BgPresetId, theme: ThemeName): string {
+  if (bgPreset === 'auto') return viewportBg(theme)
+  return BG_PRESETS.find((p) => p.id === bgPreset)?.color || viewportBg(theme)
+}
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -792,7 +807,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   cameraKeypointFrames: new Set<number>(),
   cameraSegFrames: new Set<number>(),
   // Display settings
-  bgPreset: 'dark' as BgPresetId,
+  bgPreset: 'auto' as BgPresetId,
   theme: initialTheme(),
   pointShape: 'circle' as PointShape,
   pointSize: 0.08,
