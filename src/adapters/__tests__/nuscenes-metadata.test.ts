@@ -6,12 +6,12 @@
  * minimal synthetic nuScenes JSON data.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import {
   buildNuScenesDatabase,
   loadNuScenesSceneMetadata,
-  readJsonFile,
+  readJsonTable,
 } from '../nuscenes/metadata'
 
 // ---------------------------------------------------------------------------
@@ -201,20 +201,102 @@ function createSyntheticNuScenesFiles(): Map<string, File> {
 }
 
 // ---------------------------------------------------------------------------
-// readJsonFile
+// readJsonTable
 // ---------------------------------------------------------------------------
 
-describe('readJsonFile', () => {
-  it('parses a JSON file from the map', async () => {
+describe('readJsonTable', () => {
+  it('reads a table from the map', async () => {
     const files = createSyntheticNuScenesFiles()
-    const scenes = await readJsonFile<{ token: string }>(files, 'scene.json')
-    expect(scenes).toHaveLength(1)
-    expect(scenes[0].token).toBe('scene_1')
+    const read = await readJsonTable<{ token: string }>(files, 'scene.json')
+    expect(read).toEqual({ status: 'ok', rows: [expect.objectContaining({ token: 'scene_1' })] })
   })
 
-  it('returns empty array for missing file', async () => {
-    const result = await readJsonFile(new Map(), 'nonexistent.json')
-    expect(result).toEqual([])
+  it('reports a missing table as missing', async () => {
+    expect(await readJsonTable(new Map(), 'nonexistent.json')).toEqual({ status: 'missing' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Loud failure — a conversion mistake must say what is wrong
+// ---------------------------------------------------------------------------
+
+describe('a broken tree fails with directions, not a blank viewer', () => {
+  const withoutTables = (...drop: string[]) => {
+    const files = createSyntheticNuScenesFiles()
+    for (const d of drop) files.delete(d)
+    return files
+  }
+
+  it('names every missing required table in one error', async () => {
+    const files = withoutTables('ego_pose.json', 'sensor.json')
+    const err = await buildNuScenesDatabase(files).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(Error)
+    const message = (err as Error).message
+    // Both, in one load — a converter missing two tables should not have to
+    // fix one, reload, and discover the second.
+    expect(message).toContain('ego_pose.json')
+    expect(message).toContain('sensor.json')
+    expect(message).toContain('2 of 6')
+  })
+
+  it('says what the missing table was for', async () => {
+    const err = await buildNuScenesDatabase(withoutTables('ego_pose.json')).catch((e: unknown) => e)
+    expect((err as Error).message).toContain('renders at the origin')
+  })
+
+  it('quotes the opening bytes when a host serves HTML instead of a table', async () => {
+    const files = createSyntheticNuScenesFiles()
+    files.set('sample.json', new File(['<!doctype html><html>'], 'sample.json'))
+    const err = await buildNuScenesDatabase(files).catch((e: unknown) => e)
+
+    expect((err as Error).message).toContain('<!doctype html')
+  })
+
+  it('carries a classified error code so telemetry can read it', async () => {
+    const err = await buildNuScenesDatabase(withoutTables('scene.json')).catch((e: unknown) => e)
+    expect((err as { code?: string }).code).toBe('MANIFEST')
+  })
+
+  it('tolerates every optional table being absent', async () => {
+    const files = withoutTables(
+      'sample_annotation.json', 'instance.json', 'category.json', 'log.json',
+    )
+    const db = await buildNuScenesDatabase(files)
+    expect(db.scenes).toHaveLength(1)
+  })
+
+  it('tolerates an optional table that is present but empty (the v1.0-test shape)', async () => {
+    const files = createSyntheticNuScenesFiles()
+    files.set('sample_annotation.json', new File(['[]'], 'sample_annotation.json'))
+    const db = await buildNuScenesDatabase(files)
+    expect(db.annotationsBySample.size).toBe(0)
+  })
+
+  it('names unrecognised sensor channels instead of dropping them in silence', async () => {
+    const files = createSyntheticNuScenesFiles()
+    files.set('sensor.json', new File([JSON.stringify([
+      { token: 'sensor_lidar', channel: 'lidar_roof', modality: 'lidar' },
+    ])], 'sensor.json'))
+
+    const err = await buildNuScenesDatabase(files).catch((e: unknown) => e)
+    const message = (err as Error).message
+    expect(message).toContain('lidar_roof')
+    expect(message).toContain('LIDAR_TOP')
+  })
+
+  it('warns, but still loads, when only some channels are unrecognised', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const files = createSyntheticNuScenesFiles()
+    files.set('sensor.json', new File([JSON.stringify([
+      { token: 'sensor_lidar', channel: 'LIDAR_TOP', modality: 'lidar' },
+      { token: 'sensor_extra', channel: 'lidar_roof', modality: 'lidar' },
+    ])], 'sensor.json'))
+
+    const db = await buildNuScenesDatabase(files)
+    expect(db.scenes).toHaveLength(1)
+    expect(warn.mock.calls.flat().join(' ')).toContain('lidar_roof')
+    warn.mockRestore()
   })
 })
 
