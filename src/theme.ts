@@ -218,6 +218,14 @@ export function applyTheme(theme: ThemeName, root: HTMLElement): void {
  */
 export function initialTheme(): ThemeName {
   if (typeof window === 'undefined') return 'dark'
+
+  // `?theme=` wins, and is read here rather than in embedParams so it applies
+  // in normal mode too — a scene link pasted into a paper's supplement wants
+  // the same control an iframe does.
+  const param = new URLSearchParams(window.location.search).get('theme')
+  if (param === 'light' || param === 'dark') return param
+  if (param) console.warn(`[theme] ignoring theme=${param}; expected "light" or "dark"`)
+
   try {
     const saved = localStorage.getItem('egolens-theme')
     if (saved === 'light' || saved === 'dark') return saved

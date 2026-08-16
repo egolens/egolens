@@ -143,6 +143,11 @@ export function trackPovSwitch(camera: string) {
 }
 
 /** User toggled an overlay (keypoints, segmentation, boxes, etc.) */
+/** User switched the UI theme. `theme` is the one they switched TO. */
+export function trackThemeChange(theme: string) {
+  track('theme_change', { theme })
+}
+
 export function trackOverlayToggle(overlay: string, enabled: boolean) {
   track('overlay_toggle', { overlay, enabled })
 }

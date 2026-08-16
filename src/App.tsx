@@ -14,7 +14,7 @@ import { PRESETS, isPresetUrl } from './utils/presets'
 import { buildShareUrl, parseViewParams, parseCamerasParam, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
 import { resolveCameraParam } from './utils/cameraParam'
-import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected } from './utils/analytics'
+import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected, trackThemeChange } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -722,6 +722,7 @@ function Header() {
             )}
           </div>
         )}
+        <ThemeToggle isMobile={isMobile} />
         <button
           onClick={() => { setShowStarModal(true); trackStarModalOpen(isMobile ? 'mobile' : 'desktop') }}
           title="Star on GitHub"
@@ -869,6 +870,57 @@ function useIsMobile(breakpoint = 600) {
 // ---------------------------------------------------------------------------
 // Drop Zone — shown when no data is loaded
 // ---------------------------------------------------------------------------
+
+/**
+ * Light/dark switch.
+ *
+ * Until it is first used the theme follows `?theme=`, then a stored choice,
+ * then the OS. Pressing it makes the choice explicit and persistent — there is
+ * deliberately no way back to "follow the OS", because a third state costs a
+ * menu and nobody has asked for one.
+ */
+function ThemeToggle({ isMobile }: { isMobile: boolean }) {
+  const theme = useSceneStore((s) => s.theme)
+  const setTheme = useSceneStore((s) => s.actions.setTheme)
+  const next = theme === 'dark' ? 'light' : 'dark'
+
+  return (
+    <button
+      onClick={() => { setTheme(next); trackThemeChange(next) }}
+      title={`Switch to ${next} theme`}
+      aria-label={`Switch to ${next} theme`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '6px',
+        color: colors.textDim,
+        backgroundColor: 'transparent',
+        border: `1px solid ${colors.border}`,
+        borderRadius: radius.sm,
+        cursor: 'pointer',
+        transition: 'all 0.15s',
+        flexShrink: 0,
+        marginRight: isMobile ? '4px' : '6px',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = colors.accent; e.currentTarget.style.borderColor = colors.accent }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim; e.currentTarget.style.borderColor = colors.border }}
+    >
+      {theme === 'dark' ? (
+        // Sun — what pressing it gets you
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      ) : (
+        // Moon
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+      )}
+    </button>
+  )
+}
 
 function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map<string, File>>) => Promise<void> }) {
   const [dragging, setDragging] = useState(false)

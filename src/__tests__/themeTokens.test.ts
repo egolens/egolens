@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment happy-dom
+ */
+/**
  * Theme token contract.
  *
  * Two delivery mechanisms coexist and each has a way of failing silently:
@@ -12,7 +15,7 @@
  *   black. That is the failure these tests exist to prevent.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -211,5 +214,34 @@ describe('the palette itself', () => {
 describe('initialTheme', () => {
   it('returns a valid theme name', () => {
     expect(THEMES).toContain(initialTheme())
+  })
+})
+
+describe('the theme= URL parameter', () => {
+  const withSearch = (search: string) => {
+    window.history.replaceState({}, '', `/${search}`)
+    return initialTheme()
+  }
+
+  it('wins over everything else', () => {
+    try { localStorage.setItem('egolens-theme', 'dark') } catch { /* private mode */ }
+    expect(withSearch('?theme=light')).toBe('light')
+    expect(withSearch('?theme=dark')).toBe('dark')
+  })
+
+  it('falls through to the stored choice when absent', () => {
+    try { localStorage.setItem('egolens-theme', 'light') } catch { /* private mode */ }
+    expect(withSearch('?dataset=nuscenes')).toBe('light')
+  })
+
+  it('warns and falls through on a value it does not recognise', () => {
+    // Whether the fallthrough lands on the stored choice or the OS depends on
+    // the environment; what matters is that the bogus value is not adopted.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const got = withSearch('?theme=solarized')
+    expect(THEMES).toContain(got)
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0].join(' ')).toContain('solarized')
+    warn.mockRestore()
   })
 })
