@@ -245,3 +245,31 @@ describe('the theme= URL parameter', () => {
     warn.mockRestore()
   })
 })
+
+describe('canvases that repaint from a manual subscription list', () => {
+  // BevMinimap and LidarProjectionOverlay draw to their own canvas and repaint
+  // only when a hand-written list of store keys changes. Both read the theme —
+  // for the clear colour and for which ramp the points use — and both had
+  // omitted it, so a theme switch left their canvas showing the other theme.
+  // Nothing else catches this: the code compiles and the first paint is right.
+  const SUBSCRIBERS = [
+    'components/LidarViewer/BevMinimap.tsx',
+    'components/CameraPanel/LidarProjectionOverlay.tsx',
+  ]
+
+  /** A property read, not a mention — a comment saying "theme" is not a watch. */
+  const watches = (file: string, key: string) => {
+    const text = readFileSync(join(SRC, file), 'utf8')
+    const sub = text.slice(text.indexOf('useSceneStore.subscribe'))
+    const code = sub.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    return new RegExp(`\\.${key}\\b`).test(code)
+  }
+
+  it.each(SUBSCRIBERS)('%s watches theme', (file) => {
+    expect(watches(file, 'theme'), 'add theme to the subscription predicate').toBe(true)
+  })
+
+  it.each(SUBSCRIBERS)('%s watches bgPreset too — it also picks the ramp', (file) => {
+    expect(watches(file, 'bgPreset')).toBe(true)
+  })
+})

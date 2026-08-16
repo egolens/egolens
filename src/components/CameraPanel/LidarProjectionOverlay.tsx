@@ -120,14 +120,19 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
 
   // Subscribe to relevant store changes
   useEffect(() => {
-    let prevFrame = useSceneStore.getState().currentFrame
-    let prevCmap = useSceneStore.getState().colormapMode
-    let prevSensors = useSceneStore.getState().visibleSensors
+    // Must name everything draw() reads. The ramp depends on the viewport
+    // background, so theme and bgPreset belong here too — without them a theme
+    // switch leaves the projection painted in the other set's colours.
+    let prev = useSceneStore.getState()
     const unsub = useSceneStore.subscribe((s) => {
-      if (s.currentFrame !== prevFrame || s.colormapMode !== prevCmap || s.visibleSensors !== prevSensors) {
-        prevFrame = s.currentFrame
-        prevCmap = s.colormapMode
-        prevSensors = s.visibleSensors
+      if (
+        s.currentFrame !== prev.currentFrame ||
+        s.colormapMode !== prev.colormapMode ||
+        s.visibleSensors !== prev.visibleSensors ||
+        s.theme !== prev.theme ||
+        s.bgPreset !== prev.bgPreset
+      ) {
+        prev = s
         draw()
       }
     })

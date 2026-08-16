@@ -129,6 +129,10 @@ export function BevMinimapRenderer({
         state.pointOpacity !== prev.pointOpacity ||
         state.trailLength !== prev.trailLength ||
         state.bgPreset !== prev.bgPreset ||
+        // The theme changes both the clear colour and which ramp the points
+        // use. This list has to name everything render() reads, or the canvas
+        // keeps its last painted frame.
+        state.theme !== prev.theme ||
         state.pointSize !== prev.pointSize
       ) {
         scheduleRender()
