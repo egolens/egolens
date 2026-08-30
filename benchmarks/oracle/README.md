@@ -85,6 +85,9 @@ shorter default command timeout, so a valid cold Waymo row-group load is not
 aborted before the application-level deadline. The barrier is also an eviction
 test: a selected frame whose camera batch left the bounded image cache must
 demand-reload that batch even when its point frame is still hot.
+The Timeline's camera-load indicator uses cumulative unique batch progress,
+not current LRU occupancy, so a completed bounded prefetch does not leave a
+permanent loading lane that changes the captured viewport geometry.
 
 ## 2. Capture the candidate
 

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { computeBufferSegments } from '../Timeline'
+import { computeBufferSegments, isCameraBufferLoadingV1 } from '../Timeline'
 
 describe('computeBufferSegments', () => {
   it('returns empty for totalFrames <= 1', () => {
@@ -61,5 +61,13 @@ describe('computeBufferSegments', () => {
     const result = computeBufferSegments([5, 6, 7], 20)
     expect(result[0].start).toBe(5)
     expect(result[0].end).toBe(7) // inclusive
+  })
+})
+
+describe('isCameraBufferLoadingV1', () => {
+  it('uses cumulative batch progress rather than current LRU residency', () => {
+    expect(isCameraBufferLoadingV1(0, 4)).toBe(false)
+    expect(isCameraBufferLoadingV1(1, 4)).toBe(true)
+    expect(isCameraBufferLoadingV1(4, 4)).toBe(false)
   })
 })

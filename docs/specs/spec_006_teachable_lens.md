@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed six renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed seven renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1320,7 +1320,11 @@ normative for later Teachable Lens work:
   or a fixed settle delay alone can still hash the previous image;
 - bounded point and camera caches are independent. A seek must demand-reload
   each missing batch independently; a hot point frame does not imply that its
-  camera batch survived image-cache eviction.
+  camera batch survived image-cache eviction;
+- loading progress and cache residency are different signals. Cumulative unique
+  batches drive progress UI, while the current LRU membership drives fast-seek
+  availability; eviction after completed prefetch must not make the UI appear
+  permanently unfinished.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.

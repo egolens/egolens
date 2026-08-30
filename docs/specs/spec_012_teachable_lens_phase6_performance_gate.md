@@ -136,6 +136,9 @@ equivalent bounded policy is required wherever data can grow with frame count.
 Eviction must be operational rather than merely bounded: every consumer-facing
 seek demand-reloads each independently missing point or camera batch. A cache
 hit in one resource class must never suppress restoration of another class.
+Progress counters must record cumulative unique batches separately from current
+LRU residency. Evicting already-read data changes buffer availability, not the
+fact that initial loading completed.
 
 ## 3. Scene disposal is an idempotent contract
 

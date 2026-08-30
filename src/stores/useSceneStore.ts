@@ -351,6 +351,8 @@ const internal = {
   /** Camera refresh interval — polls for late-arriving camera data during playback */
   cameraRefreshId: null as ReturnType<typeof setInterval> | null,
   cameraPrefetchStarted: false,
+  /** Camera batch identities loaded at least once; progress is not LRU residency. */
+  cameraLoadedBatchesEver: new Set<number>(),
   /** Prevent duplicate prefetchAllRowGroups calls (React StrictMode) */
   prefetchStarted: false,
   /**
@@ -424,6 +426,7 @@ function resetInternal() {
   internal.parquetFiles.clear()
   internal.timestamps = []
   internal.pendingSeekFrame = null
+  internal.cameraLoadedBatchesEver.clear()
   internal.cameraPoolInit = null
   internal.pendingCameraColormap = false
   internal.timestampToFrame.clear()
@@ -2385,6 +2388,7 @@ async function loadAndCacheCameraRowGroup(
   try {
     await scene.loadCameraBatch(rgIndex, opts)
     if (scene !== internal.normalizedScene) return
+    internal.cameraLoadedBatchesEver.add(rgIndex)
 
     // Update camera loading progress + buffer bar, and patch current frame
     // if new camera images arrived for it.  Merged into a single set() to
@@ -2393,7 +2397,7 @@ async function loadAndCacheCameraRowGroup(
     const state = useSceneStore.getState()
     const fi = state.currentFrameIndex
     const currentFrame = state.currentFrame
-    const loadedCount = scene.loadedCameraBatches().size
+    const loadedCount = internal.cameraLoadedBatchesEver.size
     if (scene.hasPointFrame(fi) && scene.hasCameraFrame(fi)) {
       const frame = await loadRendererFrame(scene, fi)
       if (scene !== internal.normalizedScene) return
