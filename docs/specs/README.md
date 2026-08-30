@@ -20,3 +20,4 @@ convention and keep their names.
 | 001 | [Integration contract — deep-link fast path, setScene, time window, collections](spec_001_integration_contract.md) | in-progress (item 4 → spec 002) |
 | 002 | [Collections — index.json curation metadata](spec_002_collections.md) | planned |
 | 003 | [Embed view composition — controls, cameras](spec_003_embed_view_composition.md) | shipped |
+| 006 | [Teachable Lens — portable full-scene adapter recipes](spec_006_teachable_lens.md) | planned |
