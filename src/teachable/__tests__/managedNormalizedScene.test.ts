@@ -210,6 +210,24 @@ describe('ManagedNormalizedSceneV1', () => {
     expect(pool.requestBatch).toHaveBeenCalledTimes(3)
   })
 
+  it('reloads an evicted camera batch under its independent byte limit', async () => {
+    const scene = new ManagedNormalizedSceneV1(delegate(), { cameraCacheByteLimit: 40 })
+    const pool = new MockPool(new Map([
+      [0, cameraBatch(0, 0)],
+      [1, cameraBatch(1, 1)],
+    ]))
+    scene.attachCameraPool(pool, 2)
+
+    await scene.loadCameraBatch(0)
+    await scene.loadCameraBatch(1)
+
+    expect(scene.cachedCameraFrames()).toEqual([1])
+    expect(scene.snapshotPerformance().operations.cameraBatchEvictions).toBe(1)
+    await scene.loadCameraBatch(0)
+    expect(scene.cachedCameraFrames()).toEqual([0])
+    expect(pool.requestBatch).toHaveBeenCalledTimes(3)
+  })
+
   it('disposes pools, caches, delegate and probe state idempotently', async () => {
     const base = delegate()
     const pointPool = new MockPool(new Map([[0, pointBatch(0, 0)]]))

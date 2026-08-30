@@ -82,7 +82,9 @@ flicker-free camera component intentionally keeps the prior blob URL visible
 until the replacement has decoded. The CDP `Runtime.evaluate` command that
 awaits this barrier uses the configured capture timeout, rather than the
 shorter default command timeout, so a valid cold Waymo row-group load is not
-aborted before the application-level deadline.
+aborted before the application-level deadline. The barrier is also an eviction
+test: a selected frame whose camera batch left the bounded image cache must
+demand-reload that batch even when its point frame is still hot.
 
 ## 2. Capture the candidate
 

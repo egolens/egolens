@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed five renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed six renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1317,7 +1317,10 @@ normative for later Teachable Lens work:
   store state. When camera JPEGs swap asynchronously, capture waits until every
   requested camera image has decoded and the DOM identifies it as the requested
   frame; `currentFrameIndex`, a non-empty camera map, `document.images.complete`,
-  or a fixed settle delay alone can still hash the previous image.
+  or a fixed settle delay alone can still hash the previous image;
+- bounded point and camera caches are independent. A seek must demand-reload
+  each missing batch independently; a hot point frame does not imply that its
+  camera batch survived image-cache eviction.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.

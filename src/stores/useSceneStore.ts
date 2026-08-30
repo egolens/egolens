@@ -791,6 +791,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       markPerformanceEvent(requestMark, { frameIndex })
       noteFrameRequest(scene.sceneGeneration, frameIndex)
 
+      // Point and camera caches have independent byte budgets. A camera batch
+      // can be evicted while the requested point frame remains hot, so every
+      // seek must restore the missing camera batch independently. Keep this
+      // detached from the point first-paint path; loadAndCacheCameraRowGroup
+      // patches the displayed frame as soon as the JPEGs arrive.
+      if (cameraImagesWanted() && scene.cameraBatchCount > 0 && !scene.hasCameraFrame(frameIndex)) {
+        const cameraBatchIndex = batchIndexForFrame(frameIndex, scene.cameraBatchCount)
+        void loadAndCacheCameraRowGroup(cameraBatchIndex, set, { priority: true })
+      }
+
       if (!scene.hasPointFrame(frameIndex)) {
         internal.pendingSeekFrame = frameIndex
         const batchIndex = batchIndexForFrame(frameIndex, scene.pointBatchCount)
