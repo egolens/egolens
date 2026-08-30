@@ -103,6 +103,16 @@ after the candidate code changes.
 Detailed oracle-side diagnostics remain a trusted human artifact. The
 authoring loop cannot query the judge repeatedly as an oracle-extraction API.
 
+### Capture-readiness finding
+
+The Waymo evidence run showed that the interactive `seekFrame()` action may
+return after scheduling a cold row-group request, before the requested frame is
+actually presented. That behavior is correct for the ordinary non-blocking UI
+but is not a valid capture barrier. The trusted browser capture command must
+wait for the requested `currentFrameIndex` and non-null frame, fail on scene
+error, and time out rather than hash the previously displayed frame. Settling
+and image-complete checks occur only after that barrier.
+
 ### 5. Phase 6 deletion and merge gate
 
 Removal of a dataset's obsolete production path is accepted only when a trusted

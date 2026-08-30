@@ -233,10 +233,19 @@ function useOracleCaptureCommand() {
         )
       },
       async seekFrame(index: number) {
-        const store = useSceneStore.getState()
-        store.actions.pause()
-        await store.actions.seekFrame(index)
-        return useSceneStore.getState().currentFrameIndex
+        useSceneStore.getState().actions.pause()
+        const deadline = performance.now() + 60_000
+        while (performance.now() < deadline) {
+          const store = useSceneStore.getState()
+          if (store.status === 'error') {
+            throw new Error(store.error ?? `Conformance frame ${index} failed to load.`)
+          }
+          await store.actions.seekFrame(index)
+          const presented = useSceneStore.getState()
+          if (presented.currentFrameIndex === index && presented.currentFrame !== null) return index
+          await new Promise((resolve) => window.setTimeout(resolve, 50))
+        }
+        throw new Error(`Timed out waiting for conformance frame ${index}.`)
       },
       setPresentation(options: {
         readonly colormapMode?: ColormapMode

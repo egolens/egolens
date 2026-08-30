@@ -62,7 +62,9 @@ source binding, records the exact build commit compiled by Vite, and disposes
 that scene in a `finally` block. `scripts/phase6-cdp-benchmark.mjs` accepts
 `--conformance-config`, `--conformance-output`, and
 `--perceptual-output-dir` for a one-run capture. The config and PNGs contain
-private case evidence and remain outside Git.
+private case evidence and remain outside Git. Perceptual capture waits for the
+requested frame to become the actually presented frame; a cold seek that only
+queued a row-group request is not considered complete.
 
 ## 2. Capture the candidate
 
