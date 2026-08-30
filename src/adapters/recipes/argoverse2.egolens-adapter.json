@@ -1,0 +1,857 @@
+{
+  "kind": "egolens-adapter",
+  "schemaVersion": 1,
+  "engine": {
+    "minimumVersion": "1.0.0",
+    "requiredOperators": {
+      "feather.columns": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.normalize_boxes2d": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.normalize_boxes3d": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.bind_camera_frame": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.encoded_bytes": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.select": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.join": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.sort": {
+        "major": 1,
+        "provider": "core"
+      },
+      "tracks.derive_trajectories": {
+        "major": 1,
+        "provider": "core"
+      }
+    }
+  },
+  "identity": {
+    "name": "Argoverse 2",
+    "description": "Argoverse 2 Sensor Dataset Feather tables and ring-camera streams."
+  },
+  "match": {
+    "inventory": {
+      "rootEntries": [
+        {
+          "path": "sensors",
+          "required": true
+        },
+        {
+          "path": "calibration",
+          "required": true
+        },
+        {
+          "path": "map",
+          "required": false
+        },
+        {
+          "path": "annotations.feather",
+          "required": false
+        },
+        {
+          "path": "city_SE3_egovehicle.feather",
+          "required": false
+        }
+      ]
+    },
+    "all": [
+      {
+        "kind": "path",
+        "glob": "sensors",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "calibration",
+        "minCount": 1
+      }
+    ]
+  },
+  "sources": {
+    "lidarFrames": {
+      "reader": "feather.columns",
+      "files": {
+        "glob": "sensors/lidar/*.feather",
+        "order": "numeric-path",
+        "minCount": 1
+      },
+      "columns": [
+        "x",
+        "y",
+        "z",
+        "intensity"
+      ]
+    },
+    "cameraFrames": {
+      "reader": "image.encoded_bytes",
+      "files": {
+        "glob": "sensors/cameras/**/*.jpg",
+        "order": "numeric-path"
+      },
+      "params": {
+        "mimeType": "image/jpeg"
+      }
+    },
+    "extrinsics": {
+      "reader": "feather.columns",
+      "files": {
+        "exact": "calibration/egovehicle_SE3_sensor.feather"
+      }
+    },
+    "intrinsics": {
+      "reader": "feather.columns",
+      "files": {
+        "exact": "calibration/intrinsics.feather"
+      }
+    },
+    "annotations": {
+      "reader": "feather.columns",
+      "files": {
+        "exact": "annotations.feather"
+      },
+      "columns": [
+        "timestamp_ns",
+        "category",
+        "track_uuid",
+        "qw",
+        "qx",
+        "qy",
+        "qz",
+        "tx_m",
+        "ty_m",
+        "tz_m",
+        "length_m",
+        "width_m",
+        "height_m"
+      ]
+    },
+    "poses": {
+      "reader": "feather.columns",
+      "files": {
+        "exact": "city_SE3_egovehicle.feather"
+      },
+      "columns": [
+        "timestamp_ns",
+        "qw",
+        "qx",
+        "qy",
+        "qz",
+        "tx_m",
+        "ty_m",
+        "tz_m"
+      ]
+    }
+  },
+  "scene": {
+    "formatId": "argoverse2",
+    "timeline": {
+      "timestampUnit": "ns",
+      "nominalFrameRate": 10
+    },
+    "coordinateFrames": [
+      {
+        "id": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_rear_left-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_side_left-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_front_left-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_front_center-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_front_right-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_side_right-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "ring_rear_right-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      }
+    ],
+    "sensors": [
+      {
+        "id": "lidar",
+        "rendererId": 1,
+        "label": "LIDAR",
+        "modality": "lidar",
+        "frameId": "lidar-frame",
+        "color": "#00E89D"
+      },
+      {
+        "id": "ring_rear_left",
+        "rendererId": 1,
+        "label": "REAR LEFT",
+        "modality": "camera",
+        "frameId": "ring_rear_left-frame",
+        "color": "#B490FF",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "rear-left",
+          "povLabel": "RL",
+          "aliases": [
+            "ring_rear_left"
+          ]
+        }
+      },
+      {
+        "id": "ring_side_left",
+        "rendererId": 2,
+        "label": "SIDE LEFT",
+        "modality": "camera",
+        "frameId": "ring_side_left-frame",
+        "color": "#4DA8FF",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "side-left",
+          "povLabel": "SL",
+          "aliases": [
+            "ring_side_left"
+          ]
+        }
+      },
+      {
+        "id": "ring_front_left",
+        "rendererId": 3,
+        "label": "FRONT LEFT",
+        "modality": "camera",
+        "frameId": "ring_front_left-frame",
+        "color": "#00E89D",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "front-left",
+          "povLabel": "FL",
+          "aliases": [
+            "ring_front_left"
+          ]
+        }
+      },
+      {
+        "id": "ring_front_center",
+        "rendererId": 4,
+        "label": "FRONT",
+        "modality": "camera",
+        "frameId": "ring_front_center-frame",
+        "color": "#FFFFFF",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "front",
+          "povLabel": "FC",
+          "aliases": [
+            "ring_front_center"
+          ]
+        }
+      },
+      {
+        "id": "ring_front_right",
+        "rendererId": 5,
+        "label": "FRONT RIGHT",
+        "modality": "camera",
+        "frameId": "ring_front_right-frame",
+        "color": "#00C9DB",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "front-right",
+          "povLabel": "FR",
+          "aliases": [
+            "ring_front_right"
+          ]
+        }
+      },
+      {
+        "id": "ring_side_right",
+        "rendererId": 6,
+        "label": "SIDE RIGHT",
+        "modality": "camera",
+        "frameId": "ring_side_right-frame",
+        "color": "#B490FF",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "side-right",
+          "povLabel": "SR",
+          "aliases": [
+            "ring_side_right"
+          ]
+        }
+      },
+      {
+        "id": "ring_rear_right",
+        "rendererId": 7,
+        "label": "REAR RIGHT",
+        "modality": "camera",
+        "frameId": "ring_rear_right-frame",
+        "color": "#7B6FFF",
+        "image": {
+          "width": 1550,
+          "height": 2048,
+          "model": "pinhole",
+          "view": "rear-right",
+          "povLabel": "RR",
+          "aliases": [
+            "ring_rear_right"
+          ]
+        }
+      }
+    ],
+    "taxonomies": [
+      {
+        "id": "objects",
+        "role": "objects",
+        "classes": [
+          {
+            "id": "UNKNOWN",
+            "rendererId": 0,
+            "label": "Unknown",
+            "color": "#6B7280"
+          },
+          {
+            "id": "REGULAR_VEHICLE",
+            "rendererId": 1,
+            "label": "Regular Vehicle",
+            "color": "#FF9E00",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "PEDESTRIAN",
+            "rendererId": 2,
+            "label": "Pedestrian",
+            "color": "#CCFF00",
+            "modelHint": "pedestrian"
+          },
+          {
+            "id": "BICYCLIST",
+            "rendererId": 3,
+            "label": "Bicyclist",
+            "color": "#FF6B9D",
+            "modelHint": "bicycle"
+          },
+          {
+            "id": "MOTORCYCLIST",
+            "rendererId": 4,
+            "label": "Motorcyclist",
+            "color": "#FF2D55",
+            "modelHint": "motorcycle"
+          },
+          {
+            "id": "WHEELED_RIDER",
+            "rendererId": 5,
+            "label": "Wheeled Rider",
+            "color": "#FF44FF",
+            "modelHint": "bicycle"
+          },
+          {
+            "id": "BOLLARD",
+            "rendererId": 6,
+            "label": "Bollard",
+            "color": "#8B9DC3"
+          },
+          {
+            "id": "CONSTRUCTION_CONE",
+            "rendererId": 7,
+            "label": "Constr. Cone",
+            "color": "#FF44FF",
+            "modelHint": "cone"
+          },
+          {
+            "id": "SIGN",
+            "rendererId": 8,
+            "label": "Sign",
+            "color": "#FF44FF",
+            "modelHint": "sign"
+          },
+          {
+            "id": "CONSTRUCTION_BARREL",
+            "rendererId": 9,
+            "label": "Constr. Barrel",
+            "color": "#CC7A00"
+          },
+          {
+            "id": "STOP_SIGN",
+            "rendererId": 10,
+            "label": "Stop Sign",
+            "color": "#FF4444",
+            "modelHint": "sign"
+          },
+          {
+            "id": "BICYCLE",
+            "rendererId": 11,
+            "label": "Bicycle",
+            "color": "#FF6B9D",
+            "modelHint": "bicycle"
+          },
+          {
+            "id": "LARGE_VEHICLE",
+            "rendererId": 12,
+            "label": "Large Vehicle",
+            "color": "#E67700",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "BUS",
+            "rendererId": 13,
+            "label": "Bus",
+            "color": "#FFD600",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "BOX_TRUCK",
+            "rendererId": 14,
+            "label": "Box Truck",
+            "color": "#D4A574",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "TRUCK",
+            "rendererId": 15,
+            "label": "Truck",
+            "color": "#E67700",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "MOTORCYCLE",
+            "rendererId": 16,
+            "label": "Motorcycle",
+            "color": "#FF2D55",
+            "modelHint": "motorcycle"
+          },
+          {
+            "id": "VEHICULAR_TRAILER",
+            "rendererId": 17,
+            "label": "Vehicular Trailer",
+            "color": "#D4A574",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "TRUCK_CAB",
+            "rendererId": 18,
+            "label": "Truck Cab",
+            "color": "#CC7A00",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "SCHOOL_BUS",
+            "rendererId": 19,
+            "label": "School Bus",
+            "color": "#FFD600",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "ARTICULATED_BUS",
+            "rendererId": 20,
+            "label": "Articulated Bus",
+            "color": "#FFD600",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "MESSAGE_BOARD_TRAILER",
+            "rendererId": 21,
+            "label": "Msg Board",
+            "color": "#8B9DC3"
+          },
+          {
+            "id": "TRAFFIC_LIGHT_TRAILER",
+            "rendererId": 22,
+            "label": "Traffic Lt Trailer",
+            "color": "#8B9DC3"
+          },
+          {
+            "id": "STROLLER",
+            "rendererId": 23,
+            "label": "Stroller",
+            "color": "#00CED1"
+          },
+          {
+            "id": "WHEELCHAIR",
+            "rendererId": 24,
+            "label": "Wheelchair",
+            "color": "#00CED1"
+          },
+          {
+            "id": "WHEELED_DEVICE",
+            "rendererId": 25,
+            "label": "Wheeled Device",
+            "color": "#00CED1"
+          },
+          {
+            "id": "ANIMAL",
+            "rendererId": 26,
+            "label": "Animal",
+            "color": "#00CED1"
+          },
+          {
+            "id": "DOG",
+            "rendererId": 27,
+            "label": "Dog",
+            "color": "#00CED1"
+          },
+          {
+            "id": "OFFICIAL_SIGNALER",
+            "rendererId": 28,
+            "label": "Official Signal",
+            "color": "#CCFF00",
+            "modelHint": "pedestrian"
+          },
+          {
+            "id": "MOBILE_PEDESTRIAN_CROSSING_SIGN",
+            "rendererId": 29,
+            "label": "Mob Ped Sign",
+            "color": "#8B9DC3",
+            "modelHint": "sign"
+          },
+          {
+            "id": "RAILED_VEHICLE",
+            "rendererId": 30,
+            "label": "Railed Vehicle",
+            "color": "#D4A574",
+            "modelHint": "vehicle"
+          }
+        ]
+      }
+    ],
+    "pointAttributes": [
+      {
+        "id": "x",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "y",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "z",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "intensity",
+        "storage": "float32",
+        "range": [
+          0,
+          255
+        ]
+      }
+    ],
+    "pointLayout": {
+      "interleavedAttributes": [
+        "x",
+        "y",
+        "z",
+        "intensity"
+      ],
+      "colorModes": [
+        "distance",
+        "intensity",
+        "camera"
+      ]
+    }
+  },
+  "pipelines": {
+    "timeline": {
+      "nodes": [
+        {
+          "id": "sortTimeline",
+          "op": "timeline.sort",
+          "version": 1,
+          "inputs": {
+            "lidar": "lidarFrames.rows"
+          },
+          "params": {
+            "timestampFrom": "numeric-path",
+            "timestampUnit": "ns"
+          }
+        }
+      ],
+      "result": "sortTimeline.frames"
+    },
+    "egoPoses": {
+      "nodes": [
+        {
+          "id": "joinEgoPoses",
+          "op": "timeline.join",
+          "version": 1,
+          "inputs": {
+            "timeline": "timeline.result",
+            "poses": "poses.rows"
+          },
+          "params": {
+            "timestampField": "timestamp_ns",
+            "mode": "nearest"
+          }
+        }
+      ],
+      "result": "joinEgoPoses.poses"
+    },
+    "pointClouds": {
+      "nodes": [
+        {
+          "id": "selectPointClouds",
+          "op": "records.select",
+          "version": 1,
+          "inputs": {
+            "rows": "lidarFrames.rows"
+          },
+          "params": {
+            "fields": [
+              "x",
+              "y",
+              "z",
+              "intensity"
+            ],
+            "frameId": "ego"
+          }
+        }
+      ],
+      "result": "selectPointClouds.pointClouds"
+    },
+    "cameraImages": {
+      "nodes": [
+        {
+          "id": "bindCameraImages",
+          "op": "image.bind_camera_frame",
+          "version": 1,
+          "inputs": {
+            "bytes": "cameraFrames.bytes",
+            "intrinsics": "intrinsics.rows",
+            "extrinsics": "extrinsics.rows"
+          },
+          "params": {
+            "timestampFrom": "numeric-path"
+          }
+        }
+      ],
+      "result": "bindCameraImages.images"
+    },
+    "boxes3d": {
+      "nodes": [
+        {
+          "id": "normalizeBoxes3d",
+          "op": "geometry.normalize_boxes3d",
+          "version": 1,
+          "inputs": {
+            "annotations": "annotations.rows"
+          },
+          "params": {
+            "quaternionOrder": "wxyz",
+            "frameId": "ego"
+          }
+        }
+      ],
+      "result": "normalizeBoxes3d.boxes"
+    },
+    "boxes2d": {
+      "nodes": [
+        {
+          "id": "normalizeBoxes2d",
+          "op": "geometry.normalize_boxes2d",
+          "version": 1,
+          "inputs": {
+            "boxes3d": "boxes3d.result",
+            "cameraImages": "cameraImages.result",
+            "intrinsics": "intrinsics.rows",
+            "extrinsics": "extrinsics.rows"
+          },
+          "params": {
+            "source": "projected-box3d",
+            "clipToImage": true
+          }
+        }
+      ],
+      "result": "normalizeBoxes2d.boxes"
+    },
+    "trajectories": {
+      "nodes": [
+        {
+          "id": "deriveTrajectories",
+          "op": "tracks.derive_trajectories",
+          "version": 1,
+          "inputs": {
+            "boxes": "boxes3d.result"
+          },
+          "params": {
+            "objectIdField": "track_uuid"
+          }
+        }
+      ],
+      "result": "deriveTrajectories.trajectories"
+    },
+    "segmentMetadata": {
+      "nodes": [
+        {
+          "id": "selectSegmentMetadata",
+          "op": "records.select",
+          "version": 1,
+          "inputs": {
+            "poses": "poses.rows"
+          },
+          "params": {
+            "fields": [
+              "timestamp_ns"
+            ]
+          }
+        }
+      ],
+      "result": "selectSegmentMetadata.records"
+    }
+  },
+  "outputs": {
+    "timeline": "timeline.result",
+    "egoPoses": "egoPoses.result",
+    "pointClouds": "pointClouds.result",
+    "cameraImages": "cameraImages.result",
+    "boxes3d": "boxes3d.result",
+    "boxes2d": "boxes2d.result",
+    "trajectories": "trajectories.result",
+    "segmentMetadata": "segmentMetadata.result"
+  },
+  "validation": {
+    "sampleFrames": [
+      "first",
+      "middle",
+      "last"
+    ],
+    "assertions": [
+      {
+        "kind": "timestamps-strictly-increasing",
+        "output": "timeline"
+      },
+      {
+        "kind": "finite-ratio",
+        "output": "pointClouds",
+        "minimum": 0.9999
+      },
+      {
+        "kind": "box-dimensions-positive",
+        "output": "boxes3d"
+      },
+      {
+        "kind": "projection-in-frame-ratio",
+        "output": "cameraImages",
+        "minimum": 0.05
+      }
+    ],
+    "humanReview": [
+      "orientation",
+      "handedness",
+      "scale",
+      "ego-motion",
+      "box-alignment",
+      "camera-projection",
+      "temporal-synchronization"
+    ]
+  },
+  "provenance": {
+    "author": "registry",
+    "createdAt": "2026-08-29T00:00:00Z",
+    "summary": "Bundled Phase 2 declarative manifest migration."
+  }
+}

@@ -98,7 +98,10 @@ function topologicalNodes(
 
 function validateScene(recipe: EgoLensAdapterRecipeV1, diagnostics: AdapterDiagnostic[]): void {
   const frameIds = new Set<string>()
-  const rendererIds = new Set<number>()
+  // Point sensors and cameras historically use separate renderer ID spaces.
+  // Radar shares the point-sensor space because both project to lidarSensors.
+  const pointRendererIds = new Set<number>()
+  const cameraRendererIds = new Set<number>()
   for (const frame of recipe.scene.coordinateFrames) {
     if (frameIds.has(frame.id)) diagnostics.push(diagnostic('DUPLICATE_FRAME_ID', `Coordinate frame "${frame.id}" is duplicated.`, '/scene/coordinateFrames'))
     frameIds.add(frame.id)
@@ -115,7 +118,8 @@ function validateScene(recipe: EgoLensAdapterRecipeV1, diagnostics: AdapterDiagn
   const sensorIds = new Set<string>()
   for (const sensor of recipe.scene.sensors) {
     if (sensorIds.has(sensor.id)) diagnostics.push(diagnostic('DUPLICATE_SENSOR_ID', `Sensor "${sensor.id}" is duplicated.`, '/scene/sensors'))
-    if (rendererIds.has(sensor.rendererId)) diagnostics.push(diagnostic('DUPLICATE_RENDERER_ID', `Renderer sensor id ${sensor.rendererId} is duplicated.`, '/scene/sensors'))
+    const rendererIds = sensor.modality === 'camera' ? cameraRendererIds : pointRendererIds
+    if (rendererIds.has(sensor.rendererId)) diagnostics.push(diagnostic('DUPLICATE_RENDERER_ID', `Renderer sensor id ${sensor.rendererId} is duplicated within the ${sensor.modality === 'camera' ? 'camera' : 'point-sensor'} namespace.`, '/scene/sensors'))
     sensorIds.add(sensor.id)
     rendererIds.add(sensor.rendererId)
     if (!frameIds.has(sensor.frameId)) diagnostics.push(diagnostic('SENSOR_FRAME_MISSING', `Sensor "${sensor.id}" references unknown frame "${sensor.frameId}".`, '/scene/sensors'))

@@ -116,7 +116,7 @@ export function normalizedManifestToDatasetManifest(
       id: entry.rendererId,
       label: entry.label,
       color: entry.color,
-      model: entry.modelHint,
+      ...(entry.modelHint ? { model: entry.modelHint } : {}),
     })),
     frameRate: manifest.nominalFrameRate,
     pointStride: manifest.pointLayout.interleavedAttributes.length,
