@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: planned · **Date**: 2026-08-29 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phase 2 contract → spec_007) · **Date**: 2026-08-29 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 

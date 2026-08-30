@@ -35,10 +35,8 @@ import type { SegmentMeta } from '../types/waymo'
 import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
 import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
-import { getManifest, setManifest } from '../adapters/registry'
-import { waymoManifest } from '../adapters/waymo/manifest'
+import { getAdapterById, getManifest, setAdapter } from '../adapters/registry'
 import { loadWaymoMetadata } from '../adapters/waymo/metadata'
-import { nuScenesManifest } from '../adapters/nuscenes/manifest'
 import {
   buildNuScenesDatabase,
   loadNuScenesSceneMetadata,
@@ -53,7 +51,6 @@ import type {
   NuScenesCameraFrameDescriptor,
   NuScenesCameraImageDescriptor,
 } from '../workers/nuScenesCameraWorker'
-import { argoverse2Manifest } from '../adapters/argoverse2/manifest'
 import {
   buildAV2LogDatabase,
   loadAV2LogMetadata,
@@ -331,6 +328,12 @@ export interface SceneState {
 
 /** Number of parallel workers for row group decompression */
 const WORKER_CONCURRENCY = 3
+
+function activateAdapter(id: string): void {
+  const adapter = getAdapterById(id)
+  if (!adapter) throw new DataLoadError(`Dataset adapter "${id}" is not registered.`, 'MANIFEST')
+  setAdapter(adapter)
+}
 
 const internal = {
   parquetFiles: new Map<string, WaymoParquetFile>(),
@@ -691,7 +694,7 @@ async function loadLocalSegments(
     internal.datasetId = 'nuscenes'
     internal.nuScenesSampleFiles = sampleFiles
     internal.nuScenesDiscoveredScenes = null
-    setManifest(nuScenesManifest)
+    activateAdapter('nuscenes')
 
     // Build one-time database from JSON tables
     set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
@@ -727,7 +730,7 @@ async function loadLocalSegments(
     // Initialize AV2 state
     internal.datasetId = 'argoverse2'
     internal.av2SampleFiles = sampleFiles
-    setManifest(argoverse2Manifest)
+    activateAdapter('argoverse2')
 
     // Build log database from Feather files
     set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
@@ -750,7 +753,7 @@ async function loadLocalSegments(
   internal.av2SampleFiles = null
   internal.av2DiscoveredLogs = null
   internal.waymoBaseUrl = null
-  setManifest(waymoManifest)
+  activateAdapter('waymo')
   internal.filesBySegment = segments
   const segmentIds = [...segments.keys()].sort()
   set({ availableSegments: segmentIds })
@@ -1135,9 +1138,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // After reset, UI prefs are already preserved. Just set the segment.
       // If the dataset type changed, visibleSensors IDs may be stale — validate them.
       if (internal.datasetId === 'nuscenes' && (internal.nuScenesDb || internal.nuScenesDiscoveredScenes)) {
-        setManifest(nuScenesManifest)
+        activateAdapter('nuscenes')
       } else if (internal.datasetId === 'argoverse2' && internal.av2Db) {
-        setManifest(argoverse2Manifest)
+        activateAdapter('argoverse2')
       }
 
       // Validate preserved visibleSensors against current manifest's sensor IDs
@@ -1297,7 +1300,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
                 internal.nuScenesDb = null
                 internal.nuScenesSampleFiles = null
                 internal.nuScenesDiscoveredScenes = null
-                setManifest(argoverse2Manifest)
+                activateAdapter('argoverse2')
                 set({ availableSegments: [initialScene], loadProgress: 0.05 })
 
                 void discoverAV2LogsInBackground(baseUrl, set)
@@ -1326,7 +1329,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             internal.nuScenesDb = null
             internal.nuScenesSampleFiles = null
             internal.nuScenesDiscoveredScenes = null
-            setManifest(argoverse2Manifest)
+            activateAdapter('argoverse2')
 
             // Show all log IDs as available segments
             const logIds = logs.map(l => l.logId)
@@ -1368,7 +1371,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           internal.nuScenesDb = null
           internal.nuScenesSampleFiles = null
           internal.nuScenesDiscoveredScenes = null
-          setManifest(argoverse2Manifest)
+          activateAdapter('argoverse2')
 
           // AV2 has a single "scene" per log
           set({ availableSegments: [db.logId], loadProgress: 0.2 })
@@ -1400,7 +1403,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
                 internal.nuScenesDiscoveredScenes = [{ name: initialScene, sceneUrl }]
                 internal.nuScenesDb = db
                 internal.nuScenesSampleFiles = sampleFiles
-                setManifest(nuScenesManifest)
+                activateAdapter('nuscenes')
                 set({ availableSegments: [initialScene], loadProgress: 0.25 })
 
                 void discoverNuScenesScenesInBackground(baseUrl, set)
@@ -1419,7 +1422,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             internal.nuScenesDiscoveredScenes = discovered
             internal.nuScenesDb = null
             internal.nuScenesSampleFiles = null
-            setManifest(nuScenesManifest)
+            activateAdapter('nuscenes')
 
             const sceneNames = discovered.map(s => s.name)
             set({ availableSegments: sceneNames, loadProgress: 0.1 })
@@ -1434,7 +1437,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           // Classic single version directory (v1.0-mini style)
           internal.nuScenesDiscoveredScenes = null
           internal.datasetId = 'nuscenes'
-          setManifest(nuScenesManifest)
+          activateAdapter('nuscenes')
 
           const { db, sampleFiles } = await fetchNuScenesVersionData(baseUrl, set)
           internal.nuScenesDb = db
@@ -1471,7 +1474,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           internal.av2Db = null
           internal.av2SampleFiles = null
           internal.av2DiscoveredLogs = null
-          setManifest(waymoManifest)
+          activateAdapter('waymo')
 
           // Direct segment access: if scene param is provided, skip discovery
           if (initialScene) {

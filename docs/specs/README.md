@@ -21,4 +21,5 @@ convention and keep their names.
 | 002 | [Collections — index.json curation metadata](spec_002_collections.md) | planned |
 | 003 | [Embed view composition — controls, cameras](spec_003_embed_view_composition.md) | shipped |
 | 005 | [Chrome token hygiene and embed theming](spec_005_embed_theming.md) | in-progress |
-| 006 | [Teachable Lens — portable full-scene adapter recipes](spec_006_teachable_lens.md) | planned |
+| 006 | [Teachable Lens — portable full-scene adapter recipes](spec_006_teachable_lens.md) | in-progress (Phase 2 → spec 007) |
+| 007 | [Teachable Lens Phase 2 contract lock](spec_007_teachable_lens_phase2_contract_lock.md) | shipped; normative addendum to spec 006 Phase 2 |

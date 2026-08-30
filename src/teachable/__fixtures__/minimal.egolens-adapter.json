@@ -1,0 +1,84 @@
+{
+  "kind": "egolens-adapter",
+  "schemaVersion": 1,
+  "engine": {
+    "minimumVersion": "1.0.0",
+    "requiredOperators": {
+      "json.records": { "major": 1, "provider": "core" },
+      "timeline.from_records": { "major": 1, "provider": "core" }
+    }
+  },
+  "identity": {
+    "name": "Minimal fixture format",
+    "description": "Contract fixture for the Phase 1 recipe-backed adapter"
+  },
+  "match": {
+    "inventory": {
+      "rootEntries": [
+        { "path": "frames.json", "required": true }
+      ]
+    },
+    "all": [
+      { "kind": "path", "glob": "frames.json", "minCount": 1 }
+    ]
+  },
+  "sources": {
+    "frames": {
+      "reader": "json.records",
+      "files": { "exact": "frames.json" },
+      "columns": ["timestamp_us"],
+      "bindings": { "timestamp": "timestamp_us" }
+    }
+  },
+  "scene": {
+    "formatId": "minimal-fixture",
+    "timeline": { "timestampUnit": "us", "nominalFrameRate": 10 },
+    "coordinateFrames": [
+      {
+        "id": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      }
+    ],
+    "sensors": [],
+    "taxonomies": [],
+    "pointAttributes": [
+      { "id": "x", "storage": "float32", "unit": "m" },
+      { "id": "y", "storage": "float32", "unit": "m" },
+      { "id": "z", "storage": "float32", "unit": "m" }
+    ],
+    "pointLayout": {
+      "interleavedAttributes": ["x", "y", "z"],
+      "colorModes": ["distance"]
+    }
+  },
+  "pipelines": {
+    "timeline": {
+      "nodes": [
+        {
+          "id": "makeTimeline",
+          "op": "timeline.from_records",
+          "version": 1,
+          "inputs": { "rows": "frames.rows" },
+          "params": { "timestampField": "timestamp_us" }
+        }
+      ],
+      "result": "makeTimeline.frames"
+    }
+  },
+  "outputs": {
+    "timeline": "timeline.result"
+  },
+  "validation": {
+    "sampleFrames": ["first", "middle", "last"],
+    "assertions": [
+      { "kind": "timestamps-strictly-increasing", "output": "timeline" }
+    ],
+    "humanReview": ["orientation", "scale"]
+  }
+}

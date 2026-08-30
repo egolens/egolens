@@ -11,7 +11,15 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { getManifest, setManifest, detectDataset, getAllKnownComponents } from '../registry'
+import {
+  getAdapter,
+  getAdapterById,
+  getManifest,
+  setManifest,
+  detectDataset,
+  detectDatasetAdapter,
+  getAllKnownComponents,
+} from '../registry'
 import { waymoManifest } from '../waymo/manifest'
 import { nuScenesManifest } from '../nuscenes/manifest'
 import type { DatasetManifest } from '../../types/dataset'
@@ -55,6 +63,12 @@ describe('adapter registry', () => {
     expect(getManifest().id).toBe('waymo')
   })
 
+  it('exposes legacy datasets through the formal adapter strategy boundary', () => {
+    expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
+    expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'legacy', adapterId: 'nuscenes' })
+    expect(getAdapterById('missing')).toBeNull()
+  })
+
   it('setManifest() swaps the active manifest', () => {
     const mock = makeMockManifest()
     setManifest(mock)
@@ -82,6 +96,11 @@ describe('detectDataset', () => {
   it('detects Waymo from required components', () => {
     const result = detectDataset(['vehicle_pose', 'lidar', 'camera_image', 'stats'])
     expect(result).toBe(waymoManifest)
+  })
+
+  it('returns the matching strategy as well as the compatibility manifest', () => {
+    const adapter = detectDatasetAdapter(['vehicle_pose', 'lidar', 'camera_image'])
+    expect(adapter).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
   })
 
   it('detects Waymo even with extra unknown dirs', () => {

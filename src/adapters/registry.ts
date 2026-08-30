@@ -3,7 +3,8 @@
  *
  * Maintains a list of known dataset manifests and provides:
  * - `detectDataset()`: inspects directory entry names to identify the dataset
- * - `getManifest()` / `setManifest()`: active manifest singleton
+ * - `getAdapter()` / `setAdapter()`: active strategy
+ * - `getManifest()` / `setManifest()`: compatibility accessors during migration
  * - `getAllKnownComponents()`: union of all manifests' knownComponents (for folder scanning)
  */
 
@@ -11,32 +12,49 @@ import type { DatasetManifest } from '../types/dataset'
 import { waymoManifest } from './waymo/manifest'
 import { nuScenesManifest } from './nuscenes/manifest'
 import { argoverse2Manifest } from './argoverse2/manifest'
+import { LegacyDatasetAdapter } from './legacy'
+import type { DatasetAdapter } from './types'
 
 // ---------------------------------------------------------------------------
 // Registry — all known dataset manifests
 // ---------------------------------------------------------------------------
 
-/** Ordered list of all registered manifests. First match wins in detectDataset(). */
-const manifests: DatasetManifest[] = [
-  waymoManifest,
-  nuScenesManifest,
-  argoverse2Manifest,
+/** Ordered list of adapter strategies. First match wins during detection. */
+const adapters: DatasetAdapter[] = [
+  new LegacyDatasetAdapter(waymoManifest),
+  new LegacyDatasetAdapter(nuScenesManifest),
+  new LegacyDatasetAdapter(argoverse2Manifest),
 ]
 
 // ---------------------------------------------------------------------------
 // Active manifest singleton
 // ---------------------------------------------------------------------------
 
-let activeManifest: DatasetManifest = waymoManifest
+let activeAdapter: DatasetAdapter = adapters[0]
+
+/** Get the currently active adapter strategy. */
+export function getAdapter(): DatasetAdapter {
+  return activeAdapter
+}
+
+/** Switch the active adapter strategy. */
+export function setAdapter(adapter: DatasetAdapter): void {
+  activeAdapter = adapter
+}
+
+/** Resolve a registered adapter by stable dataset id. */
+export function getAdapterById(id: string): DatasetAdapter | null {
+  return adapters.find((adapter) => adapter.id === id) ?? null
+}
 
 /** Get the currently active dataset manifest. */
 export function getManifest(): DatasetManifest {
-  return activeManifest
+  return activeAdapter.manifest
 }
 
 /** Switch the active manifest (called during dataset load). */
 export function setManifest(m: DatasetManifest): void {
-  activeManifest = m
+  activeAdapter = getAdapterById(m.id) ?? new LegacyDatasetAdapter(m)
 }
 
 // ---------------------------------------------------------------------------
@@ -54,12 +72,13 @@ export function setManifest(m: DatasetManifest): void {
  *                     (e.g. ['vehicle_pose', 'lidar', 'camera_image', 'stats'])
  */
 export function detectDataset(entryNames: string[]): DatasetManifest | null {
-  const entrySet = new Set(entryNames)
-  for (const manifest of manifests) {
-    const allRequired = manifest.requiredComponents.every((c) => entrySet.has(c))
-    if (allRequired) return manifest
-  }
-  return null
+  return detectDatasetAdapter(entryNames)?.manifest ?? null
+}
+
+/** Detect the adapter strategy without reading file bodies. */
+export function detectDatasetAdapter(entryNames: readonly string[]): DatasetAdapter | null {
+  const evidence = { entryNames }
+  return adapters.find((adapter) => adapter.matches(evidence)) ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -77,8 +96,8 @@ let _allKnownComponents: Set<string> | null = null
 export function getAllKnownComponents(): Set<string> {
   if (!_allKnownComponents) {
     _allKnownComponents = new Set<string>()
-    for (const m of manifests) {
-      for (const c of m.knownComponents) {
+    for (const adapter of adapters) {
+      for (const c of adapter.manifest.knownComponents) {
         _allKnownComponents.add(c)
       }
     }

@@ -1,0 +1,519 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://egolens.org/schemas/egolens-adapter-v1.schema.json",
+  "title": "EgoLensAdapterRecipeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "schemaVersion", "engine", "identity", "match", "sources", "scene", "pipelines", "outputs", "validation"],
+  "properties": {
+    "kind": { "const": "egolens-adapter" },
+    "schemaVersion": { "const": 1 },
+    "engine": { "$ref": "#/$defs/engine" },
+    "identity": { "$ref": "#/$defs/identity" },
+    "match": { "$ref": "#/$defs/match" },
+    "sources": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/source" }
+    },
+    "scene": { "$ref": "#/$defs/scene" },
+    "pipelines": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/pipeline" }
+    },
+    "outputs": { "$ref": "#/$defs/outputs" },
+    "validation": { "$ref": "#/$defs/validation" },
+    "hashes": { "$ref": "#/$defs/hashes" },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
+    "operatorName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?![a-zA-Z][a-zA-Z0-9+.-]*://).+$"
+    },
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "jsonValue": {
+      "anyOf": [
+        { "type": ["string", "number", "boolean", "null"] },
+        { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/jsonValue" } },
+        { "type": "object", "maxProperties": 128, "additionalProperties": { "$ref": "#/$defs/jsonValue" } }
+      ]
+    },
+    "jsonObject": {
+      "type": "object",
+      "maxProperties": 128,
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "operatorDependency": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["major", "provider"],
+          "properties": {
+            "major": { "type": "integer", "minimum": 1 },
+            "provider": { "const": "core" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["major", "provider", "package"],
+          "properties": {
+            "major": { "type": "integer", "minimum": 1 },
+            "provider": { "const": "extension" },
+            "package": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "version", "integrity"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" },
+                "integrity": { "type": "string", "minLength": 16, "maxLength": 160 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumVersion", "requiredOperators"],
+      "properties": {
+        "minimumVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" },
+        "requiredOperators": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": { "$ref": "#/$defs/operatorName" },
+          "additionalProperties": { "$ref": "#/$defs/operatorDependency" }
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "pathMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "glob"],
+      "properties": {
+        "kind": { "const": "path" },
+        "glob": { "$ref": "#/$defs/relativePath" },
+        "minCount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "maxCount": { "type": "integer", "minimum": 0, "maximum": 100000 }
+      }
+    },
+    "extensionMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "extension"],
+      "properties": {
+        "kind": { "const": "extension" },
+        "extension": { "type": "string", "pattern": "^\\.[A-Za-z0-9]{1,16}$" },
+        "minCount": { "type": "integer", "minimum": 0, "maximum": 100000 }
+      }
+    },
+    "sizeMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "glob"],
+      "properties": {
+        "kind": { "const": "size" },
+        "glob": { "$ref": "#/$defs/relativePath" },
+        "minimum": { "type": "integer", "minimum": 0 },
+        "maximum": { "type": "integer", "minimum": 0 },
+        "divisibleBy": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "magicMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "glob", "hex"],
+      "properties": {
+        "kind": { "const": "magic-bytes" },
+        "glob": { "$ref": "#/$defs/relativePath" },
+        "offset": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "hex": { "type": "string", "pattern": "^(?:[0-9A-Fa-f]{2}){1,64}$" }
+      }
+    },
+    "jsonKeysMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "requiredKeys"],
+      "properties": {
+        "kind": { "const": "json-keys" },
+        "source": { "$ref": "#/$defs/id" },
+        "requiredKeys": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      }
+    },
+    "tableSchemaMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "requiredFields"],
+      "properties": {
+        "kind": { "const": "table-schema" },
+        "source": { "$ref": "#/$defs/id" },
+        "requiredFields": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      }
+    },
+    "matchRule": {
+      "oneOf": [
+        { "$ref": "#/$defs/pathMatch" },
+        { "$ref": "#/$defs/extensionMatch" },
+        { "$ref": "#/$defs/sizeMatch" },
+        { "$ref": "#/$defs/magicMatch" },
+        { "$ref": "#/$defs/jsonKeysMatch" },
+        { "$ref": "#/$defs/tableSchemaMatch" }
+      ]
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventory"],
+      "properties": {
+        "inventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rootEntries"],
+          "properties": {
+            "rootEntries": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "required"],
+                "properties": {
+                  "path": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+                  "required": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "all": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/matchRule" } },
+        "any": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/matchRule" } },
+        "none": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/matchRule" } }
+      }
+    },
+    "fileSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exact": { "$ref": "#/$defs/relativePath" },
+        "glob": { "$ref": "#/$defs/relativePath" },
+        "order": { "enum": ["lexical-path", "numeric-path", "none"] },
+        "minCount": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "maxCount": { "type": "integer", "minimum": 0, "maximum": 100000 }
+      },
+      "oneOf": [
+        {
+          "required": ["exact"],
+          "properties": { "exact": {} },
+          "not": { "required": ["glob"], "properties": { "glob": {} } }
+        },
+        {
+          "required": ["glob"],
+          "properties": { "glob": {} },
+          "not": { "required": ["exact"], "properties": { "exact": {} } }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reader", "files"],
+      "properties": {
+        "reader": { "$ref": "#/$defs/operatorName" },
+        "files": { "$ref": "#/$defs/fileSelector" },
+        "columns": { "type": "array", "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "timestamp": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "sensorId": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "rangeImageShape": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "rangeImageValues": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "egoPose": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "params": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "axisDirection": { "enum": ["forward", "backward", "left", "right", "up", "down"] },
+    "coordinateFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "convention"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "parent": { "$ref": "#/$defs/id" },
+        "convention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "z", "handedness", "lengthUnit"],
+          "properties": {
+            "x": { "$ref": "#/$defs/axisDirection" },
+            "y": { "$ref": "#/$defs/axisDirection" },
+            "z": { "$ref": "#/$defs/axisDirection" },
+            "handedness": { "enum": ["right", "left"] },
+            "lengthUnit": { "enum": ["m", "cm", "mm"] }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "rendererId", "label", "modality", "frameId", "color"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "rendererId": { "type": "integer", "minimum": 0, "maximum": 32767 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "modality": { "enum": ["lidar", "radar", "camera"] },
+        "frameId": { "$ref": "#/$defs/id" },
+        "color": { "$ref": "#/$defs/color" },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "model", "view"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "height": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "model": { "enum": ["pinhole", "fisheye"] },
+            "view": { "enum": ["front", "front-left", "front-right", "side-left", "side-right", "rear", "rear-left", "rear-right"] },
+            "povLabel": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "aliases": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 80 } }
+          }
+        }
+      }
+    },
+    "taxonomyClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "rendererId", "label", "color"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "rendererId": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "color": { "$ref": "#/$defs/color" },
+        "modelHint": { "enum": ["vehicle", "pedestrian", "cyclist", "motorcycle", "bicycle", "sign", "cone", "barrier", "box"] }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "classes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "role": { "enum": ["objects", "lidar-semantics", "camera-semantics"] },
+        "classes": { "type": "array", "maxItems": 65536, "items": { "$ref": "#/$defs/taxonomyClass" } },
+        "palette": {
+          "type": "array",
+          "maxItems": 65536,
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "pointAttribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "storage"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "storage": { "enum": ["float32", "uint8", "uint16", "uint32", "int16"] },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "range": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formatId", "timeline", "coordinateFrames", "sensors", "taxonomies", "pointAttributes", "pointLayout"],
+      "properties": {
+        "formatId": { "type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[a-z][a-z0-9-]*$" },
+        "timeline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["timestampUnit", "nominalFrameRate"],
+          "properties": {
+            "timestampUnit": { "enum": ["ns", "us", "ms", "s"] },
+            "nominalFrameRate": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 }
+          }
+        },
+        "coordinateFrames": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/coordinateFrame" } },
+        "sensors": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/sensor" } },
+        "taxonomies": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/taxonomy" } },
+        "pointAttributes": { "type": "array", "minItems": 3, "maxItems": 64, "items": { "$ref": "#/$defs/pointAttribute" } },
+        "pointLayout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["interleavedAttributes", "colorModes"],
+          "properties": {
+            "interleavedAttributes": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/id" }
+            },
+            "colorModes": {
+              "type": "array",
+              "maxItems": 7,
+              "uniqueItems": true,
+              "items": { "enum": ["distance", "intensity", "range", "elongation", "segment", "panoptic", "camera"] }
+            }
+          }
+        }
+      }
+    },
+    "pipelineNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "op", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "op": { "$ref": "#/$defs/operatorName" },
+        "version": { "type": "integer", "minimum": 1 },
+        "inputs": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "$ref": "#/$defs/id" },
+          "additionalProperties": { "type": "string", "minLength": 3, "maxLength": 256, "pattern": "^[A-Za-z][A-Za-z0-9_-]*(?:\\.[A-Za-z][A-Za-z0-9_-]*)+$" }
+        },
+        "params": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes", "result"],
+      "properties": {
+        "nodes": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/pipelineNode" } },
+        "result": { "type": "string", "minLength": 3, "maxLength": 256, "pattern": "^[A-Za-z][A-Za-z0-9_-]*(?:\\.[A-Za-z][A-Za-z0-9_-]*)+$" }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeline"],
+      "properties": {
+        "timeline": { "$ref": "#/$defs/outputBinding" },
+        "egoPoses": { "$ref": "#/$defs/outputBinding" },
+        "pointClouds": { "$ref": "#/$defs/outputBinding" },
+        "radarPointClouds": { "$ref": "#/$defs/outputBinding" },
+        "cameraImages": { "$ref": "#/$defs/outputBinding" },
+        "boxes3d": { "$ref": "#/$defs/outputBinding" },
+        "boxes2d": { "$ref": "#/$defs/outputBinding" },
+        "boxAssociations": { "$ref": "#/$defs/outputBinding" },
+        "trajectories": { "$ref": "#/$defs/outputBinding" },
+        "lidarSegmentation": { "$ref": "#/$defs/outputBinding" },
+        "cameraSegmentation": { "$ref": "#/$defs/outputBinding" },
+        "keypoints3d": { "$ref": "#/$defs/outputBinding" },
+        "keypoints2d": { "$ref": "#/$defs/outputBinding" },
+        "segmentMetadata": { "$ref": "#/$defs/outputBinding" }
+      }
+    },
+    "outputBinding": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*(?:\\.[A-Za-z][A-Za-z0-9_-]*)+$"
+    },
+    "validationAssertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "output"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[a-z][a-z0-9-]*$" },
+        "output": { "enum": ["timeline", "egoPoses", "pointClouds", "radarPointClouds", "cameraImages", "boxes3d", "boxes2d", "boxAssociations", "trajectories", "lidarSegmentation", "cameraSegmentation", "keypoints3d", "keypoints2d", "segmentMetadata"] },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "value": { "type": "number" },
+        "params": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sampleFrames", "assertions", "humanReview"],
+      "properties": {
+        "sampleFrames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "enum": ["first", "middle", "last"] }] }
+        },
+        "assertions": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/validationAssertion" } },
+        "humanReview": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 96 } }
+      }
+    },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifactHash": { "$ref": "#/$defs/hash" },
+        "recipeHash": { "$ref": "#/$defs/hash" },
+        "formatFingerprint": { "$ref": "#/$defs/hash" },
+        "operatorSetFingerprint": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "hash": { "type": "string", "pattern": "^(?:sha256:)?[0-9a-f]{64}$" },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "createdAt"],
+      "properties": {
+        "author": { "enum": ["codex", "imported", "registry"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "parentRecipeHash": { "$ref": "#/$defs/hash" },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "assumptions": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 500 } },
+        "datasetFingerprint": { "$ref": "#/$defs/hash" },
+        "validatorVersion": { "type": "string", "maxLength": 64 },
+        "validationSummary": { "$ref": "#/$defs/jsonObject" },
+        "humanReviewReceipt": { "$ref": "#/$defs/jsonObject" }
+      }
+    }
+  }
+}
