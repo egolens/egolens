@@ -90,8 +90,10 @@ for live document shape, worker/object/image/renderer ownership, and bounded
 application caches. The forced snapshot is additionally required to prove that
 CDP's all-document node/listener counters contain no reachable detached viewer
 tree. During a heterogeneous cross-dataset soak, paired forced-GC diagnostics
-also provide the retained-memory series, grouped by revisited dataset; never
-fit differently sized dataset heaps into one slope. Forced diagnostics must not
+also provide the retained-memory series, grouped by revisited dataset. The
+runner must collect the page and every live worker target before sampling;
+page-only collection leaves worker V8 garbage in the series. Never fit
+differently sized dataset heaps into one slope. Forced diagnostics must not
 replace the natural checkpoint or rescue a failure in any natural ownership
 invariant. Steady traced FPS is computed only between the initial scene's ready
 mark and its first replacement/disposal mark, excluding later loading periods.

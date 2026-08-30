@@ -542,6 +542,15 @@ async function runScenario(client, browserVersion, runIndex) {
     }
   }
 
+  const collectGarbageAcrossTargets = async () => {
+    const sessions = [pageSession, ...[...workers.values()].map((worker) => worker.sessionId)]
+    const results = await Promise.allSettled(sessions.map((sessionId) =>
+      client.send('HeapProfiler.collectGarbage', {}, sessionId)))
+    if (results.some((result) => result.status === 'rejected')) {
+      throw new Error('Forced-GC diagnostic could not collect every live page/worker target.')
+    }
+  }
+
   const snapshots = {
     beforeLoad: await capture('before-load'),
     soakCheckpoints: [],
@@ -619,7 +628,7 @@ async function runScenario(client, browserVersion, runIndex) {
     // behavior. This second diagnostic removes allocator/GC scheduling noise
     // so retained-growth slopes compare the same dataset across later cycles.
     try {
-      await client.send('HeapProfiler.collectGarbage', {}, pageSession)
+      await collectGarbageAcrossTargets()
       snapshots.soakForcedGcCheckpoints.push(await capture(`${checkpointLabel}-forced-gc-diagnostic`))
     } catch {
       snapshots.soakForcedGcCheckpoints.push(null)
@@ -637,7 +646,7 @@ async function runScenario(client, browserVersion, runIndex) {
   // acceptance input. This distinguishes reachable leaks from detached trees
   // that V8 can reclaim but has not collected under low memory pressure.
   try {
-    await client.send('HeapProfiler.collectGarbage', {}, pageSession)
+    await collectGarbageAcrossTargets()
     snapshots.afterDisposeForcedGcDiagnostic = await capture('after-dispose-forced-gc-diagnostic')
   } catch { /* HeapProfiler is not available in every Chromium build. */ }
   let heapSnapshot = null
