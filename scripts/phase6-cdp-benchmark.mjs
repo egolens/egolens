@@ -39,6 +39,16 @@ const settleMs = numberArg(options, 'settle-ms', 3_000)
 const timeoutMs = numberArg(options, 'timeout-ms', 180_000)
 const playbackLoops = numberArg(options, 'playback-loops', 2)
 const nominalFps = numberArg(options, 'fps', 10)
+const traceEventLimit = numberArg(options, 'trace-event-limit', 100_000)
+if (!Number.isSafeInteger(traceEventLimit) || traceEventLimit <= 0) {
+  throw new Error('--trace-event-limit must be a positive integer')
+}
+const heapSnapshotOutput = options['heap-snapshot']
+  ? path.resolve(String(options['heap-snapshot']))
+  : null
+if (heapSnapshotOutput && warmupCount + runCount !== 1) {
+  throw new Error('--heap-snapshot is diagnostic-only and requires exactly one total run')
+}
 const viewport = String(options.viewport ?? '1440x900').split('x').map(Number)
 const switchScenarios = options['switch-scenarios']
   ? JSON.parse(await readFile(path.resolve(String(options['switch-scenarios'])), 'utf8'))
@@ -70,12 +80,22 @@ class CdpClient {
         const pending = this.pending.get(message.id)
         if (!pending) return
         this.pending.delete(message.id)
+        clearTimeout(pending.timeout)
         if (message.error) pending.reject(new Error(`${pending.method}: ${message.error.message}`))
         else pending.resolve(message.result ?? {})
         return
       }
       for (const listener of this.listeners.get(message.method) ?? []) listener(message)
     })
+    const rejectPending = () => {
+      for (const [id, pending] of this.pending) {
+        clearTimeout(pending.timeout)
+        pending.reject(new Error(`${pending.method}: CDP connection closed`))
+        this.pending.delete(id)
+      }
+    }
+    socket.addEventListener('close', rejectPending)
+    socket.addEventListener('error', rejectPending)
   }
 
   static async connect(url) {
@@ -87,10 +107,14 @@ class CdpClient {
     return new CdpClient(socket)
   }
 
-  send(method, params = {}, sessionId) {
+  send(method, params = {}, sessionId, commandTimeoutMs = 60_000) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, method })
+      const timeout = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`${method}: timed out after ${commandTimeoutMs}ms`))
+      }, commandTimeoutMs)
+      this.pending.set(id, { resolve, reject, method, timeout })
       this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
     })
   }
@@ -240,6 +264,9 @@ async function runScenario(client, browserVersion, runIndex) {
   const workerEvents = []
   const network = new Map()
   const trace = []
+  let traceEventsSeen = 0
+  let traceEventsDropped = 0
+  let traceCompleteObserved = false
   let traceCompleteResolve
   const traceComplete = new Promise((resolve) => { traceCompleteResolve = resolve })
 
@@ -286,8 +313,21 @@ async function runScenario(client, browserVersion, runIndex) {
     const entry = network.get(requestKey(message))
     if (entry) entry.encodedDataLength = message.params.encodedDataLength
   })
-  const offTrace = client.on('Tracing.dataCollected', (message) => trace.push(...message.params.value))
-  const offTraceComplete = client.on('Tracing.tracingComplete', () => traceCompleteResolve())
+  const offTrace = client.on('Tracing.dataCollected', (message) => {
+    traceEventsSeen += message.params.value.length
+    for (const event of message.params.value) {
+      const keep = event.name === 'DrawFrame'
+        || (event.name === 'RunTask' && Number(event.dur) >= 50_000)
+        || String(event.cat ?? '').includes('blink.user_timing')
+      if (!keep) continue
+      if (trace.length < traceEventLimit) trace.push(event)
+      else traceEventsDropped++
+    }
+  })
+  const offTraceComplete = client.on('Tracing.tracingComplete', () => {
+    traceCompleteObserved = true
+    traceCompleteResolve()
+  })
 
   await Promise.all([
     client.send('Page.enable', {}, pageSession),
@@ -328,6 +368,19 @@ async function runScenario(client, browserVersion, runIndex) {
     try {
       app = await evaluate(client, pageSession, 'globalThis.__EGOLENS_PERF__?.snapshot() ?? null')
     } catch { /* The document may be between navigations. */ }
+    let documentShape = null
+    try {
+      documentShape = await evaluate(client, pageSession, `({
+        url: location.href,
+        elements: document.querySelectorAll('*').length,
+        bodyChildren: document.body?.children.length ?? 0,
+        canvases: document.querySelectorAll('canvas').length,
+        images: document.querySelectorAll('img').length,
+        buttons: document.querySelectorAll('button').length,
+        inputs: document.querySelectorAll('input').length,
+        bodyTextLength: document.body?.innerText.length ?? 0,
+      })`)
+    } catch { /* The document may be between navigations. */ }
     return {
       label,
       wallTime: new Date().toISOString(),
@@ -336,6 +389,7 @@ async function runScenario(client, browserVersion, runIndex) {
       dom,
       performanceMetrics: performanceMetrics.metrics,
       app,
+      documentShape,
       liveWorkerTargets: [...workers.values()].map(({ sessionId: _sessionId, ...worker }) => worker),
     }
   }
@@ -349,6 +403,10 @@ async function runScenario(client, browserVersion, runIndex) {
   }, pageSession)
   await client.send('Page.navigate', { url: withPerf(options.url) }, pageSession)
   await waitFor(client, pageSession, 'Boolean(globalThis.__EGOLENS_PERF__)')
+  // The pre-scene comparison point must represent a committed, naturally
+  // settled landing view. Sampling immediately after the hook appears races
+  // React effects and produces false DOM/listener growth after disposal.
+  await delay(settleMs)
   snapshots.beforeSceneLoad = await capture('before-scene-load')
   await evaluate(client, pageSession, `window.dispatchEvent(new Event('egolens:benchmark-start')); true`)
   await waitFor(client, pageSession, `Boolean(globalThis.__EGOLENS_PERF__?.snapshot().marks.some((mark) => mark.name.startsWith('egolens:dataset-ready:')))`)
@@ -404,15 +462,39 @@ async function runScenario(client, browserVersion, runIndex) {
 
   await delay(settleMs)
   snapshots.afterSoak = await capture('after-soak-settle')
-  await evaluate(client, pageSession, `history.pushState({}, '', location.pathname + '?perf=1'); window.dispatchEvent(new PopStateEvent('popstate')); true`)
+  await evaluate(client, pageSession, `window.dispatchEvent(new Event('egolens:benchmark-dispose')); true`)
   await waitFor(client, pageSession, 'globalThis.__EGOLENS_PERF__?.snapshot().scene === null')
   snapshots.afterDispose = await capture('immediately-after-dispose')
   await delay(settleMs)
   snapshots.afterDisposeSettle = await capture('after-dispose-settle')
+  // Diagnostic only: the natural post-disposal snapshot above remains the
+  // acceptance input. This distinguishes reachable leaks from detached trees
+  // that V8 can reclaim but has not collected under low memory pressure.
+  try {
+    await client.send('HeapProfiler.collectGarbage', {}, pageSession)
+    snapshots.afterDisposeForcedGcDiagnostic = await capture('after-dispose-forced-gc-diagnostic')
+  } catch { /* HeapProfiler is not available in every Chromium build. */ }
+  let heapSnapshot = null
+  if (heapSnapshotOutput) {
+    const chunks = []
+    const offHeapChunk = client.on('HeapProfiler.addHeapSnapshotChunk', (message) => {
+      if (message.sessionId === pageSession) chunks.push(message.params.chunk)
+    })
+    try {
+      await client.send('HeapProfiler.enable', {}, pageSession)
+      await client.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false }, pageSession, timeoutMs)
+      await writeFile(heapSnapshotOutput, chunks.join(''))
+      heapSnapshot = heapSnapshotOutput
+    } finally {
+      offHeapChunk()
+    }
+  }
 
   await client.send('Tracing.end', {}, pageSession)
   await Promise.race([traceComplete, delay(30_000)])
-  await client.send('Target.closeTarget', { targetId: target.targetId })
+  // Some Chrome builds detach the page before acknowledging closeTarget.
+  // Cleanup is best-effort after all required evidence has been captured.
+  await client.send('Target.closeTarget', { targetId: target.targetId }, undefined, 10_000).catch(() => {})
   offAttached(); offDetached(); offRequest(); offResponse(); offLoaded(); offTrace(); offTraceComplete()
 
   return {
@@ -422,6 +504,15 @@ async function runScenario(client, browserVersion, runIndex) {
     workerEvents,
     network: [...network.values()],
     trace,
+    heapSnapshot,
+    traceCollection: {
+      eventsSeen: traceEventsSeen,
+      retainedEvents: trace.length,
+      droppedRelevantEvents: traceEventsDropped,
+      limit: traceEventLimit,
+      truncated: traceEventsDropped > 0,
+      complete: traceCompleteObserved,
+    },
   }
 }
 
@@ -465,6 +556,7 @@ try {
       switchScenarioDatasets: [...new Set(switchScenarios.map((scenario) => scenario.dataset))],
       playbackLoops,
       settleMs,
+      traceEventLimit,
       viewport: { width: viewport[0], height: viewport[1] },
     },
     environment: {

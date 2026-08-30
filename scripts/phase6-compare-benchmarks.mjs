@@ -59,7 +59,7 @@ function check(name, pass, evidence) {
 
 const comparableScenarioFields = [
   'dataset', 'url', 'seeks', 'sceneSwitches', 'crossDatasetSwitches',
-  'switchScenarioDatasets', 'playbackLoops', 'settleMs', 'viewport',
+  'switchScenarioDatasets', 'playbackLoops', 'settleMs', 'traceEventLimit', 'viewport',
 ]
 const baselineScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, baseline.scenario?.[key]]))
 const candidateScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, candidate.scenario?.[key]]))
@@ -110,6 +110,13 @@ check('required soak workload is present',
 check('CDP browser identity is present',
   Boolean(baselineBrowser?.product && baselineBrowser?.revision && candidateBrowser?.product && candidateBrowser?.revision),
   { baseline: baselineBrowser, candidate: candidateBrowser })
+check('bounded traces are complete',
+  [...(baseline.warmups ?? []), ...(baseline.samples ?? []), ...(candidate.warmups ?? []), ...(candidate.samples ?? [])]
+    .every((run) => run.traceCollection?.complete === true && run.traceCollection?.truncated === false),
+  {
+    baseline: [...(baseline.warmups ?? []), ...(baseline.samples ?? [])].map((run) => run.traceCollection),
+    candidate: [...(candidate.warmups ?? []), ...(candidate.samples ?? [])].map((run) => run.traceCollection),
+  })
 
 const baselineFirst = distValue(baseline, 'firstUsableFrameMs')
 const candidateFirst = distValue(candidate, 'firstUsableFrameMs')
@@ -169,14 +176,27 @@ for (const [runIndex, run] of candidate.samples.entries()) {
   check(`run ${runIndex + 1} renderer returns to pre-scene counts`,
     JSON.stringify(app?.renderer) === JSON.stringify(beforeRenderer),
     { before: beforeRenderer, after: app?.renderer })
+  const beforeDocument = run.snapshots.beforeSceneLoad.documentShape
+  const afterDocument = disposed.documentShape
+  const structuralDocumentShape = (shape) => {
+    if (!shape) return null
+    const { url: _url, ...structure } = shape
+    return structure
+  }
+  check(`run ${runIndex + 1} live document returns to pre-scene shape`,
+    beforeDocument !== null && afterDocument !== null
+      && JSON.stringify(structuralDocumentShape(afterDocument)) === JSON.stringify(structuralDocumentShape(beforeDocument)),
+    { before: beforeDocument, after: afterDocument })
   const beforeDom = run.snapshots.beforeSceneLoad.dom
-  const afterDom = disposed.dom
-  check(`run ${runIndex + 1} DOM/listeners return to pre-scene counts`,
-    beforeDom !== null && afterDom !== null
-      && afterDom.documents <= beforeDom.documents
-      && afterDom.nodes <= beforeDom.nodes
-      && afterDom.jsEventListeners <= beforeDom.jsEventListeners,
-    { before: beforeDom, after: afterDom })
+  const naturalDom = disposed.dom
+  const forcedGc = run.snapshots.afterDisposeForcedGcDiagnostic
+  const forcedDom = forcedGc?.dom
+  check(`run ${runIndex + 1} forced-GC diagnostic has no reachable detached DOM/listeners`,
+    beforeDom !== null && forcedDom !== null && forcedDom !== undefined
+      && forcedDom.documents <= beforeDom.documents
+      && forcedDom.nodes <= beforeDom.nodes
+      && forcedDom.jsEventListeners <= beforeDom.jsEventListeners,
+    { before: beforeDom, natural: naturalDom, forcedGc: forcedDom })
 
   const checkpoints = run.snapshots.soakCheckpoints ?? []
   if (checkpoints.length > 1) {

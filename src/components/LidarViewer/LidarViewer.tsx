@@ -30,6 +30,7 @@ import { colors, fonts, radius, alpha, sceneColors } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
 import { trackKeyboardShortcut } from '../../utils/analytics'
+import { disposeThreeRendererResources } from '../../utils/threeRendererDisposal'
 import {
   currentPerformanceSceneGeneration,
   markRenderedFrame,
@@ -60,6 +61,14 @@ const _bevQStart = new THREE.Quaternion()
 const _bevQEnd = new THREE.Quaternion()
 const _bevQCurrent = new THREE.Quaternion()
 const _bevRefDir = new THREE.Vector3(0, 0, 1)  // reference direction for quaternion mapping
+// Three.js gives every Sprite (including Drei's GizmoViewport HUD sprites) the
+// same module-level geometry. The HUD lives in a portal scene, so ordinary
+// scene traversal cannot discover this WebGL cache key during teardown.
+const SHARED_SPRITE_GEOMETRY = (() => {
+  const sprite = new THREE.Sprite()
+  sprite.material.dispose()
+  return sprite.geometry
+})()
 
 /** Sensor info — read dynamically inside components via getManifest().lidarSensors */
 
@@ -748,8 +757,32 @@ function RendererPerformanceReporter() {
   const { gl, scene } = useThree()
   const frame = useRef(0)
   const lastPresented = useRef('')
+  const ownedGeometries = useRef(new Set<THREE.BufferGeometry>([SHARED_SPRITE_GEOMETRY]))
+  const ownedMaterials = useRef(new Set<THREE.Material>())
 
   useFrame(() => {
+    const sampleRenderer = ++frame.current % 30 === 0
+    let currentMaterialCount = 0
+    if (sampleRenderer) {
+      const currentMaterialIds = new Set<string>()
+      scene.traverse((object) => {
+        const renderable = object as THREE.Object3D & {
+          geometry?: THREE.BufferGeometry
+          material?: THREE.Material | THREE.Material[]
+        }
+        if (renderable.geometry) ownedGeometries.current.add(renderable.geometry)
+        if (Array.isArray(renderable.material)) {
+          for (const material of renderable.material) {
+            ownedMaterials.current.add(material)
+            currentMaterialIds.add(material.uuid)
+          }
+        } else if (renderable.material) {
+          ownedMaterials.current.add(renderable.material)
+          currentMaterialIds.add(renderable.material.uuid)
+        }
+      })
+      currentMaterialCount = currentMaterialIds.size
+    }
     if (!window.__EGOLENS_PERF__) return
     const sceneGeneration = currentPerformanceSceneGeneration()
     const state = useSceneStore.getState()
@@ -760,32 +793,32 @@ function RendererPerformanceReporter() {
         markRenderedFrame(sceneGeneration, state.currentFrameIndex)
       }
     }
-    if (++frame.current % 30 !== 0) return
-    const materialIds = new Set<string>()
-    scene.traverse((object) => {
-      const material = (object as THREE.Object3D & {
-        material?: THREE.Material | THREE.Material[]
-      }).material
-      if (Array.isArray(material)) {
-        for (const entry of material) materialIds.add(entry.uuid)
-      } else if (material) {
-        materialIds.add(material.uuid)
-      }
-    })
+    if (!sampleRenderer) return
     updateRendererPerformanceInfo({
       textures: gl.info.memory.textures,
       geometries: gl.info.memory.geometries,
       programs: gl.info.programs?.length ?? 0,
-      materials: materialIds.size,
+      materials: currentMaterialCount,
     })
   })
 
-  useEffect(() => () => updateRendererPerformanceInfo({
-    textures: 0,
-    geometries: 0,
-    programs: 0,
-    materials: 0,
-  }), [])
+  useEffect(() => () => {
+    updateRendererPerformanceInfo({
+      textures: 0,
+      geometries: 0,
+      programs: 0,
+      materials: 0,
+    })
+    // R3F 9.5 loses the context without disposing every renderer cache. Scene
+    // geometry must emit dispose before WebGLRenderer.dispose(), otherwise a
+    // shared geometry can retain the dead WebGL context and detached canvas.
+    disposeThreeRendererResources(
+      scene,
+      gl,
+      ownedGeometries.current,
+      ownedMaterials.current,
+    )
+  }, [gl, scene])
 
   return null
 }

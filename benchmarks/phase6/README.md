@@ -42,14 +42,32 @@ The runner:
 - attaches CDP to the page and every worker target;
 - records individual `Runtime.getHeapUsage` fields and target identities;
 - records DOM counters, performance metrics, Network/Range events, cache flags,
-  encoded bytes, a bounded trace, and worker creation/destruction;
+  encoded bytes, a bounded filtered trace, and worker creation/destruction;
 - samples the read-only `__EGOLENS_PERF__.snapshot()` at coordinated lifecycle
   checkpoints;
 - performs two playback loops, 100 non-sequential timeline seeks, repeated
   camera/colormap/world/annotation/model toggles, 20 scene switches (including
   cross-dataset switches when configured), explicit disposal, and a natural
   settle window;
+- records a forced-GC snapshot only after that authoritative natural snapshot,
+  as a diagnostic for distinguishing collectible detached trees from retained
+  references; the comparator requires live document shape and app-owned
+  resources to be clean in the natural sample, then uses the forced snapshot
+  only to prove that total CDP DOM/listener counters contain no reachable
+  detached tree;
 - keeps the warm-up separate from the five measured runs.
+
+The runner retains only DrawFrame events, long RunTask events, and User Timing
+events from the CDP stream, with a default cap of 100,000 relevant events per
+run. `traceCollection.truncated` is recorded and the comparator rejects a
+truncated baseline or candidate. Raise the common cap with
+`--trace-event-limit` if a normative workload reaches it; never compare runs
+captured with missing relevant trace events.
+
+For one-run leak diagnosis, `--heap-snapshot /absolute/path/to/file.heapsnapshot`
+captures the page heap after the forced-GC diagnostic point. Heap snapshots can
+contain source URLs and application data, are not normative gate inputs, and
+must remain outside version control.
 
 `usedSize` may be summed across page/worker targets only under the formula
 written into each result. It is not total browser, process, or GPU memory.

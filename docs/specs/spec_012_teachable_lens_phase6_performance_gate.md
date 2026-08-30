@@ -1,6 +1,6 @@
 # Spec 012 — Teachable Lens Phase 6 performance and lifecycle gate
 
-**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; performance evidence and hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-29
+**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; Waymo disposal smoke passes; normative performance evidence and hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-30
 
 **Relationship to Spec 006**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 6. Phase 6 may
@@ -78,9 +78,36 @@ make that interpretation invalid.
 
 Capture coordinated CDP and application snapshots before scene load, after the
 warm-up/settle window, at every soak checkpoint, immediately after disposal,
-and after the post-disposal settle window. A forced-GC snapshot may be recorded
-as an additional diagnostic point, but it must not replace the naturally
-settled measurement or be the only evidence that resources were released.
+and after the post-disposal settle window. Record a forced-GC snapshot only
+after the naturally settled snapshot. The natural checkpoint is authoritative
+for live document shape, worker/object/image/renderer ownership, and bounded
+application caches. The forced snapshot is additionally required to prove that
+CDP's all-document node/listener counters contain no reachable detached viewer
+tree. It must not replace the natural checkpoint or rescue a failure in any
+natural ownership invariant.
+
+### Browser renderer lifecycle finding
+
+The Phase 6 Waymo production smoke exposed three browser-framework retention
+edges that are not visible in Zustand cache gauges:
+
+1. `@react-three/fiber` 9.5 keeps its last frame state/subscription variables
+   after its animation loop stops;
+2. its embedded React reconciler may retain the last unmounted `FiberRoot` for
+   nested-update detection, while R3F leaves `containerInfo` pointing at the
+   disposed scene store;
+3. `WebGLRenderer.dispose()` does not clear `WebGLAttributes` entries by
+   itself. Every geometry rendered by the main viewer or the secondary BEV
+   renderer must emit `dispose` before renderer disposal, including shared
+   Three.js Sprite geometry used through a portal scene.
+
+The production build therefore applies a fail-closed R3F 9.5 lifecycle patch:
+it releases last-frame variables at the loop terminal and clears the disposed
+FiberRoot's `containerInfo` only after R3F removes the canvas root. The build
+must fail if the pinned dependency source no longer matches these reviewed
+terminals. Both viewer renderers must track every geometry/material they render,
+dispose those resources before their renderer, and remain safe to recreate on
+the next scene. Re-evaluate and remove the patch when upgrading R3F.
 
 Phase 5 currently binds a shadow `NormalizedSceneV1` while compatibility
 workers still feed the renderer. Its duplicate timestamp/index scans are part

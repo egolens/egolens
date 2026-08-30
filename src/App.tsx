@@ -35,6 +35,11 @@ function useSegmentDiscovery() {
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
+    const params = new URLSearchParams(window.location.search)
+    // A benchmark URL must remain quiescent until CDP has captured the real
+    // pre-scene baseline. Dev auto-discovery used to bypass benchmarkHold and
+    // start Waymo workers before the runner dispatched benchmark-start.
+    if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') return
     if (availableSegments.length > 0) return // already discovered
     if (discoveryStarted) return
     discoveryStarted = true
@@ -122,6 +127,16 @@ function useUrlAutoLoad() {
 function useBenchmarkLoadCommand() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('perf') !== '1') return
+    const disposeScene = () => {
+      const store = useSceneStore.getState()
+      store.actions.reset()
+      useSceneStore.setState({
+        availableSegments: [],
+        currentSegment: null,
+        segmentMetas: new Map(),
+      })
+      clearUrlSource()
+    }
     const onLoad = (event: Event) => {
       const detail = (event as CustomEvent<{
         dataset?: string
@@ -132,22 +147,23 @@ function useBenchmarkLoadCommand() {
       if (!SUPPORTED_URL_DATASETS.includes(detail.dataset as UrlDataset)) return
       try {
         const baseUrl = normalizeBaseUrl(detail.data)
-        const store = useSceneStore.getState()
-        store.actions.reset()
-        useSceneStore.setState({
-          availableSegments: [],
-          currentSegment: null,
-          segmentMetas: new Map(),
-        })
-        clearUrlSource()
+        disposeScene()
         trackDatasetLoad(detail.dataset, 'url_direct', baseUrl)
-        void store.actions.loadFromUrl(detail.dataset, baseUrl, detail.scene)
+        void useSceneStore.getState().actions.loadFromUrl(detail.dataset, baseUrl, detail.scene)
       } catch {
         // The benchmark runner observes the load timeout/error state.
       }
     }
+    // Keep the original URL in place so before/after lifecycle samples render
+    // the same landing document. Unlike browser navigation, this deliberately
+    // leaves the one-shot URL-load guard set and cannot auto-reload the scene.
+    const onDispose = () => disposeScene()
     window.addEventListener('egolens:benchmark-load', onLoad)
-    return () => window.removeEventListener('egolens:benchmark-load', onLoad)
+    window.addEventListener('egolens:benchmark-dispose', onDispose)
+    return () => {
+      window.removeEventListener('egolens:benchmark-load', onLoad)
+      window.removeEventListener('egolens:benchmark-dispose', onDispose)
+    }
   }, [])
 }
 

@@ -14,6 +14,7 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
 import { useSceneStore, resolveViewportBg } from '../../stores/useSceneStore'
+import { disposeThreeRendererResources } from '../../utils/threeRendererDisposal'
 
 /** CSS size of the minimap (matches the overlay div) */
 export const BEV_SIZE = window.innerWidth < 600 ? 120 : 200
@@ -37,6 +38,8 @@ export function BevMinimapRenderer({
   const { scene } = useThree()
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const camRef = useRef<THREE.OrthographicCamera | null>(null)
+  const ownedGeometriesRef = useRef(new Set<THREE.BufferGeometry>())
+  const ownedMaterialsRef = useRef(new Set<THREE.Material>())
   const zoomRef = useRef(zoomIndex)
   zoomRef.current = zoomIndex
 
@@ -60,11 +63,16 @@ export function BevMinimapRenderer({
     camRef.current = cam
 
     return () => {
-      renderer.dispose()
+      disposeThreeRendererResources(
+        scene,
+        renderer,
+        ownedGeometriesRef.current,
+        ownedMaterialsRef.current,
+      )
       rendererRef.current = null
       camRef.current = null
     }
-  }, [canvasRef])
+  }, [canvasRef, scene])
 
   // Subscribe to store — re-render on any visual state change.
   // Deferred by one rAF so R3F's useFrame has already updated the
@@ -100,6 +108,18 @@ export function BevMinimapRenderer({
       cam.bottom = -radius
       cam.lookAt(cam.position.x, cam.position.y, 0)
       cam.updateProjectionMatrix()
+      scene.traverse((object) => {
+        const renderable = object as THREE.Object3D & {
+          geometry?: THREE.BufferGeometry
+          material?: THREE.Material | THREE.Material[]
+        }
+        if (renderable.geometry) ownedGeometriesRef.current.add(renderable.geometry)
+        if (Array.isArray(renderable.material)) {
+          for (const material of renderable.material) ownedMaterialsRef.current.add(material)
+        } else if (renderable.material) {
+          ownedMaterialsRef.current.add(renderable.material)
+        }
+      })
       gl.render(scene, cam)
     }
 

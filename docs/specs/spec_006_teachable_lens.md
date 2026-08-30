@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: in-progress (Phases 2–5 shipped; Phase 6 runtime cutover implemented, performance/oracle evidence pending → specs 012–013) · **Date**: 2026-08-29 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phases 2–5 shipped; Phase 6 runtime cutover implemented, performance/oracle evidence pending → specs 012–013) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 
@@ -1289,10 +1289,18 @@ remaining legacy code:
 - move retained algorithms behind versioned operator contracts;
 - delete dataset-specific orchestration that is now expressed by recipes;
 - keep golden fixtures and oracle outputs, not a second production loader.
+- treat browser-framework roots, secondary renderers, workers, object URLs, and
+  renderer caches as owned runtime resources; apply the measurement and
+  disposal rules in
+  [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
 **Exit gate:** `registry.ts` does not distinguish bundled and learned recipes by
 execution path. No permanent `loadWaymoDataset`, `parseNuScenesScene`, or
-equivalent dataset-branded production path remains.
+equivalent dataset-branded production path remains. Spec 012 performance and
+lifecycle evidence passes, and the hidden-oracle promotion receipts required by
+[`spec_013_teachable_lens_hidden_oracle_retention.md`](spec_013_teachable_lens_hidden_oracle_retention.md)
+are valid before the compatibility production path is removed from the
+shipping tree.
 
 #### Phase 7 — Add the custom operator extension boundary
 
