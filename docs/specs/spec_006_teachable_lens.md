@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed eleven renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed twelve renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1348,6 +1348,13 @@ normative for later Teachable Lens work:
   initially loaded scene's full CDP trace. A bounded end-of-soak mark snapshot
   can otherwise omit that generation and silently substitute later cold
   cross-dataset first frames.
+- heterogeneous soak checkpoints must not be fitted as one memory series.
+  Preserve every natural checkpoint for operational ownership evidence, then
+  take a paired forced-GC diagnostic and compute retained-growth slopes per
+  revisited dataset. Alternating Waymo, nuScenes, and AV2 heaps in one ordinary
+  least-squares line measures dataset size and GC timing rather than a leak.
+  Likewise, steady FPS is limited to the initial live scene and excludes later
+  dataset loading intervals.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.

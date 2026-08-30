@@ -29,6 +29,11 @@ function distValue(result, metric, statistic = 'p95') {
   return result.summary?.distribution?.[metric]?.[statistic] ?? null
 }
 
+function canonicalScenarioValue(key, value) {
+  if (key !== 'url' || typeof value !== 'string') return value
+  return value.replace(/(127\.0\.0\.1|localhost)(:|%3A)\d+/gi, '$1$2<PORT>')
+}
+
 function heapUsed(snapshot) {
   if (!snapshot) return null
   return (snapshot.pageHeap?.usedSize ?? 0)
@@ -61,8 +66,8 @@ const comparableScenarioFields = [
   'dataset', 'url', 'seeks', 'sceneSwitches', 'crossDatasetSwitches',
   'switchScenarioDatasets', 'playbackLoops', 'settleMs', 'traceEventLimit', 'viewport',
 ]
-const baselineScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, baseline.scenario?.[key]]))
-const candidateScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, candidate.scenario?.[key]]))
+const baselineScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, canonicalScenarioValue(key, baseline.scenario?.[key])]))
+const candidateScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, canonicalScenarioValue(key, candidate.scenario?.[key])]))
 const baselineBrowser = baseline.environment?.browser
 const candidateBrowser = candidate.environment?.browser
 const environmentSignature = (result) => ({
@@ -207,18 +212,28 @@ for (const [runIndex, run] of candidate.samples.entries()) {
       && forcedDom.jsEventListeners <= beforeDom.jsEventListeners,
     { before: beforeDom, natural: naturalDom, forcedGc: forcedDom })
 
-  const checkpoints = run.snapshots.soakCheckpoints ?? []
-  if (checkpoints.length > 1) {
-    const retained = checkpoints.map((snapshot) => {
-      const cache = snapshot.app?.scene?.cache
-      return heapUsed(snapshot) + (cache ? cache.pointBytes + cache.cameraBytes : 0)
-    })
+  const naturalCheckpoints = run.snapshots.soakCheckpoints ?? []
+  const forcedCheckpoints = run.snapshots.soakForcedGcCheckpoints ?? []
+  check(`run ${runIndex + 1} has paired natural and forced-GC soak checkpoints`,
+    naturalCheckpoints.length > 1
+      && forcedCheckpoints.length === naturalCheckpoints.length
+      && forcedCheckpoints.every(Boolean),
+    { natural: naturalCheckpoints.length, forcedGc: forcedCheckpoints.filter(Boolean).length })
+
+  const retainedByDataset = new Map()
+  for (const snapshot of forcedCheckpoints.filter(Boolean)) {
+    const cache = snapshot.app?.scene?.cache
+    const retained = heapUsed(snapshot) + (cache ? cache.pointBytes + cache.cameraBytes : 0)
+    const group = snapshot.label.match(/^cross-(.+)-switch-\d+-/)?.[1] ?? 'scene'
+    const values = retainedByDataset.get(group) ?? []
+    values.push(retained)
+    retainedByDataset.set(group, values)
+  }
+  for (const [dataset, retained] of retainedByDataset) {
     const slope = linearSlope(retained)
-    check(`run ${runIndex + 1} settled soak slope`, slope <= MiB, {
-      bytesPerSwitch: slope,
-      maximumBytesPerSwitch: MiB,
-      checkpoints: retained,
-    })
+    check(`run ${runIndex + 1} forced-GC retained soak slope (${dataset})`,
+      retained.length > 1 && slope <= MiB,
+      { bytesPerRevisit: slope, maximumBytesPerRevisit: MiB, checkpoints: retained })
   }
 }
 

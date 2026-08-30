@@ -313,6 +313,29 @@ function traceMarkDetail(event) {
   }
 }
 
+function tracedInitialSceneFrameRate(run, initialGeneration) {
+  const ready = run.trace.find((event) =>
+    event.name.startsWith('egolens:dataset-ready:')
+      && traceMarkDetail(event)?.sceneGeneration === initialGeneration)
+  if (!ready || !Number.isFinite(ready.ts)) return null
+  const terminal = run.trace
+    .filter((event) => Number.isFinite(event.ts) && event.ts > ready.ts)
+    .filter((event) => {
+      const detail = traceMarkDetail(event)
+      return (event.name.startsWith('egolens:scene-load-start:')
+          && detail?.sceneGeneration !== initialGeneration)
+        || (event.name.startsWith('egolens:scene-dispose-start:')
+          && detail?.sceneGeneration === initialGeneration)
+    })
+    .sort((left, right) => left.ts - right.ts)[0]
+  const end = terminal?.ts ?? Math.max(...run.trace.map((event) => event.ts).filter(Number.isFinite))
+  const seconds = (end - ready.ts) / 1_000_000
+  if (!(seconds > 0)) return null
+  const frames = run.trace.filter((event) =>
+    event.name === 'DrawFrame' && event.ts >= ready.ts && event.ts < end).length
+  return frames / seconds
+}
+
 function summarizeRun(run) {
   // Initial-load milestones come from the coordinated post-warmup snapshot so
   // later scene generations cannot be paired with the first run's start mark.
@@ -331,14 +354,6 @@ function summarizeRun(run) {
     .filter((detail) => detail?.sceneGeneration === initialGeneration)
     .map((detail) => detail?.inputToFrameMs)
     .filter(Number.isFinite)
-  const drawFrames = run.trace.filter((event) => event.name === 'DrawFrame').length
-  const frameTimestamps = run.trace
-    .filter((event) => event.name === 'DrawFrame')
-    .map((event) => event.ts)
-    .filter(Number.isFinite)
-  const traceSeconds = frameTimestamps.length > 1
-    ? (Math.max(...frameTimestamps) - Math.min(...frameTimestamps)) / 1_000_000
-    : 0
   const longTaskMs = run.trace
     .filter((event) => event.name === 'RunTask' && Number(event.dur) >= 50_000)
     .reduce((sum, event) => sum + Number(event.dur) / 1000, 0)
@@ -348,7 +363,7 @@ function summarizeRun(run) {
     frameLatencyP50Ms: quantile(latencies, 0.5),
     frameLatencyP95Ms: quantile(latencies, 0.95),
     frameLatencySamples: latencies.length,
-    tracedFrameRate: traceSeconds > 0 ? drawFrames / traceSeconds : null,
+    tracedFrameRate: tracedInitialSceneFrameRate(run, initialGeneration),
     longTaskMs,
     requests: run.network.length,
     rangeRequests: run.network.filter((request) => request.range).length,
@@ -527,7 +542,11 @@ async function runScenario(client, browserVersion, runIndex) {
     }
   }
 
-  const snapshots = { beforeLoad: await capture('before-load'), soakCheckpoints: [] }
+  const snapshots = {
+    beforeLoad: await capture('before-load'),
+    soakCheckpoints: [],
+    soakForcedGcCheckpoints: [],
+  }
   await client.send('Tracing.start', {
     categories: 'devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing,loading,v8',
     options: 'record-as-much-as-possible',
@@ -594,7 +613,17 @@ async function runScenario(client, browserVersion, runIndex) {
     await waitFor(client, pageSession, `globalThis.__EGOLENS_PERF__?.snapshot().marks.some((mark) => mark.name.startsWith('egolens:dataset-ready:') && mark.detail?.sceneGeneration === globalThis.__EGOLENS_PERF__.snapshot().scene?.sceneGeneration)`)
     await exerciseFeatureToggles(client, pageSession)
     await delay(settleMs)
-    snapshots.soakCheckpoints.push(await capture(`${crossScenario ? `cross-${crossScenario.dataset}` : 'scene'}-switch-${index + 1}-settle`))
+    const checkpointLabel = `${crossScenario ? `cross-${crossScenario.dataset}` : 'scene'}-switch-${index + 1}`
+    snapshots.soakCheckpoints.push(await capture(`${checkpointLabel}-settle`))
+    // Natural state above remains authoritative for live ownership and cache
+    // behavior. This second diagnostic removes allocator/GC scheduling noise
+    // so retained-growth slopes compare the same dataset across later cycles.
+    try {
+      await client.send('HeapProfiler.collectGarbage', {}, pageSession)
+      snapshots.soakForcedGcCheckpoints.push(await capture(`${checkpointLabel}-forced-gc-diagnostic`))
+    } catch {
+      snapshots.soakForcedGcCheckpoints.push(null)
+    }
   }
 
   await delay(settleMs)

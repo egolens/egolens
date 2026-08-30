@@ -85,12 +85,16 @@ make that interpretation invalid.
 Capture coordinated CDP and application snapshots before scene load, after the
 warm-up/settle window, at every soak checkpoint, immediately after disposal,
 and after the post-disposal settle window. Record a forced-GC snapshot only
-after the naturally settled snapshot. The natural checkpoint is authoritative
+after its paired naturally settled snapshot. The natural checkpoint is authoritative
 for live document shape, worker/object/image/renderer ownership, and bounded
 application caches. The forced snapshot is additionally required to prove that
 CDP's all-document node/listener counters contain no reachable detached viewer
-tree. It must not replace the natural checkpoint or rescue a failure in any
-natural ownership invariant.
+tree. During a heterogeneous cross-dataset soak, paired forced-GC diagnostics
+also provide the retained-memory series, grouped by revisited dataset; never
+fit differently sized dataset heaps into one slope. Forced diagnostics must not
+replace the natural checkpoint or rescue a failure in any natural ownership
+invariant. Steady traced FPS is computed only between the initial scene's ready
+mark and its first replacement/disposal mark, excluding later loading periods.
 
 ### Browser renderer lifecycle finding
 
