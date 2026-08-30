@@ -9,6 +9,7 @@ import { argoverse2Manifest } from '../../adapters/argoverse2/manifest'
 import { nuScenesManifest } from '../../adapters/nuscenes/manifest'
 import { waymoManifest } from '../../adapters/waymo/manifest'
 import { compileRecipeV1 } from '../recipe/compiler'
+import { AdapterCompileError } from '../recipe/diagnostics'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import { validateRecipeV1 } from '../schema/validateSchema'
 
@@ -71,19 +72,47 @@ describe('bundled Phase 2 recipes', () => {
     ]))
   })
 
-  it('uses closed contracts for every operator on the executable nuScenes graph', () => {
+  it('uses closed contracts for every operator on executable nuScenes and AV2 graphs', () => {
     const isClosed = (contract: Readonly<Record<string, unknown>>): boolean => {
       if (contract.additionalProperties === false) return true
       const alternatives = contract.oneOf
       return Array.isArray(alternatives)
         && alternatives.every((alternative) => isClosed(alternative as Readonly<Record<string, unknown>>))
     }
-    for (const [name, dependency] of Object.entries(nuScenesCompiledRecipe.recipe.engine.requiredOperators)) {
-      const descriptor = bundledPhase2OperatorRegistry.resolve(name, dependency)
-      expect(descriptor, name).not.toBeNull()
-      expect(isClosed(descriptor!.paramsContract), `${name} params`).toBe(true)
-      expect(isClosed(descriptor!.inputContract), `${name} input`).toBe(true)
-      expect(isClosed(descriptor!.outputContract), `${name} output`).toBe(true)
+    for (const compiled of [nuScenesCompiledRecipe, argoverse2CompiledRecipe]) {
+      for (const [name, dependency] of Object.entries(compiled.recipe.engine.requiredOperators)) {
+        const descriptor = bundledPhase2OperatorRegistry.resolve(name, dependency)
+        expect(descriptor, name).not.toBeNull()
+        expect(isClosed(descriptor!.paramsContract), `${name} params`).toBe(true)
+        expect(isClosed(descriptor!.inputContract), `${name} input`).toBe(true)
+        expect(isClosed(descriptor!.outputContract), `${name} output`).toBe(true)
+      }
+    }
+  })
+
+  it('rejects graph input drift and Feather column-contract drift before binding', () => {
+    const invalidInputs = structuredClone(argoverse2CompiledRecipe.recipe)
+    const joinNode = invalidInputs.pipelines.egoPoses.nodes[0] as unknown as { inputs: Record<string, string> }
+    joinNode.inputs = { timeline: 'timeline.result', typo: 'poses.rows' }
+    expect(() => compileRecipeV1(invalidInputs, bundledPhase2OperatorRegistry)).toThrow(AdapterCompileError)
+    try {
+      compileRecipeV1(invalidInputs, bundledPhase2OperatorRegistry)
+    } catch (error) {
+      expect((error as AdapterCompileError).diagnostics).toContainEqual(expect.objectContaining({
+        code: 'OPERATOR_INPUTS_INVALID',
+      }))
+    }
+
+    const invalidColumns = structuredClone(argoverse2CompiledRecipe.recipe)
+    const lidarSource = invalidColumns.sources.lidarFrames as unknown as { columns: string[] }
+    lidarSource.columns = ['x', 'y', 'z']
+    expect(() => compileRecipeV1(invalidColumns, bundledPhase2OperatorRegistry)).toThrow(AdapterCompileError)
+    try {
+      compileRecipeV1(invalidColumns, bundledPhase2OperatorRegistry)
+    } catch (error) {
+      expect((error as AdapterCompileError).diagnostics).toContainEqual(expect.objectContaining({
+        code: 'SOURCE_COLUMNS_CONTRACT_MISMATCH',
+      }))
     }
   })
 

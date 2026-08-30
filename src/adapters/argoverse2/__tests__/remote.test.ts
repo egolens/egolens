@@ -234,6 +234,25 @@ describe('discoverAV2FramesFromManifest', () => {
     expect(frame0).toHaveLength(1)
     expect(frame0[0].cameraId).toBe(4)
   })
+
+  it('omits manifest cameras outside the recipe timestamp bound', () => {
+    const outOfSyncManifest: AV2Manifest = {
+      ...SAMPLE_MANIFEST,
+      num_frames: 1,
+      frames: [{
+        timestamp_ns: '1000000000',
+        cameras: {
+          ring_front_center: '1050000000',
+          ring_front_left: '1050000001',
+        },
+      }],
+    }
+    const { cameraFilesByFrame } = discoverAV2FramesFromManifest(
+      outOfSyncManifest, SENSOR_NAME_TO_ID, RING_CAMERAS,
+    )
+
+    expect(cameraFilesByFrame.get(0)?.map((camera) => camera.cameraId)).toEqual([4])
+  })
 })
 
 // ---------------------------------------------------------------------------

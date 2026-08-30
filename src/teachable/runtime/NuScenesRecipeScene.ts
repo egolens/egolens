@@ -2,7 +2,6 @@ import type { NuScenesDatabase } from '../../adapters/nuscenes/metadata'
 import { loadNuScenesSceneMetadata } from '../../adapters/nuscenes/metadata'
 import type { MetadataBundle } from '../../types/dataset'
 import { NUSCENES_CHANNEL_TO_ID } from '../../adapters/nuscenes/manifest'
-import { invertRowMajor4x4 } from '../../utils/matrix'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import { resolveFileEntry } from '../../workers/fetchHelper'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
@@ -29,6 +28,7 @@ import type {
   NormalizedTrackPointV1,
   NormalizedTransformV1,
 } from './normalizedScene'
+import { projectBox3dPinholeV1 } from '../operators/sceneGeometry'
 
 export interface NuScenesRecipeSceneInputV1 {
   readonly compiledRecipe: CompiledRecipeV1
@@ -74,54 +74,6 @@ function capabilityDiagnostic(capability: NormalizedCapabilityV1): AdapterDiagno
     code: 'OPTIONAL_OUTPUT_UNBOUND',
     jsonPointer: `/outputs/${capability}`,
     hint: `The ${capability} output has no complete source binding in this dataset and was disabled.`,
-  }
-}
-
-function transformPoint(matrix: readonly number[], x: number, y: number, z: number): [number, number, number] {
-  return [
-    matrix[0] * x + matrix[1] * y + matrix[2] * z + matrix[3],
-    matrix[4] * x + matrix[5] * y + matrix[6] * z + matrix[7],
-    matrix[8] * x + matrix[9] * y + matrix[10] * z + matrix[11],
-  ]
-}
-
-function projectBox(
-  box: NormalizedBox3dV1,
-  calibration: NormalizedCameraCalibrationV1,
-): NormalizedBox2dV1 | null {
-  const cameraFromEgo = invertRowMajor4x4([...calibration.egoFromCamera])
-  const [length, width, height] = box.dimensions
-  const heading = box.heading ?? 0
-  const cos = Math.cos(heading)
-  const sin = Math.sin(heading)
-  const xs: number[] = []
-  const ys: number[] = []
-  for (const dx of [-length / 2, length / 2]) {
-    for (const dy of [-width / 2, width / 2]) {
-      for (const dz of [-height / 2, height / 2]) {
-        const egoX = box.center[0] + cos * dx - sin * dy
-        const egoY = box.center[1] + sin * dx + cos * dy
-        const egoZ = box.center[2] + dz
-        const [x, y, z] = transformPoint(cameraFromEgo, egoX, egoY, egoZ)
-        if (z <= 1e-3) continue
-        xs.push(calibration.intrinsics[0] * x / z + calibration.intrinsics[2])
-        ys.push(calibration.intrinsics[1] * y / z + calibration.intrinsics[3])
-      }
-    }
-  }
-  if (xs.length === 0) return null
-  const left = Math.max(0, Math.min(...xs))
-  const right = Math.min(calibration.width, Math.max(...xs))
-  const top = Math.max(0, Math.min(...ys))
-  const bottom = Math.min(calibration.height, Math.max(...ys))
-  if (right <= left || bottom <= top) return null
-  return {
-    id: `${box.id}:${calibration.sensorId}`,
-    objectId: box.objectId,
-    classId: box.classId,
-    cameraId: calibration.sensorId,
-    center: [(left + right) / 2, (top + bottom) / 2],
-    dimensions: [right - left, bottom - top],
   }
 }
 
@@ -377,7 +329,7 @@ export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): Bo
         for (const box of boxes3d) {
           for (const calibration of cameraCalibrations.values()) {
             if (request.sensorIds && !request.sensorIds.has(calibration.sensorId)) continue
-            const projected = projectBox(box, calibration)
+            const projected = projectBox3dPinholeV1(box, calibration)
             if (!projected) continue
             boxes2d.push(projected)
             box2dToBox3d.set(projected.id, box.id)

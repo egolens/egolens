@@ -13,8 +13,6 @@
  * Init/batch protocol matches the generic WorkerPool interface.
  */
 
-import { tableFromIPC, setCompressionCodec } from '@uwdata/flechette'
-import lz4 from 'lz4js'
 import type {
   WorkerInitBase,
   SensorCloudResult,
@@ -24,6 +22,11 @@ import type {
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 import { resolveFileEntry } from './fetchHelper'
+import {
+  decodeFeatherColumnsV1,
+  interleaveFeatherNumericColumnsV1,
+  type FeatherColumnsParamsV1,
+} from '../teachable/operators/featherColumns'
 
 // ---------------------------------------------------------------------------
 // Init message
@@ -41,6 +44,8 @@ export interface AV2LidarWorkerInit extends WorkerInitBase {
   frameBatches: AV2LidarFrameDescriptor[][]
   /** File access: [filename, File | URL string][] — File for local, string for remote */
   fileEntries: [string, File | string][]
+  /** Strict recipe-bound Feather schema and resource limits. */
+  readerParams: FeatherColumnsParamsV1
 }
 
 export type AV2LidarWorkerRequest = AV2LidarWorkerInit | LidarBatchRequest
@@ -49,14 +54,9 @@ export type AV2LidarWorkerRequest = AV2LidarWorkerInit | LidarBatchRequest
 // Worker state
 // ---------------------------------------------------------------------------
 
-// Register LZ4_FRAME codec for AV2 Feather files (type id = 0)
-setCompressionCodec(0, {
-  decode(buf: Uint8Array): Uint8Array { return lz4.decompress(buf) },
-  encode(buf: Uint8Array): Uint8Array { return lz4.compress(buf) },
-})
-
 let frameBatches: AV2LidarFrameDescriptor[][] = []
 let fileMap = new Map<string, File | string>()
+let readerParams: FeatherColumnsParamsV1 | null = null
 let wMem = createWorkerMemoryLogger('worker-av2-lidar-?')
 
 const LIDAR_COMBINED_ID = 1
@@ -73,37 +73,12 @@ const LIDAR_COMBINED_ID = 1
  * Points are already in the ego frame — no transform needed.
  */
 function parseFeatherPointCloud(buffer: ArrayBuffer): { positions: Float32Array; pointCount: number } {
-  const table = tableFromIPC(buffer, { useProxy: false, useBigInt: true })
-  const numRows = table.numRows
-
-  const xCol = table.getChild('x')
-  const yCol = table.getChild('y')
-  const zCol = table.getChild('z')
-  const intensityCol = table.getChild('intensity')
-
-  if (!xCol || !yCol || !zCol) {
-    console.warn('[AV2 LiDAR] Missing required columns (x, y, z)')
-    return { positions: new Float32Array(0), pointCount: 0 }
-  }
-
-  const positions = new Float32Array(numRows * 4)
-
-  // Use toArray() for fast columnar access
-  // flechette returns typed arrays (Float16Array for halffloat, etc.)
-  const xArr = xCol.toArray()
-  const yArr = yCol.toArray()
-  const zArr = zCol.toArray()
-  const intArr = intensityCol?.toArray()
-
-  for (let i = 0; i < numRows; i++) {
-    const dst = i * 4
-    positions[dst] = xArr[i]
-    positions[dst + 1] = yArr[i]
-    positions[dst + 2] = zArr[i]
-    positions[dst + 3] = intArr ? intArr[i] : 0
-  }
-
-  return { positions, pointCount: numRows }
+  if (!readerParams) throw new Error('AV2 Feather reader was not initialized.')
+  const decoded = interleaveFeatherNumericColumnsV1(
+    decodeFeatherColumnsV1(buffer, readerParams),
+    ['x', 'y', 'z', 'intensity'],
+  )
+  return { positions: decoded.values, pointCount: decoded.pointCount }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +114,7 @@ async function handleMessage(msg: AV2LidarWorkerRequest) {
       wMem.snap('init:start')
       frameBatches = msg.frameBatches
       fileMap = new Map(msg.fileEntries)
+      readerParams = msg.readerParams
       wMem.snap('init:complete', { note: `${frameBatches.length} batches, ${fileMap.size} files` })
 
       post.postMessage({

@@ -63,9 +63,10 @@ describe('adapter registry', () => {
     expect(getManifest().id).toBe('waymo')
   })
 
-  it('migrates nuScenes to the recipe strategy while retaining other legacy adapters', () => {
+  it('migrates nuScenes and Argoverse 2 to the recipe strategy while retaining Waymo', () => {
     expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
     expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'nuscenes' })
+    expect(getAdapterById('argoverse2')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'argoverse2' })
     expect(getAdapterById('missing')).toBeNull()
   })
 
@@ -146,6 +147,13 @@ describe('detectDataset', () => {
   it('detects every allowlisted nuScenes version root', () => {
     expect(detectDatasetAdapter(['samples', 'v1.0-trainval'])).toMatchObject({ id: 'nuscenes', kind: 'recipe' })
     expect(detectDatasetAdapter(['samples', 'v1.0-test'])).toMatchObject({ id: 'nuscenes', kind: 'recipe' })
+  })
+
+  it('detects Argoverse 2 through its recipe-backed strategy', () => {
+    expect(detectDatasetAdapter(['sensors', 'calibration', 'annotations.feather'])).toMatchObject({
+      id: 'argoverse2',
+      kind: 'recipe',
+    })
   })
 
   it('returns Waymo (not nuScenes) when both could match but Waymo is first', () => {

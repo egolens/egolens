@@ -1,6 +1,7 @@
 import type { CoreOperatorDescriptor, OperatorJsonSchema } from './registry'
 import { OperatorRegistry } from './registry'
 import { assertValidInterleavedRecordsParamsV1 } from './binaryReaders'
+import { assertValidFeatherColumnsParamsV1 } from './featherColumns'
 
 const objectContract: OperatorJsonSchema = {
   type: 'object',
@@ -101,6 +102,31 @@ const npzParamsContract: OperatorJsonSchema = {
   additionalProperties: false,
 }
 
+const featherParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    columns: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 128,
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_]{0,95}$' },
+          type: { enum: ['float16', 'float32', 'float64', 'uint8', 'uint16', 'uint32', 'int8', 'int16', 'int32', 'int64', 'utf8'] },
+        },
+        required: ['name', 'type'],
+        additionalProperties: false,
+      },
+    },
+    maxInputBytes: positiveLimit,
+    maxRows: positiveLimit,
+    maxOutputBytes: positiveLimit,
+  },
+  required: ['columns', 'maxInputBytes', 'maxRows', 'maxOutputBytes'],
+  additionalProperties: false,
+}
+
 const emptyParamsContract: OperatorJsonSchema = {
   type: 'object',
   properties: {},
@@ -123,21 +149,42 @@ function recordContract(fields: readonly string[]): OperatorJsonSchema {
   }
 }
 
-const strictNuScenesGraphOperators: readonly CoreOperatorDescriptor[] = [
-  ['geometry.normalize_boxes2d', recordContract(['boxes3d', 'cameraImages', 'calibration']), {
+const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
+  ['geometry.normalize_boxes2d', {
+    oneOf: [
+      recordContract(['rows']),
+      recordContract(['boxes3d', 'cameraImages', 'calibration']),
+      recordContract(['boxes3d', 'cameraImages', 'intrinsics', 'extrinsics']),
+    ],
+  }, {
     oneOf: [
       closedParams({ source: { const: 'projected-box3d' }, clipToImage: { type: 'boolean' } }, ['source', 'clipToImage']),
       closedParams({ geometry: { const: 'center-size-pixels' } }, ['geometry']),
     ],
   }, recordContract(['boxes'])],
-  ['geometry.normalize_boxes3d', recordContract(['annotations', 'instances', 'categories']), closedParams({
+  ['geometry.normalize_boxes3d', {
+    oneOf: [
+      recordContract(['rows']),
+      recordContract(['annotations']),
+      recordContract(['annotations', 'instances', 'categories']),
+    ],
+  }, closedParams({
     quaternionOrder: { const: 'wxyz' },
     frameId: { type: 'string', minLength: 1, maxLength: 96 },
   }, ['frameId']), recordContract(['boxes'])],
-  ['image.bind_camera_frame', recordContract(['bytes', 'sampleData', 'calibration']), {
+  ['image.bind_camera_frame', {
+    oneOf: [
+      recordContract(['rows', 'calibration']),
+      recordContract(['bytes', 'sampleData', 'calibration']),
+      recordContract(['bytes', 'intrinsics', 'extrinsics']),
+    ],
+  }, {
     oneOf: [
       closedParams({ timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['timestampField']),
-      closedParams({ timestampFrom: { const: 'numeric-path' } }, ['timestampFrom']),
+      closedParams({
+        timestampFrom: { const: 'numeric-path' },
+        maxDeltaNs: positiveLimit,
+      }, ['timestampFrom', 'maxDeltaNs']),
       closedParams({ encoding: { const: 'jpeg' } }, ['encoding']),
     ],
   }, recordContract(['images'])],
@@ -156,11 +203,24 @@ const strictNuScenesGraphOperators: readonly CoreOperatorDescriptor[] = [
     leftKey: { type: 'string', minLength: 1, maxLength: 256 },
     rightKey: { type: 'string', minLength: 1, maxLength: 256 },
   }, ['leftKey', 'rightKey']), recordContract(['rows'])],
-  ['timeline.join', recordContract(['records', 'sampleData', 'calibration']), closedParams({
-    mode: { enum: ['token', 'nearest'] },
-    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
-  }, ['mode']), recordContract(['pointClouds'])],
-  ['timeline.sort', recordContract(['samples']), {
+  ['timeline.join', {
+    oneOf: [
+      recordContract(['records', 'sampleData', 'calibration']),
+      recordContract(['timeline', 'poses']),
+    ],
+  }, {
+    oneOf: [
+      closedParams({ mode: { const: 'token' }, timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['mode']),
+      closedParams({
+        mode: { const: 'nearest' },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        maxDeltaNs: positiveLimit,
+      }, ['mode', 'timestampField', 'maxDeltaNs']),
+    ],
+  }, recordContract(['pointClouds'])],
+  ['timeline.sort', {
+    oneOf: [recordContract(['samples']), recordContract(['rows']), recordContract(['lidar'])],
+  }, {
     oneOf: [
       closedParams({ timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['timestampField']),
       closedParams({
@@ -233,8 +293,35 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
   },
 ]
 
+const strictFeatherOperator: CoreOperatorDescriptor = {
+  name: 'feather.columns',
+  majorVersion: 1,
+  provider: 'core',
+  tier: 1,
+  inputContract: byteInputContract,
+  paramsContract: featherParamsContract,
+  outputContract: {
+    type: 'object',
+    properties: {
+      columns: { type: 'object' },
+      numRows: { type: 'integer', minimum: 0 },
+    },
+    required: ['columns', 'numRows'],
+    additionalProperties: false,
+  },
+  validateParams: (params) => {
+    try {
+      assertValidFeatherColumnsParamsV1(params as never)
+      return []
+    } catch (error) {
+      return [{ message: error instanceof Error ? error.message : String(error) }]
+    }
+  },
+  execution: 'worker',
+  deterministic: true,
+}
+
 const workerOperators = [
-  'feather.columns',
   'geometry.normalize_keypoints',
   'geometry.range_image_to_cartesian',
   'geometry.relative_poses',
@@ -252,7 +339,8 @@ const workerOperators = [
  */
 export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescriptor[] = [
   ...strictBinaryOperators,
-  ...strictNuScenesGraphOperators,
+  strictFeatherOperator,
+  ...strictGraphOperators,
   ...workerOperators.map((name): CoreOperatorDescriptor => ({
     name,
     majorVersion: 1,
