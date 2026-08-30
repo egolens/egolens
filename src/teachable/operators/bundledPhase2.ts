@@ -2,6 +2,7 @@ import type { CoreOperatorDescriptor, OperatorJsonSchema } from './registry'
 import { OperatorRegistry } from './registry'
 import { assertValidInterleavedRecordsParamsV1 } from './binaryReaders'
 import { assertValidFeatherColumnsParamsV1 } from './featherColumns'
+import { assertValidParquetColumnsParamsV1 } from './parquetColumns'
 
 const objectContract: OperatorJsonSchema = {
   type: 'object',
@@ -127,6 +128,33 @@ const featherParamsContract: OperatorJsonSchema = {
   additionalProperties: false,
 }
 
+const parquetParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    columns: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 256,
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 512 },
+          type: { enum: ['bigint', 'integer', 'number', 'utf8', 'boolean', 'binary', 'number-list', 'integer-list', 'boolean-list'] },
+          optional: { type: 'boolean' },
+          nullable: { type: 'boolean' },
+        },
+        required: ['name', 'type'],
+        additionalProperties: false,
+      },
+    },
+    maxInputBytes: positiveLimit,
+    maxRows: positiveLimit,
+    maxOutputBytes: positiveLimit,
+  },
+  required: ['columns', 'maxInputBytes', 'maxRows', 'maxOutputBytes'],
+  additionalProperties: false,
+}
+
 const emptyParamsContract: OperatorJsonSchema = {
   type: 'object',
   properties: {},
@@ -195,6 +223,23 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['labels.attach_by_point_index', recordContract(['pointClouds', 'labels']), closedParams({
     taxonomy: { type: 'string', minLength: 1, maxLength: 96 },
   }, ['taxonomy']), recordContract(['segmentation'])],
+  ['labels.decode_camera_mask', recordContract(['rows']), closedParams({
+    encoding: { const: 'png-uint16' },
+    taxonomy: { type: 'string', minLength: 1, maxLength: 96 },
+  }, ['encoding', 'taxonomy']), recordContract(['segmentation'])],
+  ['geometry.normalize_keypoints', recordContract(['rows']), {
+    oneOf: [
+      closedParams({ dimensions: { const: 3 }, frameId: { type: 'string', minLength: 1, maxLength: 96 } }, ['dimensions', 'frameId']),
+      closedParams({ dimensions: { const: 2 }, coordinateSpace: { const: 'pixels' } }, ['dimensions', 'coordinateSpace']),
+    ],
+  }, recordContract(['keypoints'])],
+  ['geometry.range_image_to_cartesian', recordContract(['rangeImages', 'calibration', 'poses']), closedParams({
+    returns: { type: 'array', minItems: 1, maxItems: 2, uniqueItems: true, items: { enum: [1, 2] } },
+    outputFrame: { const: 'ego' },
+  }, ['returns', 'outputFrame']), recordContract(['pointClouds'])],
+  ['geometry.relative_poses', recordContract(['rows']), closedParams({
+    matrixField: { type: 'string', minLength: 1, maxLength: 512 },
+  }, ['matrixField']), recordContract(['poses'])],
   ['records.select', recordContract(['rows']), closedParams({
     fields: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
     frameId: { type: 'string', minLength: 1, maxLength: 96 },
@@ -203,6 +248,9 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     leftKey: { type: 'string', minLength: 1, maxLength: 256 },
     rightKey: { type: 'string', minLength: 1, maxLength: 256 },
   }, ['leftKey', 'rightKey']), recordContract(['rows'])],
+  ['relations.composite_key_join', recordContract(['boxes2d', 'boxes3d', 'associations']), closedParams({
+    relation: { const: 'camera-object-to-lidar-object' },
+  }, ['relation']), recordContract(['relations'])],
   ['timeline.join', {
     oneOf: [
       recordContract(['records', 'sampleData', 'calibration']),
@@ -321,14 +369,28 @@ const strictFeatherOperator: CoreOperatorDescriptor = {
   deterministic: true,
 }
 
+const strictParquetOperator: CoreOperatorDescriptor = {
+  name: 'parquet.columns',
+  majorVersion: 1,
+  provider: 'core',
+  tier: 1,
+  inputContract: byteInputContract,
+  paramsContract: parquetParamsContract,
+  outputContract: recordContract(['rows']),
+  validateParams: (params) => {
+    try {
+      assertValidParquetColumnsParamsV1(params as never)
+      return []
+    } catch (error) {
+      return [{ message: error instanceof Error ? error.message : String(error) }]
+    }
+  },
+  execution: 'worker',
+  deterministic: true,
+}
+
 const workerOperators = [
-  'geometry.normalize_keypoints',
-  'geometry.range_image_to_cartesian',
-  'geometry.relative_poses',
-  'labels.decode_camera_mask',
   'labels.panoptic_split',
-  'parquet.columns',
-  'relations.composite_key_join',
 ] as const
 
 /**
@@ -340,6 +402,7 @@ const workerOperators = [
 export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescriptor[] = [
   ...strictBinaryOperators,
   strictFeatherOperator,
+  strictParquetOperator,
   ...strictGraphOperators,
   ...workerOperators.map((name): CoreOperatorDescriptor => ({
     name,

@@ -2,7 +2,7 @@
  * Unit tests for the dataset adapter registry and Waymo manifest.
  *
  * Verifies:
- * - Registry defaults to Waymo manifest
+ * - Registry defaults to the Waymo recipe-backed strategy
  * - setManifest() / getManifest() correctly swap the active manifest
  * - detectDataset() matches manifests by requiredComponents
  * - getAllKnownComponents() aggregates across all manifests
@@ -63,8 +63,9 @@ describe('adapter registry', () => {
     expect(getManifest().id).toBe('waymo')
   })
 
-  it('migrates nuScenes and Argoverse 2 to the recipe strategy while retaining Waymo', () => {
-    expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
+  it('resolves all bundled datasets through recipe-backed strategies', () => {
+    expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'recipe', manifest: waymoManifest })
+    expect(getAdapterById('waymo')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'waymo' })
     expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'nuscenes' })
     expect(getAdapterById('argoverse2')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'argoverse2' })
     expect(getAdapterById('missing')).toBeNull()
@@ -101,7 +102,7 @@ describe('detectDataset', () => {
 
   it('returns the matching strategy as well as the compatibility manifest', () => {
     const adapter = detectDatasetAdapter(['vehicle_pose', 'lidar', 'camera_image'])
-    expect(adapter).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
+    expect(adapter).toMatchObject({ id: 'waymo', kind: 'recipe', manifest: waymoManifest })
   })
 
   it('detects Waymo even with extra unknown dirs', () => {

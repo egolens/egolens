@@ -8,13 +8,14 @@
 
 import { groupIndexBy } from '../../utils/merge'
 import {
-  readAllRows,
   buildFrameIndex,
   type WaymoParquetFile,
 } from '../../utils/parquet'
+import { readParquetColumnsV1, type ParquetColumnsParamsV1 } from '../../teachable/operators/parquetColumns'
 import { parseLidarCalibration } from '../../utils/rangeImage'
 import { multiplyRowMajor4x4, invertRowMajor4x4 } from '../../utils/matrix'
 import type { MetadataBundle } from '../../types/dataset'
+import { waymoRecipe } from './manifest'
 
 // ---------------------------------------------------------------------------
 // Waymo metadata loader
@@ -31,6 +32,12 @@ import type { MetadataBundle } from '../../types/dataset'
 export async function loadWaymoMetadata(
   parquetFiles: Map<string, WaymoParquetFile>,
 ): Promise<MetadataBundle> {
+  const readSource = async (component: string, sourceId: keyof typeof waymoRecipe.sources) => {
+    const file = parquetFiles.get(component)
+    if (!file) return []
+    const params = waymoRecipe.sources[sourceId].params as unknown as ParquetColumnsParamsV1
+    return readParquetColumnsV1(file, params)
+  }
   const bundle: MetadataBundle = {
     timestamps: [],
     timestampToFrame: new Map(),
@@ -53,7 +60,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const posePf = parquetFiles.get('vehicle_pose')
   if (posePf) {
-    const rows = await readAllRows(posePf)
+    const rows = await readSource('vehicle_pose', 'poseRows')
     const index = buildFrameIndex(rows)
     bundle.timestamps = index.timestamps
     bundle.timestampToFrame = index.frameByTimestamp
@@ -87,7 +94,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const lidarCalibPf = parquetFiles.get('lidar_calibration')
   if (lidarCalibPf) {
-    const rows = await readAllRows(lidarCalibPf)
+    const rows = await readSource('lidar_calibration', 'lidarCalibrationRows')
     for (const row of rows) {
       const calib = parseLidarCalibration(row)
       bundle.lidarCalibrations.set(calib.laserName, calib)
@@ -99,7 +106,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const cameraCalibPf = parquetFiles.get('camera_calibration')
   if (cameraCalibPf) {
-    bundle.cameraCalibrations = await readAllRows(cameraCalibPf)
+    bundle.cameraCalibrations = await readSource('camera_calibration', 'cameraCalibrationRows')
   }
 
   // -----------------------------------------------------------------------
@@ -107,7 +114,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const lidarBoxPf = parquetFiles.get('lidar_box')
   if (lidarBoxPf) {
-    const rows = await readAllRows(lidarBoxPf)
+    const rows = await readSource('lidar_box', 'box3dRows')
     bundle.lidarBoxByFrame = groupIndexBy(rows, 'key.frame_timestamp_micros')
     bundle.hasBoxData = rows.length > 0
 
@@ -144,7 +151,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const cameraBoxPf = parquetFiles.get('camera_box')
   if (cameraBoxPf) {
-    const rows = await readAllRows(cameraBoxPf)
+    const rows = await readSource('camera_box', 'box2dRows')
     bundle.cameraBoxByFrame = groupIndexBy(rows, 'key.frame_timestamp_micros')
   }
 
@@ -153,10 +160,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const assocPf = parquetFiles.get('camera_to_lidar_box_association')
   if (assocPf) {
-    const rows = await readAllRows(assocPf, [
-      'key.camera_object_id',
-      'key.laser_object_id',
-    ])
+    const rows = await readSource('camera_to_lidar_box_association', 'associationRows')
     for (const row of rows) {
       const camId = row['key.camera_object_id'] as string | undefined
       const laserId = row['key.laser_object_id'] as string | undefined
@@ -176,14 +180,7 @@ export async function loadWaymoMetadata(
   // -----------------------------------------------------------------------
   const statsPf = parquetFiles.get('stats')
   if (statsPf) {
-    const rows = await readAllRows(statsPf, [
-      'key.segment_context_name',
-      '[StatsComponent].time_of_day',
-      '[StatsComponent].location',
-      '[StatsComponent].weather',
-      '[StatsComponent].lidar_object_counts.types',
-      '[StatsComponent].lidar_object_counts.counts',
-    ])
+    const rows = await readSource('stats', 'statsRows')
     if (rows.length > 0) {
       const row = rows[0]
       const segmentId = row['key.segment_context_name'] as string
@@ -226,11 +223,10 @@ export async function loadWaymoMetadata(
   const lidarSegPf = parquetFiles.get('lidar_segmentation')
   if (lidarSegPf) {
     try {
-      const rows = await readAllRows(lidarSegPf, [
-        'key.frame_timestamp_micros',
-      ])
+      const rows = await readSource('lidar_segmentation', 'lidarSegmentationRows')
       if (rows.length > 0) {
         bundle.hasSegmentation = true
+        bundle.lidarSegmentationByFrame = groupIndexBy(rows, 'key.frame_timestamp_micros') as Map<bigint, typeof rows>
         const segLabelFrames = new Set<number>()
         for (const row of rows) {
           const ts = row['key.frame_timestamp_micros'] as bigint
@@ -250,7 +246,7 @@ export async function loadWaymoMetadata(
   const lidarHkpPf = parquetFiles.get('lidar_hkp')
   if (lidarHkpPf) {
     try {
-      const rows = await readAllRows(lidarHkpPf)
+      const rows = await readSource('lidar_hkp', 'keypoints3dRows')
       if (rows.length > 0) {
         bundle.hasKeypoints = true
         const keypointFrames = new Set<number>()
@@ -280,7 +276,7 @@ export async function loadWaymoMetadata(
   const cameraHkpPf = parquetFiles.get('camera_hkp')
   if (cameraHkpPf) {
     try {
-      const rows = await readAllRows(cameraHkpPf)
+      const rows = await readSource('camera_hkp', 'keypoints2dRows')
       if (rows.length > 0) {
         bundle.hasKeypoints = true
         const cameraKeypointFrames = new Set<number>()
@@ -311,12 +307,7 @@ export async function loadWaymoMetadata(
   const cameraSegPf = parquetFiles.get('camera_segmentation')
   if (cameraSegPf) {
     try {
-      const rows = await readAllRows(cameraSegPf, [
-        'key.frame_timestamp_micros',
-        'key.camera_name',
-        '[CameraSegmentationLabelComponent].panoptic_label',
-        '[CameraSegmentationLabelComponent].panoptic_label_divisor',
-      ], { utf8: false })
+      const rows = await readSource('camera_segmentation', 'cameraSegmentationRows')
       if (rows.length > 0) {
         bundle.hasCameraSegmentation = true
         const cameraSegFrames = new Set<number>()

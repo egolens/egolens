@@ -13,8 +13,6 @@
 import {
   openParquetFile,
   buildHeavyFileFrameIndex,
-  readRowGroupRows,
-  readAllRows,
   type WaymoParquetFile,
   type FrameRowIndex,
 } from '../utils/parquet'
@@ -24,6 +22,7 @@ import {
   type RangeImage,
 } from '../utils/rangeImage'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
+import { readParquetColumnsV1, type ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 
 import type {
   WorkerInitBase,
@@ -54,8 +53,11 @@ export interface WaymoLidarWorkerInit extends WorkerInitBase {
   lidarUrl: string | File
   /** Serialized as [laserName, calibration][] since Map can't be postMessage'd */
   calibrationEntries: [number, LidarCalibration][]
+  /** Compiled parquet.columns@1 contract from the active Waymo recipe. */
+  lidarReaderParams: ParquetColumnsParamsV1
   /** Optional: lidar_segmentation parquet URL for per-point semantic labels */
   segUrl?: string | File
+  segReaderParams?: ParquetColumnsParamsV1
 }
 
 export type WaymoLidarWorkerRequest = WaymoLidarWorkerInit | LidarBatchRequest
@@ -77,6 +79,7 @@ export type DataWorkerLoadRowGroup = LidarBatchRequest
 let lidarPf: WaymoParquetFile | null = null
 let lidarIndex: FrameRowIndex | null = null
 let calibrations = new Map<number, LidarCalibration>()
+let lidarReaderParams: ParquetColumnsParamsV1 | null = null
 
 /** Worker-local memory logger — posts snapshots to main thread */
 let wMem = createWorkerMemoryLogger('worker-lidar-?')
@@ -94,14 +97,6 @@ let segDiagLogged = false
 // ---------------------------------------------------------------------------
 // Waymo Parquet column names
 // ---------------------------------------------------------------------------
-
-const LIDAR_COLUMNS = [
-  'key.frame_timestamp_micros',
-  'key.laser_name',
-  '[LiDARComponent].range_image_return1.shape',
-  '[LiDARComponent].range_image_return1.values',
-]
-
 
 // ---------------------------------------------------------------------------
 // Message handler
@@ -138,18 +133,15 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
       lidarPf = await openParquetFile('lidar', msg.lidarUrl)
       lidarIndex = await buildHeavyFileFrameIndex(lidarPf)
       calibrations = new Map(msg.calibrationEntries)
+      lidarReaderParams = msg.lidarReaderParams
 
       // Load segmentation parquet if provided (~850KB, full load)
       segMap = null
       if (msg.segUrl) {
         try {
           const segPf = await openParquetFile('lidar_segmentation', msg.segUrl)
-          const segRows = await readAllRows(segPf, [
-            'key.frame_timestamp_micros',
-            'key.laser_name',
-            '[LiDARSegmentationLabelComponent].range_image_return1.shape',
-            '[LiDARSegmentationLabelComponent].range_image_return1.values',
-          ])
+          if (!msg.segReaderParams) throw new Error('Missing lidar segmentation reader contract.')
+          const segRows = await readParquetColumnsV1(segPf, msg.segReaderParams)
           segMap = new Map()
           for (const row of segRows) {
             const ts = row['key.frame_timestamp_micros'] as bigint
@@ -180,7 +172,7 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
     }
 
     if (msg.type === 'loadBatch') {
-      if (!lidarPf || !lidarIndex) {
+      if (!lidarPf || !lidarIndex || !lidarReaderParams) {
         throw new Error('Worker not initialized')
       }
 
@@ -188,7 +180,10 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
       wMem.snap(`rg${msg.batchIndex}:fetch-start`)
 
       // 1. Read entire row group — one decompression pass
-      const allRows = await readRowGroupRows(lidarPf, msg.batchIndex, LIDAR_COLUMNS)
+      const rowGroup = lidarPf.rowGroups[msg.batchIndex]
+      const allRows = rowGroup
+        ? await readParquetColumnsV1(lidarPf, lidarReaderParams, rowGroup)
+        : []
 
       wMem.snap(`rg${msg.batchIndex}:decompress-done`, {
         note: `${allRows.length} rows decompressed`,

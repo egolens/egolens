@@ -9,12 +9,11 @@
  */
 
 import type { DatasetManifest } from '../types/dataset'
-import { waymoManifest } from './waymo/manifest'
 import { LegacyDatasetAdapter } from './legacy'
 import type { DatasetAdapter } from './types'
 import { RecipeBackedDatasetAdapter } from '../teachable/runtime/RecipeBackedDatasetAdapter'
 import { bundledPhase2OperatorRegistry } from '../teachable/operators/bundledPhase2'
-import { argoverse2CompiledRecipe, nuScenesCompiledRecipe } from './recipes/bundled'
+import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe } from './recipes/bundled'
 
 // ---------------------------------------------------------------------------
 // Registry — all known dataset manifests
@@ -22,7 +21,11 @@ import { argoverse2CompiledRecipe, nuScenesCompiledRecipe } from './recipes/bund
 
 /** Ordered list of adapter strategies. First match wins during detection. */
 const adapters: DatasetAdapter[] = [
-  new LegacyDatasetAdapter(waymoManifest),
+  new RecipeBackedDatasetAdapter(
+    waymoCompiledRecipe.recipe,
+    bundledPhase2OperatorRegistry,
+    waymoCompiledRecipe,
+  ),
   new RecipeBackedDatasetAdapter(
     nuScenesCompiledRecipe.recipe,
     bundledPhase2OperatorRegistry,
