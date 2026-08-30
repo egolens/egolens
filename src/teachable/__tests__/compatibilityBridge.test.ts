@@ -51,6 +51,7 @@ describe('bridgeNormalizedFrame', () => {
     const first = bridgeNormalizedFrame(normalized, manifest)
     const second = bridgeNormalizedFrame(normalized, manifest)
 
+    expect(second.sensorClouds).toBe(first.sensorClouds)
     expect(second.sensorClouds.get(10)).toBe(first.sensorClouds.get(10))
     expect(second.sensorClouds.get(10)?.positions).toBe(first.sensorClouds.get(10)?.positions)
     expect(second.boxes).toBe(first.boxes)

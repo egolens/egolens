@@ -790,8 +790,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (frameIndex < 0 || frameIndex >= internal.timestamps.length) return
       const scene = internal.normalizedScene
       if (!scene) return
-      const requestMark = `frame-request-${scene.sceneGeneration}-${frameIndex}-${performance.now().toFixed(3)}`
-      markPerformanceEvent(requestMark, { frameIndex })
       noteFrameRequest(scene.sceneGeneration, frameIndex)
 
       // Point and camera caches have independent byte budgets. A camera batch

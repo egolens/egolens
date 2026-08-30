@@ -118,6 +118,15 @@ check('bounded traces are complete',
     candidate: [...(candidate.warmups ?? []), ...(candidate.samples ?? [])].map((run) => run.traceCollection),
   })
 
+const baselineFrameSampleCounts = baseline.summary?.runSummaries?.map((run) => run.frameLatencySamples) ?? []
+const candidateFrameSampleCounts = candidate.summary?.runSummaries?.map((run) => run.frameLatencySamples) ?? []
+check('warm/rapid frame samples are present for every measured run',
+  baselineFrameSampleCounts.length === baseline.samples?.length
+    && candidateFrameSampleCounts.length === candidate.samples?.length
+    && baselineFrameSampleCounts.every((count) => Number.isSafeInteger(count) && count > 0)
+    && candidateFrameSampleCounts.every((count) => Number.isSafeInteger(count) && count > 0),
+  { baseline: baselineFrameSampleCounts, candidate: candidateFrameSampleCounts })
+
 const baselineFirst = distValue(baseline, 'firstUsableFrameMs')
 const candidateFirst = distValue(candidate, 'firstUsableFrameMs')
 const firstAllowance = Math.max((baselineFirst ?? 0) * 0.1, 50)

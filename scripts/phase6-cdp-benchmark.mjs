@@ -302,17 +302,34 @@ function quantile(values, q) {
   return sorted[Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1)]
 }
 
+function traceMarkDetail(event) {
+  const detail = event?.args?.data?.detail
+  if (detail && typeof detail === 'object') return detail
+  if (typeof detail !== 'string') return null
+  try {
+    return JSON.parse(detail)
+  } catch {
+    return null
+  }
+}
+
 function summarizeRun(run) {
   // Initial-load milestones come from the coordinated post-warmup snapshot so
   // later scene generations cannot be paired with the first run's start mark.
   const initialMarks = run.snapshots.afterWarmup.app?.marks ?? []
-  const soakMarks = run.snapshots.afterSoak.app?.marks ?? []
   const start = initialMarks.find((mark) => mark.name.startsWith('egolens:scene-load-start:'))
   const ready = initialMarks.find((mark) => mark.name.startsWith('egolens:dataset-ready:'))
   const first = initialMarks.find((mark) => mark.name.startsWith('egolens:first-usable-frame:'))
-  const latencies = soakMarks
-    .filter((mark) => mark.name.startsWith('egolens:frame-presented:'))
-    .map((mark) => mark.detail?.inputToFrameMs)
+  const initialGeneration = ready?.detail?.sceneGeneration ?? first?.detail?.sceneGeneration
+  // The app snapshot is intentionally bounded and can contain only the last
+  // cross-dataset generations after a long soak. Trace events retain the full
+  // run, so warm/rapid latency must select only the initially loaded scene and
+  // must not mix later cold first frames into this distribution.
+  const latencies = run.trace
+    .filter((event) => event.name.startsWith('egolens:frame-presented:'))
+    .map(traceMarkDetail)
+    .filter((detail) => detail?.sceneGeneration === initialGeneration)
+    .map((detail) => detail?.inputToFrameMs)
     .filter(Number.isFinite)
   const drawFrames = run.trace.filter((event) => event.name === 'DrawFrame').length
   const frameTimestamps = run.trace
@@ -330,6 +347,7 @@ function summarizeRun(run) {
     firstUsableFrameMs: start && first ? first.startTime - start.startTime : null,
     frameLatencyP50Ms: quantile(latencies, 0.5),
     frameLatencyP95Ms: quantile(latencies, 0.95),
+    frameLatencySamples: latencies.length,
     tracedFrameRate: traceSeconds > 0 ? drawFrames / traceSeconds : null,
     longTaskMs,
     requests: run.network.length,
@@ -349,7 +367,7 @@ function aggregate(runs) {
   return {
     runSummaries: summaries,
     distribution: Object.fromEntries([
-      'datasetReadyMs', 'firstUsableFrameMs', 'frameLatencyP50Ms', 'frameLatencyP95Ms',
+      'datasetReadyMs', 'firstUsableFrameMs', 'frameLatencyP50Ms', 'frameLatencyP95Ms', 'frameLatencySamples',
       'tracedFrameRate', 'longTaskMs', 'requests', 'rangeRequests', 'encodedBytes',
       'decompressions', 'rowGroupFetches', 'retainedBytes',
     ].map((key) => [key, {

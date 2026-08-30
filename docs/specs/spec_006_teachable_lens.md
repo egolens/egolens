@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed ten renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed eleven renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1342,6 +1342,12 @@ normative for later Teachable Lens work:
   the normalized manifest/frame component identity with weak keys so eviction
   and scene disposal still release the authoritative buffers; do not add an
   independently retained compatibility-frame cache.
+- performance selectors and generation boundaries are part of benchmark
+  validity. The legacy and candidate timelines must expose the same stable
+  interaction target, and warm/rapid frame latency must be derived from the
+  initially loaded scene's full CDP trace. A bounded end-of-soak mark snapshot
+  can otherwise omit that generation and silently substitute later cold
+  cross-dataset first frames.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.

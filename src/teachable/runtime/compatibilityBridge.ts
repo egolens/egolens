@@ -43,6 +43,10 @@ interface ManifestBridgeCacheV1 {
   readonly classIds: ReadonlyMap<string, number>
   readonly lidarPointClouds: WeakMap<NormalizedPointCloudV1, PointCloud>
   readonly radarPointClouds: WeakMap<NormalizedPointCloudV1, PointCloud>
+  readonly sensorCloudMaps: WeakMap<
+    NormalizedFrameV1['pointClouds'],
+    WeakMap<NormalizedFrameV1['radarPointClouds'], Map<number, PointCloud>>
+  >
   readonly boxes3d: WeakMap<readonly NormalizedBox3dV1[], ParquetRow[]>
   readonly boxes2d: WeakMap<readonly NormalizedBox2dV1[], ParquetRow[]>
   readonly cameraImages: WeakMap<NormalizedFrameV1['cameraImages'], Map<number, ArrayBuffer>>
@@ -63,6 +67,7 @@ function manifestBridgeCache(manifest: NormalizedManifestV1): ManifestBridgeCach
     classIds: taxonomyRendererIds(manifest),
     lidarPointClouds: new WeakMap(),
     radarPointClouds: new WeakMap(),
+    sensorCloudMaps: new WeakMap(),
     boxes3d: new WeakMap(),
     boxes2d: new WeakMap(),
     cameraImages: new WeakMap(),
@@ -297,27 +302,40 @@ function bridgeCameraImages(
   return bridged
 }
 
+function bridgeSensorClouds(
+  frame: NormalizedFrameV1,
+  cache: ManifestBridgeCacheV1,
+): Map<number, PointCloud> {
+  let radarMaps = cache.sensorCloudMaps.get(frame.pointClouds)
+  if (!radarMaps) {
+    radarMaps = new WeakMap()
+    cache.sensorCloudMaps.set(frame.pointClouds, radarMaps)
+  }
+  const cached = radarMaps.get(frame.radarPointClouds)
+  if (cached) return cached
+  const bridged = new Map<number, PointCloud>()
+  for (const cloud of frame.pointClouds) {
+    const rendererId = cache.sensorIds.get(cloud.sensorId)
+    if (rendererId !== undefined) bridged.set(rendererId, bridgePointCloud(cloud, false, cache))
+  }
+  for (const cloud of frame.radarPointClouds) {
+    const rendererId = cache.sensorIds.get(cloud.sensorId)
+    if (rendererId !== undefined) bridged.set(rendererId, bridgePointCloud(cloud, true, cache))
+  }
+  radarMaps.set(frame.radarPointClouds, bridged)
+  return bridged
+}
+
 export function bridgeNormalizedFrame(
   frame: NormalizedFrameV1,
   manifest: NormalizedManifestV1,
   rendererTimestamp: bigint = frame.timestampMicros,
 ): RendererFrameV1 {
   const cache = manifestBridgeCache(manifest)
-  const sensorClouds = new Map<number, PointCloud>()
-  for (const cloud of frame.pointClouds) {
-    const rendererId = cache.sensorIds.get(cloud.sensorId)
-    if (rendererId === undefined) continue
-    sensorClouds.set(rendererId, bridgePointCloud(cloud, false, cache))
-  }
-  for (const cloud of frame.radarPointClouds) {
-    const rendererId = cache.sensorIds.get(cloud.sensorId)
-    if (rendererId === undefined) continue
-    sensorClouds.set(rendererId, bridgePointCloud(cloud, true, cache))
-  }
 
   return {
     timestamp: rendererTimestamp,
-    sensorClouds,
+    sensorClouds: bridgeSensorClouds(frame, cache),
     boxes: bridgeBoxes3d(frame.boxes3d, cache),
     cameraBoxes: bridgeBoxes2d(frame.boxes2d, cache),
     cameraImages: bridgeCameraImages(frame.cameraImages, cache),

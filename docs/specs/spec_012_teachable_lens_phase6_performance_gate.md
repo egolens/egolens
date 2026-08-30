@@ -37,6 +37,12 @@ dataset scene, and presentation settings before and after each cutover:
 Use at least five runs after one warm-up run. Compare distributions rather than
 a single fastest run. Store the benchmark scenario, commit, browser version,
 hardware, raw samples, and summary so a future regression can be reproduced.
+The rapid-scrub input must resolve the same stable timeline selector in both
+revisions. Its latency distribution is limited to `frame-presented` trace marks
+whose scene generation matches the initially loaded scene; cold first-frame
+marks from later cross-dataset soak generations are not warm/rapid samples.
+The runner must fail validation when that interaction target or sample set is
+absent rather than substituting another generation.
 
 ### Measurement source matrix
 
