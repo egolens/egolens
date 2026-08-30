@@ -140,6 +140,11 @@ A point or image buffer may be transferred or viewed without copying, but may
 not be retained independently by a compatibility cache, normalized cache, and
 renderer cache. Cache keys and byte budgets must be explicit. An LRU or
 equivalent bounded policy is required wherever data can grow with frame count.
+Pure compatibility projections may be memoized only as weakly keyed derived
+views whose lifetime follows the normalized manifest/frame component that owns
+their input. This includes renderer sensor/class maps, box rows, and lossy radar
+layouts used by the existing renderer. A hot seek must reuse those projections
+without creating a second strongly retained frame cache.
 Eviction must be operational rather than merely bounded: every consumer-facing
 seek demand-reloads each independently missing point or camera batch. A cache
 hit in one resource class must never suppress restoration of another class.

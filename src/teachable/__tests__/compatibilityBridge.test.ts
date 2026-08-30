@@ -45,6 +45,19 @@ describe('bridgeNormalizedFrame', () => {
     expect(Array.from(normalizedValues)).toEqual([1, 2, 3, 3, 4, 6, 8])
   })
 
+  it('reuses derived renderer views while normalized cache identities remain live', () => {
+    const normalized = frameWithRadar(new Float32Array([1, 2, 3, 3, 4, 6, 8]))
+
+    const first = bridgeNormalizedFrame(normalized, manifest)
+    const second = bridgeNormalizedFrame(normalized, manifest)
+
+    expect(second.sensorClouds.get(10)).toBe(first.sensorClouds.get(10))
+    expect(second.sensorClouds.get(10)?.positions).toBe(first.sensorClouds.get(10)?.positions)
+    expect(second.boxes).toBe(first.boxes)
+    expect(second.cameraBoxes).toBe(first.cameraBoxes)
+    expect(second.cameraImages).toBe(first.cameraImages)
+  })
+
   it('keeps projected cuboids on the legacy wireframe path', () => {
     const base = frameWithRadar(new Float32Array([1, 2, 3, 3, 4, 6, 8]))
     const bridged = bridgeNormalizedFrame({

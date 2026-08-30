@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed nine renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed ten renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1336,6 +1336,12 @@ normative for later Teachable Lens work:
   when store, worker, and renderer counters are already zero. Clear every
   viewer-owned model URL when the viewer is disposed; the browser HTTP cache may
   remain the transport cache.
+- compatibility projection is a derived renderer view, not another frame
+  owner. Repeated hot seeks must not rebuild sensor/class lookup maps, box rows,
+  or the legacy five-float radar projection. Memoize those pure projections by
+  the normalized manifest/frame component identity with weak keys so eviction
+  and scene disposal still release the authoritative buffers; do not add an
+  independently retained compatibility-frame cache.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.
