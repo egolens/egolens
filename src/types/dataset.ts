@@ -107,6 +107,8 @@ export interface MetadataBundle {
 
   /** Frame indices with lidar segmentation labels */
   segLabelFrames?: Set<number>
+  /** LiDAR segmentation rows grouped by timestamp */
+  lidarSegmentationByFrame?: Map<bigint, import('../utils/merge').ParquetRow[]>
   /** Frame indices with 3D lidar keypoint data */
   keypointFrames?: Set<number>
   /** Frame indices with 2D camera keypoint data */

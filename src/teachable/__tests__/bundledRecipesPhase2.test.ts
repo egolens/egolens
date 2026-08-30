@@ -8,6 +8,7 @@ import {
 import { argoverse2Manifest } from '../../adapters/argoverse2/manifest'
 import { nuScenesManifest } from '../../adapters/nuscenes/manifest'
 import { waymoManifest } from '../../adapters/waymo/manifest'
+import { getAdapterById } from '../../adapters/registry'
 import { compileRecipeV1 } from '../recipe/compiler'
 import { AdapterCompileError } from '../recipe/diagnostics'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
@@ -72,14 +73,14 @@ describe('bundled Phase 2 recipes', () => {
     ]))
   })
 
-  it('uses closed contracts for every operator on executable nuScenes and AV2 graphs', () => {
+  it('uses closed contracts for every operator on all executable bundled graphs', () => {
     const isClosed = (contract: Readonly<Record<string, unknown>>): boolean => {
       if (contract.additionalProperties === false) return true
       const alternatives = contract.oneOf
       return Array.isArray(alternatives)
         && alternatives.every((alternative) => isClosed(alternative as Readonly<Record<string, unknown>>))
     }
-    for (const compiled of [nuScenesCompiledRecipe, argoverse2CompiledRecipe]) {
+    for (const compiled of bundledCompiledRecipes) {
       for (const [name, dependency] of Object.entries(compiled.recipe.engine.requiredOperators)) {
         const descriptor = bundledPhase2OperatorRegistry.resolve(name, dependency)
         expect(descriptor, name).not.toBeNull()
@@ -87,6 +88,13 @@ describe('bundled Phase 2 recipes', () => {
         expect(isClosed(descriptor!.inputContract), `${name} input`).toBe(true)
         expect(isClosed(descriptor!.outputContract), `${name} output`).toBe(true)
       }
+    }
+  })
+
+  it('resolves all three bundled datasets through recipe-backed registry strategies', () => {
+    for (const id of ['waymo', 'nuscenes', 'argoverse2']) {
+      expect(getAdapterById(id)?.kind).toBe('recipe')
+      expect(getAdapterById(id)?.prepare().kind).toBe('recipe')
     }
   })
 

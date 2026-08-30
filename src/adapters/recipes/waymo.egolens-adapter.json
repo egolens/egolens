@@ -168,6 +168,15 @@
       "bindings": {
         "timestamp": "key.frame_timestamp_micros",
         "egoPose": "[VehiclePoseComponent].world_from_vehicle.transform"
+      },
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "[VehiclePoseComponent].world_from_vehicle.transform", "type": "number-list" }
+        ],
+        "maxInputBytes": 268435456,
+        "maxRows": 1000000,
+        "maxOutputBytes": 268435456
       }
     },
     "lidarRows": {
@@ -188,6 +197,17 @@
         "sensorId": "key.laser_name",
         "rangeImageShape": "[LiDARComponent].range_image_return1.shape",
         "rangeImageValues": "[LiDARComponent].range_image_return1.values"
+      },
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.laser_name", "type": "integer" },
+          { "name": "[LiDARComponent].range_image_return1.shape", "type": "integer-list" },
+          { "name": "[LiDARComponent].range_image_return1.values", "type": "number-list" }
+        ],
+        "maxInputBytes": 4294967296,
+        "maxRows": 10000,
+        "maxOutputBytes": 1073741824
       }
     },
     "lidarCalibrationRows": {
@@ -195,6 +215,25 @@
       "files": {
         "glob": "lidar_calibration/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.laser_name",
+        "[LiDARCalibrationComponent].extrinsic.transform",
+        "[LiDARCalibrationComponent].beam_inclination.values",
+        "[LiDARCalibrationComponent].beam_inclination.min",
+        "[LiDARCalibrationComponent].beam_inclination.max"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.laser_name", "type": "integer" },
+          { "name": "[LiDARCalibrationComponent].extrinsic.transform", "type": "number-list" },
+          { "name": "[LiDARCalibrationComponent].beam_inclination.values", "type": "number-list", "optional": true, "nullable": true },
+          { "name": "[LiDARCalibrationComponent].beam_inclination.min", "type": "number", "optional": true, "nullable": true },
+          { "name": "[LiDARCalibrationComponent].beam_inclination.max", "type": "number", "optional": true, "nullable": true }
+        ],
+        "maxInputBytes": 16777216,
+        "maxRows": 128,
+        "maxOutputBytes": 16777216
       }
     },
     "cameraCalibrationRows": {
@@ -202,6 +241,41 @@
       "files": {
         "glob": "camera_calibration/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.camera_name",
+        "[CameraCalibrationComponent].extrinsic.transform",
+        "[CameraCalibrationComponent].width",
+        "[CameraCalibrationComponent].height",
+        "[CameraCalibrationComponent].intrinsic.f_u",
+        "[CameraCalibrationComponent].intrinsic.f_v",
+        "[CameraCalibrationComponent].intrinsic.c_u",
+        "[CameraCalibrationComponent].intrinsic.c_v",
+        "[CameraCalibrationComponent].intrinsic.k1",
+        "[CameraCalibrationComponent].intrinsic.k2",
+        "[CameraCalibrationComponent].intrinsic.p1",
+        "[CameraCalibrationComponent].intrinsic.p2",
+        "[CameraCalibrationComponent].intrinsic.k3"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.camera_name", "type": "integer" },
+          { "name": "[CameraCalibrationComponent].extrinsic.transform", "type": "number-list" },
+          { "name": "[CameraCalibrationComponent].width", "type": "integer" },
+          { "name": "[CameraCalibrationComponent].height", "type": "integer" },
+          { "name": "[CameraCalibrationComponent].intrinsic.f_u", "type": "number" },
+          { "name": "[CameraCalibrationComponent].intrinsic.f_v", "type": "number" },
+          { "name": "[CameraCalibrationComponent].intrinsic.c_u", "type": "number", "optional": true, "nullable": true },
+          { "name": "[CameraCalibrationComponent].intrinsic.c_v", "type": "number", "optional": true, "nullable": true },
+          { "name": "[CameraCalibrationComponent].intrinsic.k1", "type": "number", "optional": true, "nullable": true },
+          { "name": "[CameraCalibrationComponent].intrinsic.k2", "type": "number", "optional": true, "nullable": true },
+          { "name": "[CameraCalibrationComponent].intrinsic.p1", "type": "number", "optional": true, "nullable": true },
+          { "name": "[CameraCalibrationComponent].intrinsic.p2", "type": "number", "optional": true, "nullable": true },
+          { "name": "[CameraCalibrationComponent].intrinsic.k3", "type": "number", "optional": true, "nullable": true }
+        ],
+        "maxInputBytes": 16777216,
+        "maxRows": 128,
+        "maxOutputBytes": 16777216
       }
     },
     "cameraImageRows": {
@@ -210,6 +284,21 @@
         "glob": "camera_image/**/*.parquet",
         "order": "numeric-path",
         "minCount": 1
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.camera_name",
+        "[CameraImageComponent].image"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.camera_name", "type": "integer" },
+          { "name": "[CameraImageComponent].image", "type": "binary" }
+        ],
+        "maxInputBytes": 4294967296,
+        "maxRows": 10000,
+        "maxOutputBytes": 2147483648
       }
     },
     "box3dRows": {
@@ -217,6 +306,35 @@
       "files": {
         "glob": "lidar_box/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.laser_object_id",
+        "[LiDARBoxComponent].type",
+        "[LiDARBoxComponent].box.center.x",
+        "[LiDARBoxComponent].box.center.y",
+        "[LiDARBoxComponent].box.center.z",
+        "[LiDARBoxComponent].box.size.x",
+        "[LiDARBoxComponent].box.size.y",
+        "[LiDARBoxComponent].box.size.z",
+        "[LiDARBoxComponent].box.heading"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.laser_object_id", "type": "utf8" },
+          { "name": "[LiDARBoxComponent].type", "type": "integer" },
+          { "name": "[LiDARBoxComponent].box.center.x", "type": "number" },
+          { "name": "[LiDARBoxComponent].box.center.y", "type": "number" },
+          { "name": "[LiDARBoxComponent].box.center.z", "type": "number" },
+          { "name": "[LiDARBoxComponent].box.size.x", "type": "number" },
+          { "name": "[LiDARBoxComponent].box.size.y", "type": "number" },
+          { "name": "[LiDARBoxComponent].box.size.z", "type": "number" },
+          { "name": "[LiDARBoxComponent].box.heading", "type": "number" }
+        ],
+        "maxInputBytes": 1073741824,
+        "maxRows": 1000000,
+        "maxOutputBytes": 1073741824
       }
     },
     "box2dRows": {
@@ -224,6 +342,31 @@
       "files": {
         "glob": "camera_box/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.camera_name",
+        "key.camera_object_id",
+        "[CameraBoxComponent].type",
+        "[CameraBoxComponent].box.center.x",
+        "[CameraBoxComponent].box.center.y",
+        "[CameraBoxComponent].box.size.x",
+        "[CameraBoxComponent].box.size.y"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.camera_name", "type": "integer" },
+          { "name": "key.camera_object_id", "type": "utf8" },
+          { "name": "[CameraBoxComponent].type", "type": "integer" },
+          { "name": "[CameraBoxComponent].box.center.x", "type": "number" },
+          { "name": "[CameraBoxComponent].box.center.y", "type": "number" },
+          { "name": "[CameraBoxComponent].box.size.x", "type": "number" },
+          { "name": "[CameraBoxComponent].box.size.y", "type": "number" }
+        ],
+        "maxInputBytes": 1073741824,
+        "maxRows": 1000000,
+        "maxOutputBytes": 1073741824
       }
     },
     "associationRows": {
@@ -231,6 +374,19 @@
       "files": {
         "glob": "camera_to_lidar_box_association/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.camera_object_id",
+        "key.laser_object_id"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.camera_object_id", "type": "utf8" },
+          { "name": "key.laser_object_id", "type": "utf8" }
+        ],
+        "maxInputBytes": 536870912,
+        "maxRows": 1000000,
+        "maxOutputBytes": 536870912
       }
     },
     "lidarSegmentationRows": {
@@ -238,6 +394,23 @@
       "files": {
         "glob": "lidar_segmentation/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.laser_name",
+        "[LiDARSegmentationLabelComponent].range_image_return1.shape",
+        "[LiDARSegmentationLabelComponent].range_image_return1.values"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.laser_name", "type": "integer" },
+          { "name": "[LiDARSegmentationLabelComponent].range_image_return1.shape", "type": "integer-list" },
+          { "name": "[LiDARSegmentationLabelComponent].range_image_return1.values", "type": "integer-list" }
+        ],
+        "maxInputBytes": 2147483648,
+        "maxRows": 10000,
+        "maxOutputBytes": 1073741824
       }
     },
     "cameraSegmentationRows": {
@@ -245,6 +418,23 @@
       "files": {
         "glob": "camera_segmentation/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.camera_name",
+        "[CameraSegmentationLabelComponent].panoptic_label",
+        "[CameraSegmentationLabelComponent].panoptic_label_divisor"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.camera_name", "type": "integer" },
+          { "name": "[CameraSegmentationLabelComponent].panoptic_label", "type": "binary" },
+          { "name": "[CameraSegmentationLabelComponent].panoptic_label_divisor", "type": "integer" }
+        ],
+        "maxInputBytes": 1073741824,
+        "maxRows": 100000,
+        "maxOutputBytes": 1073741824
       }
     },
     "keypoints3dRows": {
@@ -252,6 +442,27 @@
       "files": {
         "glob": "lidar_hkp/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.laser_object_id",
+        "[LiDARHumanKeypointsComponent].lidar_keypoints[*].type",
+        "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.x",
+        "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.y",
+        "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.z"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.laser_object_id", "type": "utf8" },
+          { "name": "[LiDARHumanKeypointsComponent].lidar_keypoints[*].type", "type": "integer-list" },
+          { "name": "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.x", "type": "number-list" },
+          { "name": "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.y", "type": "number-list" },
+          { "name": "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.z", "type": "number-list" }
+        ],
+        "maxInputBytes": 536870912,
+        "maxRows": 1000000,
+        "maxOutputBytes": 536870912
       }
     },
     "keypoints2dRows": {
@@ -259,6 +470,29 @@
       "files": {
         "glob": "camera_hkp/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.camera_name",
+        "key.camera_object_id",
+        "[CameraHumanKeypointsComponent].camera_keypoints[*].type",
+        "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.x",
+        "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.y",
+        "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.visibility.is_occluded"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.frame_timestamp_micros", "type": "bigint" },
+          { "name": "key.camera_name", "type": "integer" },
+          { "name": "key.camera_object_id", "type": "utf8", "optional": true, "nullable": true },
+          { "name": "[CameraHumanKeypointsComponent].camera_keypoints[*].type", "type": "integer-list" },
+          { "name": "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.x", "type": "number-list" },
+          { "name": "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.y", "type": "number-list" },
+          { "name": "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.visibility.is_occluded", "type": "boolean-list", "optional": true, "nullable": true }
+        ],
+        "maxInputBytes": 536870912,
+        "maxRows": 1000000,
+        "maxOutputBytes": 536870912
       }
     },
     "statsRows": {
@@ -266,6 +500,27 @@
       "files": {
         "glob": "stats/**/*.parquet",
         "order": "numeric-path"
+      },
+      "columns": [
+        "key.segment_context_name",
+        "[StatsComponent].time_of_day",
+        "[StatsComponent].location",
+        "[StatsComponent].weather",
+        "[StatsComponent].lidar_object_counts.types",
+        "[StatsComponent].lidar_object_counts.counts"
+      ],
+      "params": {
+        "columns": [
+          { "name": "key.segment_context_name", "type": "utf8" },
+          { "name": "[StatsComponent].time_of_day", "type": "utf8" },
+          { "name": "[StatsComponent].location", "type": "utf8" },
+          { "name": "[StatsComponent].weather", "type": "utf8" },
+          { "name": "[StatsComponent].lidar_object_counts.types", "type": "integer-list" },
+          { "name": "[StatsComponent].lidar_object_counts.counts", "type": "integer-list" }
+        ],
+        "maxInputBytes": 268435456,
+        "maxRows": 1000000,
+        "maxOutputBytes": 268435456
       }
     }
   },
@@ -345,9 +600,9 @@
         "id": "camera-side-left-frame",
         "parent": "ego",
         "convention": {
-          "x": "forward",
-          "y": "left",
-          "z": "up",
+          "x": "right",
+          "y": "down",
+          "z": "forward",
           "handedness": "right",
           "lengthUnit": "m"
         }
@@ -356,9 +611,9 @@
         "id": "camera-front-left-frame",
         "parent": "ego",
         "convention": {
-          "x": "forward",
-          "y": "left",
-          "z": "up",
+          "x": "right",
+          "y": "down",
+          "z": "forward",
           "handedness": "right",
           "lengthUnit": "m"
         }
@@ -367,9 +622,9 @@
         "id": "camera-front-frame",
         "parent": "ego",
         "convention": {
-          "x": "forward",
-          "y": "left",
-          "z": "up",
+          "x": "right",
+          "y": "down",
+          "z": "forward",
           "handedness": "right",
           "lengthUnit": "m"
         }
@@ -378,9 +633,9 @@
         "id": "camera-front-right-frame",
         "parent": "ego",
         "convention": {
-          "x": "forward",
-          "y": "left",
-          "z": "up",
+          "x": "right",
+          "y": "down",
+          "z": "forward",
           "handedness": "right",
           "lengthUnit": "m"
         }
@@ -389,9 +644,9 @@
         "id": "camera-side-right-frame",
         "parent": "ego",
         "convention": {
-          "x": "forward",
-          "y": "left",
-          "z": "up",
+          "x": "right",
+          "y": "down",
+          "z": "forward",
           "handedness": "right",
           "lengthUnit": "m"
         }

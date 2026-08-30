@@ -92,9 +92,11 @@ import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverl
 import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
 import { bindNuScenesRecipeSceneV1 } from '../teachable/runtime/NuScenesRecipeScene'
 import type { NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
-import { argoverse2CompiledRecipe, nuScenesCompiledRecipe } from '../adapters/recipes/bundled'
+import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe } from '../adapters/recipes/bundled'
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
+import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 import { bindAV2RecipeSceneV1 } from '../teachable/runtime/AV2RecipeScene'
+import { bindWaymoRecipeSceneV1 } from '../teachable/runtime/WaymoRecipeScene'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1673,9 +1675,26 @@ async function loadFrameMainThread(
 async function loadStartupData(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
   // Delegate to Waymo adapter (returns dataset-agnostic MetadataBundle)
   const bundle = await loadWaymoMetadata(internal.parquetFiles)
+  const binding = await bindWaymoRecipeSceneV1({
+    compiledRecipe: waymoCompiledRecipe,
+    parquetFiles: internal.parquetFiles,
+    metadataBundle: bundle,
+  })
+  internal.normalizedScene?.dispose()
+  internal.normalizedScene = binding.scene
+  for (const diagnostic of binding.diagnostics) {
+    console.info(`[Waymo recipe] ${diagnostic.code}: ${diagnostic.hint}`)
+  }
 
   // Unpack bundle into internal state
-  applyMetadataBundle(bundle, set, get)
+  applyMetadataBundle({
+    ...bundle,
+    hasBoxData: binding.scene.manifest.capabilities.has('boxes3d'),
+    hasSegmentation: binding.scene.manifest.capabilities.has('lidarSegmentation'),
+    hasKeypoints: binding.scene.manifest.capabilities.has('keypoints3d')
+      || binding.scene.manifest.capabilities.has('keypoints2d'),
+    hasCameraSegmentation: binding.scene.manifest.capabilities.has('cameraSegmentation'),
+  }, set, get)
 }
 
 /**
@@ -1762,11 +1781,17 @@ async function initDataWorker(
     () => new Worker(new URL('../workers/waymoLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
   // Pass segmentation parquet URL if available (Phase A worker protocol)
-  const segSource = sources.get('lidar_segmentation')
+  const segSource = internal.parquetFiles.has('lidar_segmentation')
+    ? sources.get('lidar_segmentation')
+    : undefined
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
-    ...(segSource ? { segUrl: segSource } : {}),
+    lidarReaderParams: waymoCompiledRecipe.recipe.sources.lidarRows.params as unknown as ParquetColumnsParamsV1,
+    ...(segSource ? {
+      segUrl: segSource,
+      segReaderParams: waymoCompiledRecipe.recipe.sources.lidarSegmentationRows.params as unknown as ParquetColumnsParamsV1,
+    } : {}),
   })
 
   internal.workerPool = pool
@@ -1778,14 +1803,17 @@ async function initCameraWorker(
   sources: Map<string, File | string>,
 ) {
   const cameraSource = sources.get('camera_image')
-  if (!cameraSource) return
+  if (!cameraSource || !internal.parquetFiles.has('camera_image')) return
 
   const start = async () => {
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
     2,
     () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
   )
-  const { numBatches } = await pool.init({ cameraUrl: cameraSource })
+  const { numBatches } = await pool.init({
+    cameraUrl: cameraSource,
+    cameraReaderParams: waymoCompiledRecipe.recipe.sources.cameraImageRows.params as unknown as ParquetColumnsParamsV1,
+  })
 
   internal.cameraPool = pool
   internal.cameraNumBatches = numBatches

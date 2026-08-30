@@ -13,10 +13,10 @@
 
 import {
   openParquetFile,
-  readRowGroupRows,
   type WaymoParquetFile,
 } from '../utils/parquet'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
+import { readParquetColumnsV1, type ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 
 import type {
   WorkerInitBase,
@@ -43,6 +43,8 @@ export type {
 
 export interface WaymoCameraWorkerInit extends WorkerInitBase {
   cameraUrl: string | File
+  /** Compiled parquet.columns@1 contract from the active Waymo recipe. */
+  cameraReaderParams: ParquetColumnsParamsV1
 }
 
 export type WaymoCameraWorkerRequest = WaymoCameraWorkerInit | CameraBatchRequest
@@ -58,6 +60,7 @@ export type CameraWorkerLoadRowGroup = CameraBatchRequest
 // ---------------------------------------------------------------------------
 
 let cameraPf: WaymoParquetFile | null = null
+let cameraReaderParams: ParquetColumnsParamsV1 | null = null
 
 /** Worker-local memory logger */
 let wMem = createWorkerMemoryLogger('worker-cam-?')
@@ -65,12 +68,6 @@ let wMem = createWorkerMemoryLogger('worker-cam-?')
 // ---------------------------------------------------------------------------
 // Waymo Parquet column names
 // ---------------------------------------------------------------------------
-
-const CAMERA_COLUMNS = [
-  'key.frame_timestamp_micros',
-  'key.camera_name',
-  '[CameraImageComponent].image',
-]
 
 // ---------------------------------------------------------------------------
 // Message handler
@@ -104,6 +101,7 @@ async function handleMessage(msg: WaymoCameraWorkerRequest) {
 
       wMem.snap('init:start')
       cameraPf = await openParquetFile('camera_image', msg.cameraUrl)
+      cameraReaderParams = msg.cameraReaderParams
       wMem.snap('init:complete', { note: `${cameraPf.rowGroups.length} RGs` })
 
       post.postMessage({
@@ -114,7 +112,7 @@ async function handleMessage(msg: WaymoCameraWorkerRequest) {
     }
 
     if (msg.type === 'loadBatch') {
-      if (!cameraPf) {
+      if (!cameraPf || !cameraReaderParams) {
         throw new Error('Camera worker not initialized')
       }
 
@@ -122,7 +120,10 @@ async function handleMessage(msg: WaymoCameraWorkerRequest) {
       wMem.snap(`rg${msg.batchIndex}:fetch-start`)
 
       // 1. Read entire row group (utf8:false → BYTE_ARRAY stays as Uint8Array, not string)
-      const allRows = await readRowGroupRows(cameraPf, msg.batchIndex, CAMERA_COLUMNS, { utf8: false })
+      const rowGroup = cameraPf.rowGroups[msg.batchIndex]
+      const allRows = rowGroup
+        ? await readParquetColumnsV1(cameraPf, cameraReaderParams, rowGroup)
+        : []
       wMem.snap(`rg${msg.batchIndex}:decompress-done`, {
         note: `${allRows.length} rows decompressed`,
       })
