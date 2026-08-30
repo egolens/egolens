@@ -306,35 +306,14 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
               }} />
             )}
 
-            {/* Time window — dim everything outside [f0, f1]; the window keeps
-                the track's own colors (Perfetto/DevTools brush idiom) */}
+            {/* Time-window boundaries. Handles provide the affordance in the
+                full viewer; minimal/embed mode uses ticks because its window
+                is controlled by the host. */}
             {playbackWindow && maxFrame > 0 && (() => {
               const leftPct = (playbackWindow.f0 / maxFrame) * 100
               const rightPct = (playbackWindow.f1 / maxFrame) * 100
               return (
                 <>
-                  {playbackWindow.f0 > 0 && (
-                    <div style={{
-                      position: 'absolute',
-                      left: 0,
-                      width: `${leftPct}%`,
-                      height: '16px',
-                      backgroundColor: colors.scrimOut,
-                      borderRadius: `${radius.pill} 0 0 ${radius.pill}`,
-                      pointerEvents: 'none',
-                    }} />
-                  )}
-                  {playbackWindow.f1 < maxFrame && (
-                    <div style={{
-                      position: 'absolute',
-                      left: `${rightPct}%`,
-                      right: 0,
-                      height: '16px',
-                      backgroundColor: colors.scrimOut,
-                      borderRadius: `0 ${radius.pill} ${radius.pill} 0`,
-                      pointerEvents: 'none',
-                    }} />
-                  )}
                   {minimal && (
                     // Minimal/embed: boundary ticks only — the window is host-controlled
                     <>

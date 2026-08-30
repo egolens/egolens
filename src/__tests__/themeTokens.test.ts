@@ -305,12 +305,6 @@ describe('canvases that repaint from a manual subscription list', () => {
 })
 
 describe('surfaces cannot be hardcoded near-black or near-white', () => {
-  // The class this catches: a scrim. The playback range dimmed everything
-  // outside it with `rgba(10, 13, 26, 0.72)`, which reads as de-emphasis on
-  // dark and as a black bar on light. It was not a copy of any token, so the
-  // duplicate rules above could not see it — but a near-black surface is
-  // always theme-blind, whatever its exact value.
-  //
   // Deliberately narrow: brand colours, dataset colours and annotation marker
   // colours are literals too, and must stay literals. Only the extremes of the
   // lightness range are a surface that has to flip.

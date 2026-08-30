@@ -63,11 +63,6 @@ const CHROME_DARK = {
   tintSinkText: 'rgba(255, 255, 255, 0.82)',
   /** Drop-shadow ink. A black shadow is invisible on dark and heavy on light. */
   shadowInk: 'rgba(0, 0, 0, 0.55)',
-  /** Pushes a region back — the timeline outside a playback range. "Recede"
-   *  means darker on dark and lighter on light; a black scrim on a light
-   *  timeline reads as a bar, not as de-emphasis. Kept short of opaque so the
-   *  buffer bar and annotation ticks stay legible underneath. */
-  scrimOut: 'rgba(10, 13, 26, 0.72)',
 } as const
 
 const CHROME_LIGHT: Record<keyof typeof CHROME_DARK, string> = {
@@ -96,7 +91,6 @@ const CHROME_LIGHT: Record<keyof typeof CHROME_DARK, string> = {
   tintSink: 'rgba(255, 255, 255, 0.78)',
   tintSinkText: 'rgba(15, 23, 42, 0.86)',
   shadowInk: 'rgba(15, 23, 42, 0.16)',
-  scrimOut: 'rgba(248, 250, 252, 0.80)',
 }
 
 export const CHROME_PALETTES: Record<ThemeName, Record<string, string>> = {
