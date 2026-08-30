@@ -7,6 +7,7 @@ import type {
   NormalizedBox3dV1,
   NormalizedFrameV1,
   NormalizedManifestV1,
+  NormalizedPointCloudV1,
 } from './normalizedScene'
 
 /** Renderer-facing frame shape while the R3F components migrate independently. */
@@ -166,11 +167,51 @@ function bridgeBox2d(box: NormalizedBox2dV1, cameraIds: ReadonlyMap<string, numb
   }
 }
 
-export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: NormalizedManifestV1): RendererFrameV1 {
+/**
+ * The legacy renderer has a fixed five-float radar layout even though the
+ * normalized contract preserves the source velocity components. Keep that
+ * lossy projection at the renderer boundary so recipes and oracle artifacts
+ * retain the richer, dataset-neutral representation.
+ */
+function bridgeRadarValues(cloud: NormalizedPointCloudV1): Float32Array {
+  const attributeIndex = new Map(cloud.attributes.map((attribute, index) => [attribute, index]))
+  const speedComp = attributeIndex.get('speedComp')
+  const speedRaw = attributeIndex.get('speedRaw')
+  const vxComp = attributeIndex.get('vx_comp')
+  const vyComp = attributeIndex.get('vy_comp')
+  const vx = attributeIndex.get('vx')
+  const vy = attributeIndex.get('vy')
+  const values = new Float32Array(cloud.pointCount * 5)
+
+  for (let pointIndex = 0; pointIndex < cloud.pointCount; pointIndex += 1) {
+    const source = pointIndex * cloud.stride
+    const target = pointIndex * 5
+    values[target] = cloud.values[source]
+    values[target + 1] = cloud.values[source + 1]
+    values[target + 2] = cloud.values[source + 2]
+    values[target + 3] = speedComp !== undefined
+      ? cloud.values[source + speedComp]
+      : vxComp !== undefined && vyComp !== undefined
+        ? Math.hypot(cloud.values[source + vxComp], cloud.values[source + vyComp])
+        : 0
+    values[target + 4] = speedRaw !== undefined
+      ? cloud.values[source + speedRaw]
+      : vx !== undefined && vy !== undefined
+        ? Math.hypot(cloud.values[source + vx], cloud.values[source + vy])
+        : 0
+  }
+  return values
+}
+
+export function bridgeNormalizedFrame(
+  frame: NormalizedFrameV1,
+  manifest: NormalizedManifestV1,
+  rendererTimestamp: bigint = frame.timestampMicros,
+): RendererFrameV1 {
   const sensorIds = new Map(manifest.sensors.map((sensor) => [sensor.id, sensor.rendererId]))
   const classIds = taxonomyRendererIds(manifest)
   const sensorClouds = new Map<number, PointCloud>()
-  for (const cloud of [...frame.pointClouds, ...frame.radarPointClouds]) {
+  for (const cloud of frame.pointClouds) {
     const rendererId = sensorIds.get(cloud.sensorId)
     if (rendererId === undefined) continue
     sensorClouds.set(rendererId, {
@@ -183,12 +224,29 @@ export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: Normal
       validIndices: cloud.sourceIndices,
     })
   }
+  for (const cloud of frame.radarPointClouds) {
+    const rendererId = sensorIds.get(cloud.sensorId)
+    if (rendererId === undefined) continue
+    sensorClouds.set(rendererId, {
+      positions: bridgeRadarValues(cloud),
+      pointCount: cloud.pointCount,
+      segLabels: cloud.semanticLabels instanceof Uint8Array ? cloud.semanticLabels : undefined,
+      panopticLabels: cloud.panopticLabels,
+      cameraProjection: cloud.cameraProjection,
+      cameraRgb: cloud.cameraRgb,
+      validIndices: cloud.sourceIndices,
+    })
+  }
 
   return {
-    timestamp: frame.timestampMicros,
+    timestamp: rendererTimestamp,
     sensorClouds,
     boxes: frame.boxes3d.map((box) => bridgeBox3d(box, classIds)),
-    cameraBoxes: frame.boxes2d.map((box) => bridgeBox2d(box, sensorIds, classIds)),
+    // Projected cuboids are an observation of the camera projection, not a
+    // request to replace the renderer's wireframe overlay with 2D rectangles.
+    cameraBoxes: frame.boxes2d
+      .filter((box) => box.presentation !== 'projected-cuboid')
+      .map((box) => bridgeBox2d(box, sensorIds, classIds)),
     cameraImages: new Map(frame.cameraImages.flatMap((camera) => {
       const rendererId = sensorIds.get(camera.sensorId)
       return rendererId === undefined ? [] : [[rendererId, camera.encodedBytes] as const]

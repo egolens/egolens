@@ -493,7 +493,7 @@ async function loadRendererFrame(
 ): Promise<FrameData> {
   const capabilities = rendererFrameCapabilities(scene, frameIndex)
   const frame = await scene.loadFrame(frameIndex, { capabilities })
-  return bridgeNormalizedFrame(frame, scene.manifest)
+  return bridgeNormalizedFrame(frame, scene.manifest, internal.timestamps[frameIndex])
 }
 
 function rendererFrameCapabilities(
@@ -514,7 +514,7 @@ function getCachedRendererFrame(
   const frame = scene.getCachedFrame(frameIndex, {
     capabilities: rendererFrameCapabilities(scene, frameIndex),
   })
-  return frame ? bridgeNormalizedFrame(frame, scene.manifest) : null
+  return frame ? bridgeNormalizedFrame(frame, scene.manifest, internal.timestamps[frameIndex]) : null
 }
 
 function batchIndexForFrame(frame: number, batchCount: number): number {

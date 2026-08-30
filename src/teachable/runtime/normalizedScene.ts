@@ -153,6 +153,8 @@ export interface NormalizedBox2dV1 {
   readonly objectId: string
   readonly classId: string
   readonly cameraId: string
+  /** Rectangle annotations render directly; projected cuboids keep the 3D wireframe presentation. */
+  readonly presentation: 'rectangle' | 'projected-cuboid'
   readonly center: readonly [number, number]
   readonly dimensions: readonly [number, number]
 }

@@ -44,12 +44,22 @@ the Phase 6 candidate branch. Record that full SHA as `generatorCommit`, and
 record an immutable build identifier as `legacyRuntimeId`.
 
 Bring only the conformance capture instrumentation into the producer build.
-Its `createScene` factory must adapt the independently executing legacy loader
-to `NormalizedSceneV1`; it must not call the candidate recipe scene or share
-the candidate's parse/decode implementation. Capture occurs through
+The pinned revision's legacy loader, workers, caches, compatibility projection,
+and renderer must execute independently. A frozen pre-cutover shadow
+`NormalizedSceneV1` may supply the standard artifact shape only after every
+selected frame has been witnessed against that legacy execution; it must not
+import candidate-branch code or become the sole source of truth. Perceptual
+hashes always come from the legacy renderer. Capture occurs through
 `captureSceneConformanceArtifactV1`, outside Zustand, and the capture function
-always disposes the scene. Promote the result with `createOracleBundleV1` and
-write it directly to protected evidence storage.
+always disposes the shadow scene. Promote the result into an `OracleBundleV1`
+and write it directly to protected evidence storage.
+
+Witness comparisons must account for explicit compatibility projections rather
+than assuming one buffer shape on both sides: normalized nuScenes radar retains
+seven attributes while the renderer uses five values, projected cuboid boxes
+stay on the wireframe overlay, AV2 renderer timestamps retain source units, and
+Waymo panoptic label width remains the pre-cutover width. Any new exception is
+a reviewed spec finding, not a producer-only tolerance.
 
 For every case, explicitly provide all exposed capabilities, the required
 frame indices, and perceptual references. Use a SHA-256 of an anonymized case

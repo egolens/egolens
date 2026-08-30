@@ -233,7 +233,10 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
               }
 
               const segLabels = new Uint8Array(cloud.pointCount)
-              const panopticLabels = new Uint32Array(cloud.pointCount)
+              // Preserve the pre-cutover renderer contract. Widening this to
+              // uint32 changes existing panoptic colors and belongs in a
+              // separately reviewed behavior migration.
+              const panopticLabels = new Uint16Array(cloud.pointCount)
 
               for (let i = 0; i < cloud.pointCount; i++) {
                 const ri = cloud.validIndices[i] // flattened row*W+col index

@@ -1294,6 +1294,28 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
+Phase 6 oracle promotion exposed four renderer-boundary details that remain
+normative for later Teachable Lens work:
+
+- normalized point buffers may be richer than a compatibility renderer buffer;
+  nuScenes radar keeps seven named velocity components in `NormalizedSceneV1`
+  but projects to the legacy five-value `[x,y,z,speedComp,speedRaw]` layout only
+  at the renderer boundary;
+- a normalized 2D box must declare whether it is a native rectangle or the
+  observation of a projected 3D cuboid. Projected cuboids must keep the
+  existing camera wireframe presentation and must not silently select the
+  native rectangle overlay;
+- normalized timestamps are microseconds, while a compatibility UI may still
+  key caches and share URLs by a source-unit timeline (AV2 nanoseconds). Keep
+  the source timestamp at that renderer boundary until the UI timeline itself
+  migrates as one reviewed change;
+- typed-array width is observable behavior. Waymo panoptic labels remain the
+  pre-cutover `Uint16Array` during Phase 6; widening them is a separate product
+  migration with its own perceptual and numeric review.
+
+These projections must be explicit and tested. They must not weaken the public
+normalized contract or leak dataset-specific parsing back into the renderer.
+
 **Exit gate:** `registry.ts` does not distinguish bundled and learned recipes by
 execution path. No permanent `loadWaymoDataset`, `parseNuScenesScene`, or
 equivalent dataset-branded production path remains. Spec 012 performance and

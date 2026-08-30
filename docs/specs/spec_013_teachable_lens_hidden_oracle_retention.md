@@ -119,6 +119,26 @@ so it must wait for an explicit benchmark-command-ready signal before sending
 the one-shot start event. A fixed delay alone is not a valid synchronization
 barrier.
 
+### Renderer-boundary witness finding
+
+The initial three-dataset promotion also showed that normalized observations
+and renderer-facing buffers are not always byte-for-byte the same object. The
+trusted producer must witness the legacy renderer behavior while preserving the
+richer normalized artifact:
+
+- compare nuScenes radar through the explicit seven-component-to-five-value
+  compatibility projection;
+- retain the legacy projected-cuboid camera wireframe even though the normalized
+  artifact also records deterministic 2D projection bounds;
+- compare AV2 renderer timestamps in their legacy source unit while recording
+  normalized artifact timestamps in microseconds;
+- preserve the pre-cutover Waymo panoptic typed-array width.
+
+Perceptual hashes must come from the independently executing legacy renderer.
+The normalized capture observer may serialize a witness-verified shadow scene,
+but it must not replace the legacy renderer, parser, worker, or presentation
+path being witnessed.
+
 ### 5. Phase 6 deletion and merge gate
 
 Removal of a dataset's obsolete production path is accepted only when a trusted

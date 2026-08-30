@@ -34,7 +34,7 @@ export interface SensorCloudResult {
   pointCount: number
   /** Per-point semantic segmentation labels (uint8, 0–31). nuScenes lidarseg only. */
   segLabels?: Uint8Array
-  /** Per-point panoptic labels. Waymo instance IDs require uint32; nuScenes uses uint16. */
+  /** Per-point panoptic labels; width is part of each adapter's compatibility contract. */
   panopticLabels?: Uint16Array | Uint32Array
   /** Per-point camera projection: [camName, pixelX, pixelY] × pointCount. Waymo lidar_camera_projection. */
   cameraProjection?: Int16Array
