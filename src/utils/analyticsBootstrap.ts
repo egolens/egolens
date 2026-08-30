@@ -70,5 +70,8 @@ export function installAnalytics(): void {
     // buys (no consent banner) and costs (returning users are unmeasurable).
     storage: 'none',
     client_id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+    // page_view는 track() 헬퍼를 거치지 않으므로 여기서도 라벨을 실어야
+    // hosted/local/other 필터가 자동 이벤트까지 커버한다.
+    deployment,
   })
 }
