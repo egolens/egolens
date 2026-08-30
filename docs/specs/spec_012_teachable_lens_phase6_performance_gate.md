@@ -1,6 +1,6 @@
 # Spec 012 — Teachable Lens Phase 6 performance and lifecycle gate
 
-**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; isolated 20-switch cross-dataset lifecycle soak passes; hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-30
+**Status**: complete (three-dataset performance coverage, isolated 20-switch cross-dataset lifecycle soak, and exact-head hidden-oracle promotion pass) · **Date**: 2026-08-30
 
 **Relationship to Spec 006**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 6. Phase 6 may
@@ -277,15 +277,15 @@ description is not sufficient.
 
 ## Phase 6 exit gate
 
-- [ ] Baseline artifacts exist for all three datasets and include coordinated
+- [x] Baseline artifacts exist for all three datasets and include coordinated
       raw CDP traces/metrics and application-probe snapshots.
 - [x] Resource ownership and byte budgets are implemented and tested.
 - [x] `dispose()` and cancellation lifecycle invariants pass in CI.
 - [x] The required browser soak scenarios pass without sustained growth.
-- [ ] Structural, numeric, and perceptual parity still pass.
-- [ ] Every regression budget passes for each dataset cutover.
-- [ ] Each live scene has one frame producer and one cache owner.
-- [ ] Compatibility production paths are removed only after their dataset
+- [x] Structural, numeric, and perceptual parity still pass.
+- [x] Every regression budget passes for each dataset cutover.
+- [x] Each live scene has one frame producer and one cache owner.
+- [x] Compatibility production paths are removed only after their dataset
       passes all gates.
-- [ ] `registry.ts` and scene loading no longer choose different execution
+- [x] `registry.ts` and scene loading no longer choose different execution
       paths for bundled versus learned recipes.

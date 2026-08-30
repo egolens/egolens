@@ -1,6 +1,6 @@
 # Spec 013 — Teachable Lens hidden-oracle retention
 
-**Status**: in-progress (reviewed cases and protected GitHub judge provisioned; real bundles/receipts pending) · **Date**: 2026-08-30
+**Status**: in-progress (Phase 6 protected exact-head receipts pass for all three datasets; Phase 9 retention gate pending) · **Date**: 2026-08-30
 
 **Relationship to earlier specs**: this is the normative addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phases 6 and 9 and
@@ -196,23 +196,23 @@ judge-tool commit; it must not check out, install, or execute the candidate PR.
 
 ## Phase 6 gate additions
 
-- [ ] A hidden `OracleBundleV1` exists for every required Waymo case and covers
+- [x] A hidden `OracleBundleV1` exists for every required Waymo case and covers
       all exposed Waymo capabilities.
-- [ ] A hidden `OracleBundleV1` exists for every required nuScenes case and
+- [x] A hidden `OracleBundleV1` exists for every required nuScenes case and
       covers all exposed nuScenes capabilities.
-- [ ] A hidden `OracleBundleV1` exists for every required Argoverse 2 case and
+- [x] A hidden `OracleBundleV1` exists for every required Argoverse 2 case and
       covers all exposed AV2 capabilities.
-- [ ] Bundle provenance points to the pinned pre-cutover legacy revision.
-- [ ] The authoring workspace cannot access bundled held-out recipes, legacy
+- [x] Bundle provenance points to the pinned pre-cutover legacy revision.
+- [x] The authoring workspace cannot access bundled held-out recipes, legacy
       source, oracle storage, or the judge private key.
-- [ ] The trusted judge returns valid signed receipts for structural, numeric,
+- [x] The trusted judge returns valid signed receipts for structural, numeric,
       perceptual, coverage, and integrity checks.
-- [ ] The receipt gate verifies all three datasets with the configured public
+- [x] The receipt gate verifies all three datasets with the configured public
       key and exact reviewed target coverage before the Phase 6 deletion PR
       becomes mergeable.
-- [ ] Every receipt binds the candidate artifact to the exact Phase 6 PR HEAD;
+- [x] Every receipt binds the candidate artifact to the exact Phase 6 PR HEAD;
       a stale candidate artifact fails before judging.
-- [ ] Spec 012 performance/lifecycle evidence passes independently; oracle
+- [x] Spec 012 performance/lifecycle evidence passes independently; oracle
       parity and runtime performance never substitute for one another.
 
 ## Phase 9 gate additions
