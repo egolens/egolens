@@ -1325,7 +1325,10 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
       )}
 
       {/* Layer control overlay — hidden in embed hideControls mode */}
-      {!hideControls && <div style={{
+      {!hideControls && <div
+        data-egolens-control-panel
+        data-egolens-open={panelOpen ? 'true' : 'false'}
+        style={{
         position: 'absolute',
         top: 12,
         left: 12,
@@ -1344,6 +1347,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
         {/* ── Collapsed: compact status bar ── */}
         {!panelOpen && (
           <button
+            data-egolens-control-panel-toggle
             onClick={() => setPanelOpen(true)}
             style={{
               display: 'flex',
@@ -1390,6 +1394,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
         {panelOpen && <>
           {/* ── COORDINATE section ── */}
           <button
+            data-egolens-control-panel-toggle
             onClick={() => setPanelOpen(false)}
             style={{
               display: 'flex',

@@ -12,6 +12,7 @@ import type {
   ConformanceCaptureOptionsV1,
   SceneConformanceArtifactV1,
 } from './teachable/conformance/oracleArtifacts'
+import { areCameraViewsPresentedV1 } from './teachable/conformance/presentationBarrier'
 import LidarViewer, { type ViewerChrome } from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
@@ -197,6 +198,7 @@ interface BrowserConformanceCaptureV1 {
     readonly boxMode?: BoxMode
     readonly cameraSegmentation?: boolean
     readonly activeCamera?: number | null
+    readonly controlPanelOpen?: boolean
   }): void
 }
 
@@ -247,7 +249,12 @@ function useOracleCaptureCommand() {
           }
           await store.actions.seekFrame(index)
           const presented = useSceneStore.getState()
-          if (presented.currentFrameIndex === index && presented.currentFrame !== null) return index
+          const needsCamera = getActiveConformanceDescriptor()?.capabilities.includes('cameraImages') ?? false
+          const cameraFramesPresented = !needsCamera || (presented.currentFrame !== null
+            && presented.currentFrame.cameraImages.size > 0
+            && areCameraViewsPresentedV1(presented.currentFrame.cameraImages.keys(), index))
+          if (presented.currentFrameIndex === index && presented.currentFrame !== null
+            && cameraFramesPresented) return index
           await new Promise((resolve) => window.setTimeout(resolve, 50))
         }
         throw new Error(`Timed out waiting for conformance frame ${index}.`)
@@ -257,6 +264,7 @@ function useOracleCaptureCommand() {
         readonly boxMode?: BoxMode
         readonly cameraSegmentation?: boolean
         readonly activeCamera?: number | null
+        readonly controlPanelOpen?: boolean
       }) {
         const store = useSceneStore.getState()
         if (options.colormapMode) store.actions.setColormapMode(options.colormapMode)
@@ -264,6 +272,13 @@ function useOracleCaptureCommand() {
         if (options.cameraSegmentation !== undefined
           && options.cameraSegmentation !== store.showCameraSeg) store.actions.toggleCameraSeg()
         if (options.activeCamera !== undefined) store.actions.setActiveCam(options.activeCamera)
+        if (options.controlPanelOpen !== undefined) {
+          const panel = document.querySelector<HTMLElement>('[data-egolens-control-panel]')
+          const open = panel?.dataset.egolensOpen === 'true'
+          if (panel && open !== options.controlPanelOpen) {
+            panel.querySelector<HTMLButtonElement>('[data-egolens-control-panel-toggle]')?.click()
+          }
+        }
       },
     })
     Object.defineProperty(window, '__EGOLENS_ORACLE_CAPTURE__', {

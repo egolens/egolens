@@ -110,8 +110,15 @@ return after scheduling a cold row-group request, before the requested frame is
 actually presented. That behavior is correct for the ordinary non-blocking UI
 but is not a valid capture barrier. The trusted browser capture command must
 wait for the requested `currentFrameIndex` and non-null frame, fail on scene
-error, and time out rather than hash the previously displayed frame. Settling
-and image-complete checks occur only after that barrier.
+error, and time out rather than hash the previously displayed frame.
+
+Camera images add a second presentation barrier. The camera panel deliberately
+keeps the previous blob URL visible while a new JPEG decodes, so a populated
+camera map and `document.images.complete` can both be true while the old frame
+is still on screen. Each camera view must publish the frame index whose JPEG
+has completed decode, and the trusted capture command must wait until every
+requested camera view publishes the requested index. Settling and ordinary
+image-complete checks occur only after this semantic presentation barrier.
 
 The initial-load command has the same ordering requirement. The CDP runner may
 observe the performance probe before React has committed the URL-load effect,

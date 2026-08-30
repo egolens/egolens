@@ -74,7 +74,12 @@ that scene in a `finally` block. `scripts/phase6-cdp-benchmark.mjs` accepts
 `--perceptual-output-dir` for a one-run capture. The config and PNGs contain
 private case evidence and remain outside Git. Perceptual capture waits for the
 requested frame to become the actually presented frame; a cold seek that only
-queued a row-group request is not considered complete.
+queued a row-group request is not considered complete. For camera captures,
+the barrier also waits for every requested JPEG to finish decoding and for its
+camera view to publish the requested frame index. A non-empty camera cache,
+`document.images.complete`, or a fixed settle delay is insufficient because the
+flicker-free camera component intentionally keeps the prior blob URL visible
+until the replacement has decoded.
 
 ## 2. Capture the candidate
 

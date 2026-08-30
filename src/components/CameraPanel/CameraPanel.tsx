@@ -42,6 +42,7 @@ function useIsMobile(breakpoint = 600) {
 }
 
 export default function CameraPanel() {
+  const currentFrameIndex = useSceneStore((s) => s.currentFrameIndex)
   const cameraImages = useSceneStore((s) => s.currentFrame?.cameraImages)
   const cameraBoxes = useSceneStore((s) => s.currentFrame?.cameraBoxes)
   const boxMode = useSceneStore((s) => s.boxMode)
@@ -132,6 +133,7 @@ export default function CameraPanel() {
                 key={id}
                 cameraName={id}
                 label={label}
+                frameIndex={currentFrameIndex}
                 imageBuffer={cameraImages?.get(id) ?? null}
                 boxes={boxesByCamera.get(id) ?? EMPTY_BOXES}
                 boxMode={boxMode}
@@ -164,6 +166,7 @@ export default function CameraPanel() {
           key={id}
           cameraName={id}
           label={label}
+          frameIndex={currentFrameIndex}
           imageBuffer={cameraImages?.get(id) ?? null}
           boxes={boxesByCamera.get(id) ?? EMPTY_BOXES}
           boxMode={boxMode}
@@ -187,6 +190,7 @@ const EMPTY_BOXES: ParquetRow[] = []
 interface CameraViewProps {
   cameraName: number
   label: string
+  frameIndex: number
   imageBuffer: ArrayBuffer | null
   boxes: ParquetRow[]
   boxMode: string
@@ -198,13 +202,15 @@ interface CameraViewProps {
   shortcutKey?: number
 }
 
-function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover, shortcutKey }: CameraViewProps) {
+function CameraView({ cameraName, label, frameIndex, imageBuffer, boxes, boxMode, showLidarOverlay, active, onTogglePov, onHover, shortcutKey }: CameraViewProps) {
   const showKeypoints2D = useSceneStore((s) => s.showKeypoints2D)
   const hasKeypoints = useSceneStore((s) => s.hasKeypoints)
   const showCameraSeg = useSceneStore((s) => s.showCameraSeg)
   const hasCameraSeg = useSceneStore((s) => s.hasCameraSegmentation)
   /** The URL currently displayed (kept until a new image fully loads) */
   const [displayUrl, setDisplayUrl] = useState<string | null>(null)
+  /** Frame whose JPEG has completed decode and is actually visible. */
+  const [displayFrameIndex, setDisplayFrameIndex] = useState<number | null>(null)
   /** The newest blob URL being loaded (may not be visible yet) */
   const pendingUrlRef = useRef<string | null>(null)
   /** The blob URL currently shown on screen (for cleanup) */
@@ -232,6 +238,7 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
       activeUrlRef.current = newUrl
       pendingUrlRef.current = null
       setDisplayUrl(newUrl)
+      setDisplayFrameIndex(frameIndex)
     }
     img.onerror = () => {
       // Corrupted frame — discard, keep previous image
@@ -244,7 +251,7 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
       // If a newer effect fires before this image loaded, clean up
       if (pendingUrlRef.current === newUrl) pendingUrlRef.current = null
     }
-  }, [imageBuffer])
+  }, [frameIndex, imageBuffer])
 
   // The active URL intentionally survives frame changes for flicker-free swaps,
   // so component teardown is the single place that releases both generations.
@@ -267,6 +274,7 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
     <div
       data-egolens-camera-id={cameraName}
       data-egolens-camera-label={label}
+      data-egolens-camera-frame-index={displayFrameIndex ?? undefined}
       style={{
         flex,
         position: 'relative',
