@@ -919,13 +919,29 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     play: () => {
       if (get().isPlaying) return
+      const startWindow = get().playbackWindow
+      const startFrame = get().currentFrameIndex
+      if (startWindow && (startFrame < startWindow.f0 || startFrame > startWindow.f1)) {
+        // A playback window is a clip, not merely a loop boundary. Starting
+        // outside it always begins at the clip's first frame. On a cold cache
+        // this records a pending seek; the interval below keeps playback from
+        // advancing outside the window while that frame arrives.
+        void get().actions.loadFrame(startWindow.f0)
+      }
       set({ isPlaying: true })
       const fps = getManifest().frameRate // Waymo=10Hz, nuScenes=2Hz
       const intervalMs = (1000 / fps) / get().playbackSpeed
       internal.playIntervalId = setInterval(async () => {
-        const next = get().currentFrameIndex + 1
-        // Time window: loop inside [f0, f1] instead of running to the end
         const win = get().playbackWindow
+        const current = get().currentFrameIndex
+        // A cold seek may still be showing its old frame. Hold at the window
+        // start rather than walking toward the range from outside it.
+        if (win && (current < win.f0 || current > win.f1)) {
+          await get().actions.loadFrame(win.f0)
+          return
+        }
+        const next = current + 1
+        // Time window: loop inside [f0, f1] instead of running to the end
         if (win && next > win.f1) {
           await get().actions.loadFrame(win.f0)
           return

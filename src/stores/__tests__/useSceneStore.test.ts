@@ -376,6 +376,18 @@ describe('useSceneStore', () => {
       expect(state().isPlaying).toBe(false)
     })
 
+    it.each([5, 25])('starts at the playback-window beginning when frame %i is outside', async (frame) => {
+      await actions().seekFrame(frame)
+      actions().setPlaybackWindowFrames(10, 20)
+
+      actions().play()
+
+      expect(state().currentFrameIndex).toBe(10)
+      expect(state().isPlaying).toBe(true)
+      actions().pause()
+      useSceneStore.setState({ playbackWindow: null })
+    })
+
     it('setPlaybackSpeed updates speed', () => {
       actions().setPlaybackSpeed(2)
       expect(state().playbackSpeed).toBe(2)
