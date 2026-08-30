@@ -14,7 +14,7 @@
  */
 
 import { useRef, useEffect, useCallback, useMemo } from 'react'
-import { useSceneStore } from '../../stores/useSceneStore'
+import { useSceneStore, resolveViewportBg } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import {
   buildCameraProjectors,
@@ -23,10 +23,10 @@ import {
 import { computeTransform } from './BBoxOverlayCanvas'
 import { setupHiDpiCanvas } from '../../utils/canvasUtils'
 import {
-  COLORMAP_STOPS,
   ATTR_OFFSET,
   ATTR_RANGE,
   computePointColor,
+  colormapStopsFor,
 } from '../../utils/colormaps'
 import { getManifest } from '../../adapters/registry'
 import type { PointCloud } from '../../utils/rangeImage'
@@ -88,7 +88,11 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
     const stride = manifest.pointStride
 
     // Resolve colormap stops, attribute offset, and normalization range
-    const stops = COLORMAP_STOPS[cmap]
+    // Ramps follow the viewport background, not the UI theme: the two are
+    // independent, and the dark-background ramps put 11 of 24 stops below
+    // 3:1 on white.
+    const { bgPreset, theme } = useSceneStore.getState()
+    const stops = colormapStopsFor(cmap, resolveViewportBg(bgPreset, theme))
     const attrOff = ATTR_OFFSET[cmap]
     // Intensity range may be overridden per-dataset
     const [attrMin, attrMax] = cmap === 'intensity' && manifest.intensityRange
@@ -116,14 +120,19 @@ export default function LidarProjectionOverlay({ cameraName }: LidarProjectionOv
 
   // Subscribe to relevant store changes
   useEffect(() => {
-    let prevFrame = useSceneStore.getState().currentFrame
-    let prevCmap = useSceneStore.getState().colormapMode
-    let prevSensors = useSceneStore.getState().visibleSensors
+    // Must name everything draw() reads. The ramp depends on the viewport
+    // background, so theme and bgPreset belong here too — without them a theme
+    // switch leaves the projection painted in the other set's colours.
+    let prev = useSceneStore.getState()
     const unsub = useSceneStore.subscribe((s) => {
-      if (s.currentFrame !== prevFrame || s.colormapMode !== prevCmap || s.visibleSensors !== prevSensors) {
-        prevFrame = s.currentFrame
-        prevCmap = s.colormapMode
-        prevSensors = s.visibleSensors
+      if (
+        s.currentFrame !== prev.currentFrame ||
+        s.colormapMode !== prev.colormapMode ||
+        s.visibleSensors !== prev.visibleSensors ||
+        s.theme !== prev.theme ||
+        s.bgPreset !== prev.bgPreset
+      ) {
+        prev = s
         draw()
       }
     })

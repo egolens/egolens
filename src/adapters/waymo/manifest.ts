@@ -6,7 +6,7 @@
  * sensor names and camera layouts.
  */
 
-import { colors } from '../../theme'
+import { dataColors as colors } from '../../dataColors'
 import type { DatasetManifest } from '../../types/dataset'
 import {
   WAYMO_SEG_PALETTE,

@@ -306,8 +306,9 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
               }} />
             )}
 
-            {/* Time window — dim everything outside [f0, f1]; the window keeps
-                the track's own colors (Perfetto/DevTools brush idiom) */}
+            {/* Time window — fade the track outside [f0, f1] with the existing
+                base surface. This keeps the effect identical across themes
+                without introducing a dedicated scrim colour token. */}
             {playbackWindow && maxFrame > 0 && (() => {
               const leftPct = (playbackWindow.f0 / maxFrame) * 100
               const rightPct = (playbackWindow.f1 / maxFrame) * 100
@@ -319,7 +320,8 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                       left: 0,
                       width: `${leftPct}%`,
                       height: '16px',
-                      backgroundColor: 'rgba(10, 13, 26, 0.72)',
+                      backgroundColor: colors.bgBase,
+                      opacity: 0.82,
                       borderRadius: `${radius.pill} 0 0 ${radius.pill}`,
                       pointerEvents: 'none',
                     }} />
@@ -330,7 +332,8 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
                       left: `${rightPct}%`,
                       right: 0,
                       height: '16px',
-                      backgroundColor: 'rgba(10, 13, 26, 0.72)',
+                      backgroundColor: colors.bgBase,
+                      opacity: 0.82,
                       borderRadius: `0 ${radius.pill} ${radius.pill} 0`,
                       pointerEvents: 'none',
                     }} />

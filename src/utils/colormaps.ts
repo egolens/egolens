@@ -98,6 +98,96 @@ export const COLORMAP_STOPS: Record<ColormapMode, [number, number, number][]> = 
 }
 
 // ---------------------------------------------------------------------------
+// Light-background variants
+// ---------------------------------------------------------------------------
+
+/**
+ * The same four ramps, shifted to sit under a light viewport.
+ *
+ * Hue and chroma are unchanged, so a value keeps its colour identity across
+ * backgrounds: low is still blue-ish, high is still warm, and lightness still
+ * rises with the value. Only the lightness *band* moves, from L* [30, 92] to
+ * L* [22, 60] — a ceiling of 60 is what 3:1 against white requires.
+ *
+ * Reversing the ramps was tried first and rejected twice over: it only bought
+ * one stop per ramp, and it would have made a low value light on one
+ * background and dark on the other, which is exactly the kind of instability
+ * the palette is supposed to prevent.
+ *
+ * Measured on white: 0 of 24 stops fall below 3:1, worst 3.16:1. The
+ * dark-background ramps on the same white viewport put 11 of 24 below 3:1,
+ * worst 1.22:1.
+ */
+const INTENSITY_STOPS_LIGHT: [number, number, number][] = [
+  [0.00, 0.21, 0.39],  // 0.0 — #003663
+  [0.00, 0.31, 0.33],  // 0.2 — #004F54
+  [0.00, 0.40, 0.21],  // 0.4 — #006636
+  [0.44, 0.43, 0.00],  // 0.6 — #706E00
+  [0.75, 0.39, 0.08],  // 0.8 — #BF6314
+  [0.79, 0.48, 0.47],  // 1.0 — #C97A78
+]
+
+const RANGE_STOPS_LIGHT: [number, number, number][] = [
+  [0.21, 0.20, 0.27],  // 0.0 — #363345
+  [0.41, 0.20, 0.38],  // 0.2 — #693361
+  [0.63, 0.17, 0.22],  // 0.4 — #A12B38
+  [0.70, 0.29, 0.00],  // 0.6 — #B24A00
+  [0.64, 0.46, 0.00],  // 0.8 — #A37500
+  [0.58, 0.58, 0.22],  // 1.0 — #949438
+]
+
+const ELONGATION_STOPS_LIGHT: [number, number, number][] = [
+  [0.19, 0.21, 0.25],  // 0.0 — #303640
+  [0.17, 0.29, 0.33],  // 0.2 — #2B4A54
+  [0.09, 0.39, 0.31],  // 0.4 — #17634F
+  [0.00, 0.48, 0.23],  // 0.6 — #007A3B
+  [0.21, 0.56, 0.13],  // 0.8 — #368F21
+  [0.44, 0.62, 0.21],  // 1.0 — #709E36
+]
+
+const DISTANCE_STOPS_LIGHT: [number, number, number][] = [
+  [0.34, 0.09, 0.40],  // 0.0 — #571766
+  [0.32, 0.21, 0.54],  // 0.2 — #52368A
+  [0.11, 0.36, 0.55],  // 0.4 — #1C5C8C
+  [0.00, 0.47, 0.38],  // 0.6 — #007861
+  [0.28, 0.55, 0.00],  // 0.8 — #478C00
+  [0.62, 0.57, 0.00],  // 1.0 — #9E9100
+]
+
+const COLORMAP_STOPS_LIGHT: Record<ColormapMode, [number, number, number][]> = {
+  intensity: INTENSITY_STOPS_LIGHT,
+  range: RANGE_STOPS_LIGHT,
+  elongation: ELONGATION_STOPS_LIGHT,
+  distance: DISTANCE_STOPS_LIGHT,
+  segment: INTENSITY_STOPS_LIGHT,
+  panoptic: INTENSITY_STOPS_LIGHT,
+  camera: INTENSITY_STOPS_LIGHT,
+}
+
+/**
+ * Pick the ramp set for a viewport background.
+ *
+ * Keyed on the background, not on the UI theme: the two are independent, and a
+ * light-theme user may well choose a dark viewport. Relative luminance 0.35 is
+ * the crossover — above it, the light-background set reads better.
+ */
+export function colormapStopsFor(
+  mode: ColormapMode,
+  backgroundHex: string,
+): [number, number, number][] {
+  return backgroundLuminance(backgroundHex) > 0.35
+    ? COLORMAP_STOPS_LIGHT[mode]
+    : COLORMAP_STOPS[mode]
+}
+
+/** WCAG relative luminance of a `#rrggbb` string. */
+export function backgroundLuminance(hex: string): number {
+  const f = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  const [r, g, b] = [1, 3, 5].map((i) => f(parseInt(hex.slice(i, i + 2), 16) / 255))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+// ---------------------------------------------------------------------------
 // Attribute extraction helpers
 // ---------------------------------------------------------------------------
 

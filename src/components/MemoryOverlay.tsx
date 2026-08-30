@@ -79,6 +79,7 @@ export default function MemoryOverlay() {
       bottom: 12,
       right: 12,
       zIndex: 99999,
+      // theme-exempt: a debug overlay behind a localStorage flag, not product chrome
       background: 'rgba(10, 10, 15, 0.92)',
       backdropFilter: 'blur(8px)',
       border: '1px solid rgba(78, 205, 196, 0.3)',
@@ -109,6 +110,7 @@ export default function MemoryOverlay() {
       {/* Progress bar */}
       <div style={{
         height: 3,
+        // theme-exempt: see above
         background: '#222',
         borderRadius: 2,
         margin: '4px 0',

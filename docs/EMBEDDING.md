@@ -31,7 +31,8 @@ The hosted build at `https://egolens.org` is embeddable as-is — no need to run
 | `camera` | string | — | Initial camera POV by name: the panel label (`FRONT`, `REAR LEFT`), the dataset's own channel name (`ring_front_center`, `CAM_FRONT`), or an id. Case, spaces, underscores and hyphens are ignored. Share links write the numeric `cam=` instead, and `cam` wins when both are present |
 | `autoplay` | `true` | `false` | Auto-start playback after first frame loads |
 | `colormap` | string | `intensity` | Initial colormap mode |
-| `bgcolor` | hex | — | Canvas background color without `#` (e.g., `000000`, `1a1f35`) |
+| `theme` | `dark` \| `light` \| `auto` | OS preference | Chrome theme; `auto` follows the operating-system preference on load |
+| `accent` | six-digit hex | theme default | Chrome accent without `#` (for example `FF6F00`); does not recolor sensors, classes, colormaps, or annotations |
 | `origin` | URL origin | — | Allowed origin for postMessage (auto-derived from referrer if omitted) |
 
 ### Controls Modes
@@ -91,6 +92,10 @@ iframe.contentWindow.postMessage({ type: 'setScene', scene: 'scene-0103' }, '*')
 iframe.contentWindow.postMessage({ type: 'setWindow', t0: '1533151608548020', t1: '1533151613398020' }, '*')
 iframe.contentWindow.postMessage({ type: 'setWindow', t0: null }, '*')
 
+// Repaint chrome without reloading the iframe. `accent: null` restores the
+// selected theme's default; omit accent to preserve the current custom value.
+iframe.contentWindow.postMessage({ type: 'setTheme', theme: 'light', accent: 'FF6F00' }, '*')
+
 // Request current state (viewer replies with 'stateReply')
 iframe.contentWindow.postMessage({ type: 'getState' }, '*')
 ```
@@ -117,7 +122,8 @@ window.addEventListener('message', (event) => {
   }
 
   if (type === 'stateReply') {
-    // Response to getState — { frame, totalFrames, isPlaying, colormap, status, scene, window }
+    // Response to getState — { frame, totalFrames, isPlaying, colormap,
+    // status, scene, window, theme, accent }
     console.log('State:', event.data)
   }
 
@@ -169,7 +175,7 @@ If embedding on the same domain, consider serving the embed from a subdomain (e.
 ### Minimal View-Only Embed
 ```html
 <iframe
-  src="...?dataset=argoverse2&data=...&embed=true&controls=none&bgcolor=000000"
+  src="...?dataset=argoverse2&data=...&embed=true&controls=none&theme=dark"
   width="800" height="450"
   sandbox="allow-scripts allow-same-origin"
 ></iframe>
@@ -178,7 +184,7 @@ If embedding on the same domain, consider serving the embed from a subdomain (e.
 ### Auto-Playing with Minimal Controls
 ```html
 <iframe
-  src="...?dataset=argoverse2&data=...&embed=true&controls=minimal&autoplay=true&colormap=distance"
+  src="...?dataset=argoverse2&data=...&embed=true&controls=minimal&autoplay=true&colormap=distance&theme=light&accent=FF6F00"
   width="100%" height="600"
   sandbox="allow-scripts allow-same-origin"
 ></iframe>

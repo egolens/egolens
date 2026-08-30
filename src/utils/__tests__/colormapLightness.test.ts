@@ -11,8 +11,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { COLORMAP_STOPS } from '../colormaps'
-import { colors } from '../../theme'
+import { COLORMAP_STOPS, colormapStopsFor, backgroundLuminance } from '../colormaps'
+import { viewportBg } from '../../theme'
 
 /** Relative luminance, per WCAG. */
 function luminance([r, g, b]: [number, number, number]): number {
@@ -63,7 +63,7 @@ describe.each(RAMPS)('%s ramp', (mode) => {
     // Not a WCAG text threshold — 3:1 is unreachable at both ends at once (see
     // the note in colormaps.ts). This asserts "distinguishable from the
     // background", which is what 1.00:1 was not.
-    const bg = hexToRgb(colors.bgDeep)
+    const bg = hexToRgb(viewportBg('dark'))
     const worst = Math.min(...stops.map((s) => contrast(s, bg)))
     expect(worst).toBeGreaterThan(1.9)
   })
@@ -90,5 +90,50 @@ describe('intensity carries its signal in hue, not luminance', () => {
     }
     const hues = COLORMAP_STOPS.intensity.map(hue)
     expect(new Set(hues.map((h) => Math.round(h / 40))).size).toBeGreaterThanOrEqual(4)
+  })
+})
+
+describe('the light-background ramp set', () => {
+  const WHITE = '#FFFFFF'
+  const stopsOn = (mode: typeof RAMPS[number], bg: string) => colormapStopsFor(mode, bg)
+
+  it('is selected by background luminance, not by the UI theme', () => {
+    // A light-theme user may pick a dark viewport; the ramp must follow the
+    // viewport, since that is what the points are drawn on.
+    expect(backgroundLuminance(WHITE)).toBeGreaterThan(0.35)
+    expect(backgroundLuminance(viewportBg('dark'))).toBeLessThan(0.35)
+    for (const mode of RAMPS) {
+      expect(stopsOn(mode, viewportBg('dark'))).toEqual(COLORMAP_STOPS[mode])
+      expect(stopsOn(mode, WHITE)).not.toEqual(COLORMAP_STOPS[mode])
+    }
+  })
+
+  it.each(RAMPS)('%s clears 3:1 at every stop on white', (mode) => {
+    const bg = hexToRgb(WHITE)
+    const worst = Math.min(...stopsOn(mode, WHITE).map((s) => contrast(s, bg)))
+    expect(worst).toBeGreaterThan(3)
+  })
+
+  it.each(RAMPS)('%s keeps the same lightness direction as the dark set', (mode) => {
+    // Reversal was rejected: it would make a low value light on one background
+    // and dark on the other.
+    const Ls = stopsOn(mode, WHITE).map(lightness)
+    for (let i = 1; i < Ls.length; i++) expect(Ls[i]).toBeGreaterThan(Ls[i - 1])
+  })
+
+  it.each(RAMPS)('%s keeps each value recognisably the same hue', (mode) => {
+    const hue = ([r, g, b]: [number, number, number]) => {
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+      if (d < 0.02) return null
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+      return (h * 60 + 360) % 360
+    }
+    const dark = COLORMAP_STOPS[mode].map(hue)
+    const light = stopsOn(mode, WHITE).map(hue)
+    for (let i = 0; i < dark.length; i++) {
+      if (dark[i] === null || light[i] === null) continue
+      const d = Math.abs(dark[i]! - light[i]!)
+      expect(Math.min(d, 360 - d), `stop ${i} hue drifted`).toBeLessThan(30)
+    }
   })
 })

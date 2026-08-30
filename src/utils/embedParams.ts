@@ -14,6 +14,7 @@
  */
 
 import type { ColormapMode } from '../stores/useSceneStore'
+import { parseAccent, parseThemePreference, type ThemePreference } from './themeParams'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,8 +35,10 @@ export interface EmbedParams {
   autoplay: boolean
   /** Initial colormap mode */
   colormap: ColormapMode | null
-  /** Canvas background color (hex without #, e.g., '000000') */
-  bgcolor: string | null
+  /** Chrome theme. `auto` resolves from the operating-system preference. */
+  theme: ThemePreference | null
+  /** Chrome accent color (`RRGGBB`, without `#`). */
+  accent: string | null
   /** Allowed origin for postMessage (derived from &origin= or document.referrer) */
   origin: string | null
 }
@@ -44,9 +47,6 @@ export interface EmbedParams {
 const VALID_COLORMAPS: ReadonlySet<string> = new Set([
   'intensity', 'range', 'elongation', 'distance', 'segment', 'panoptic', 'camera',
 ])
-
-// Hex color pattern (3, 6, or 8 hex digits)
-const HEX_COLOR_RE = /^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?([0-9a-fA-F]{2})?$/
 
 // ---------------------------------------------------------------------------
 // Parser
@@ -94,12 +94,8 @@ export function parseEmbedParams(search?: string): EmbedParams {
     colormap = colormapRaw as ColormapMode
   }
 
-  // Background color
-  let bgcolor: string | null = null
-  const bgRaw = params.get('bgcolor')
-  if (bgRaw && HEX_COLOR_RE.test(bgRaw)) {
-    bgcolor = bgRaw
-  }
+  const theme = parseThemePreference(params.toString())
+  const accent = parseAccent(params.toString())
 
   // Origin for postMessage validation
   let origin: string | null = params.get('origin') ?? null
@@ -111,7 +107,7 @@ export function parseEmbedParams(search?: string): EmbedParams {
     }
   }
 
-  return { embed, controls, frame, camera, autoplay, colormap, bgcolor, origin }
+  return { embed, controls, frame, camera, autoplay, colormap, theme, accent, origin }
 }
 
 /**

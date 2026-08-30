@@ -16,7 +16,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties, type ReactElement } from 'react'
 import { List, type ListImperativeAPI } from 'react-window'
-import { colors, fonts, radius } from '../theme'
+import { colors, fonts, radius, alpha } from '../theme'
 import { trackKeyboardShortcut } from '../utils/analytics'
 import {
   useThumbnailCache,
@@ -28,9 +28,9 @@ import {
 const SCROLLBAR_CSS = `
 .ss-list::-webkit-scrollbar { width: 4px; height: 4px; }
 .ss-list::-webkit-scrollbar-track { background: transparent; }
-.ss-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
-.ss-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
-.ss-list { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+.ss-list::-webkit-scrollbar-thumb { background: var(--el-tint-raise-strong); border-radius: 4px; }
+.ss-list::-webkit-scrollbar-thumb:hover { background: var(--el-tint-raise-strong); }
+.ss-list { scrollbar-width: thin; scrollbar-color: var(--el-tint-raise-strong) transparent; }
 `
 
 export interface SelectItem {
@@ -47,12 +47,12 @@ export interface SelectItem {
 }
 
 const TAG_COLORS = {
-  default: { text: '#7dd3c8', border: 'rgba(125, 211, 200, 0.4)' },
-  warning: { text: '#f0c674', border: 'rgba(240, 198, 116, 0.45)' },
+  default: colors.accent,
+  warning: colors.warning,
 } as const
 
 function TagPill({ tag, tone }: { tag: string; tone: 'default' | 'warning' }) {
-  const c = TAG_COLORS[tone]
+  const color = TAG_COLORS[tone]
   return (
     <span
       style={{
@@ -60,8 +60,9 @@ function TagPill({ tag, tone }: { tag: string; tone: 'default' | 'warning' }) {
         padding: '1px 7px',
         fontSize: '10px',
         fontFamily: fonts.sans,
-        color: c.text,
-        border: `1px solid ${c.border}`,
+        color,
+        backgroundColor: alpha(color, 0.08),
+        border: `1px solid ${alpha(color, 0.4)}`,
         borderRadius: '999px',
         lineHeight: 1.5,
       }}
@@ -475,9 +476,9 @@ export default function SearchableSelect({
                 fontSize: '11px',
                 fontFamily: fonts.sans,
                 fontWeight: active ? 600 : 400,
-                color: active ? '#000' : colors.textSecondary,
-                backgroundColor: active ? colors.accent : 'transparent',
-                border: `1px solid ${active ? colors.accent : colors.border}`,
+                color: active ? colors.accent : colors.textSecondary,
+                backgroundColor: active ? alpha(colors.accent, 0.12) : 'transparent',
+                border: `1px solid ${active ? alpha(colors.accent, 0.5) : colors.border}`,
                 borderRadius: '999px',
                 cursor: 'pointer',
                 transition: 'all 0.15s',
@@ -582,7 +583,7 @@ export default function SearchableSelect({
             zIndex: 9999,
             display: 'flex',
             flexDirection: 'column',
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: colors.shadowInk,
             backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => {
@@ -599,7 +600,7 @@ export default function SearchableSelect({
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
-              background: 'rgba(26, 31, 53, 0.97)',
+              background: alpha(colors.bgSurface, 0.97),
               border: `1px solid ${colors.border}`,
               borderRadius: radius.lg,
               overflow: 'hidden',
@@ -654,7 +655,7 @@ export default function SearchableSelect({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(0, 0, 0, 0.5)',
+            background: colors.shadowInk,
             backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => {
@@ -671,10 +672,10 @@ export default function SearchableSelect({
               maxHeight: '70vh',
               display: 'flex',
               flexDirection: 'column',
-              background: 'rgba(26, 31, 53, 0.97)',
+              background: alpha(colors.bgSurface, 0.97),
               border: `1px solid ${colors.border}`,
               borderRadius: radius.lg,
-              boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
+              boxShadow: `0 16px 48px ${colors.shadowInk}`,
               overflow: 'hidden',
             }}
           >

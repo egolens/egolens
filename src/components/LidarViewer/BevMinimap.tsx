@@ -13,8 +13,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useThree } from '@react-three/fiber'
-import { useSceneStore, BG_PRESETS } from '../../stores/useSceneStore'
-import { colors } from '../../theme'
+import { useSceneStore, resolveViewportBg } from '../../stores/useSceneStore'
 
 /** CSS size of the minimap (matches the overlay div) */
 export const BEV_SIZE = window.innerWidth < 600 ? 120 : 200
@@ -50,7 +49,7 @@ export function BevMinimapRenderer({
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: false, antialias: false })
     renderer.setSize(BEV_SIZE, BEV_SIZE, false)
     renderer.setPixelRatio(DPR)
-    renderer.setClearColor(colors.bgDeep)
+    renderer.setClearColor(resolveViewportBg(useSceneStore.getState().bgPreset, useSceneStore.getState().theme))
     rendererRef.current = renderer
 
     const cam = new THREE.OrthographicCamera(-r, r, r, -r, 0.1, 500)
@@ -78,9 +77,9 @@ export function BevMinimapRenderer({
       const cam = camRef.current
       if (!gl || !cam) return
 
-      const { worldMode, currentFrame, bgPreset } = useSceneStore.getState()
+      const { worldMode, currentFrame, bgPreset, theme } = useSceneStore.getState()
       // Sync background color with 3D viewport
-      const bgHex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? colors.bgDeep
+      const bgHex = resolveViewportBg(bgPreset, theme)
       gl.setClearColor(bgHex)
       const pose = currentFrame?.vehiclePose ?? null
       const radius = BEV_ZOOM_LEVELS[zoomRef.current] ?? BEV_ZOOM_LEVELS[0]
@@ -129,6 +128,10 @@ export function BevMinimapRenderer({
         state.pointOpacity !== prev.pointOpacity ||
         state.trailLength !== prev.trailLength ||
         state.bgPreset !== prev.bgPreset ||
+        // The theme changes both the clear colour and which ramp the points
+        // use. This list has to name everything render() reads, or the canvas
+        // keeps its last painted frame.
+        state.theme !== prev.theme ||
         state.pointSize !== prev.pointSize
       ) {
         scheduleRender()

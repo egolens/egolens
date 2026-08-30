@@ -88,10 +88,10 @@ import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindo
 import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { getEmbedParams } from '../utils/embedParams'
 import { trackSegmentSwitch, trackColormapChange, trackPovSwitch, trackOverlayToggle, trackDatasetLoad } from '../utils/analytics'
-import { colors } from '../theme'
 import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkeleton'
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
+import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,14 +128,29 @@ export type PointShape = 'square' | 'circle'
 
 /** Background color presets for 3D viewport */
 export const BG_PRESETS = [
+  { id: 'auto',      label: 'Match theme', color: '' },  // theme-exempt: resolved from the theme, see resolveViewportBg
   { id: 'black',     label: 'Black',     color: '#000000' },
-  { id: 'dark',      label: 'Dark',      color: colors.bgDeep },
+  { id: 'dark',      label: 'Dark',      color: '#0C0F1A' },  // theme-exempt: consumed by THREE.setClearColor, and a viewport preset is not a UI theme
   { id: 'charcoal',  label: 'Charcoal',  color: '#1a1a1a' },
   { id: 'midgray',   label: 'Mid Gray',  color: '#4d4d4d' },
   { id: 'navy',      label: 'Navy',      color: '#0d1117' },
   { id: 'white',     label: 'White',     color: '#ffffff' },
 ] as const
 export type BgPresetId = typeof BG_PRESETS[number]['id']
+
+/**
+ * The viewport clear colour, as literal hex for THREE.
+ *
+ * `auto` is the default and follows the UI theme, which is the whole point of
+ * the light theme: a figure destined for a white page should not have a black
+ * rectangle in it. An explicit preset always wins — a light-theme user who
+ * finds the point cloud hard to read on white can still choose a dark
+ * viewport, and the ramps do read better there.
+ */
+export function resolveViewportBg(bgPreset: BgPresetId, theme: ThemeName): string {
+  if (bgPreset === 'auto') return viewportBg(theme)
+  return BG_PRESETS.find((p) => p.id === bgPreset)?.color || viewportBg(theme)
+}
 export interface FrameData {
   timestamp: bigint
   /** Per-sensor point clouds (keyed by laser_name: 1=TOP,2=FRONT,3=SIDE_LEFT,4=SIDE_RIGHT,5=REAR) */
@@ -184,6 +199,7 @@ interface SceneActions {
   toggleCameraSeg: () => void
   // Display settings
   setBgPreset: (id: BgPresetId) => void
+  setTheme: (theme: ThemeName, accent?: string | null) => void
   setPointShape: (shape: PointShape) => void
   setPointSize: (size: number) => void
   setFollowCam: (follow: boolean) => void
@@ -285,6 +301,9 @@ export interface SceneState {
   // -- Display settings (rendering style, not perception data) ----------------
   /** Background color preset for 3D viewport */
   bgPreset: BgPresetId
+  /** UI theme. Chrome follows via CSS custom properties; scene colours are
+   *  resolved from this at render time, because THREE cannot read var(). */
+  theme: ThemeName
   /** Point rendering shape: square (GL default) or circle (discard outside radius) */
   pointShape: PointShape
   /** Point world-space size (default 0.08) */
@@ -788,7 +807,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   cameraKeypointFrames: new Set<number>(),
   cameraSegFrames: new Set<number>(),
   // Display settings
-  bgPreset: 'dark' as BgPresetId,
+  bgPreset: 'auto' as BgPresetId,
+  theme: initialTheme(),
   pointShape: 'circle' as PointShape,
   pointSize: 0.08,
   followCam: false,
@@ -899,13 +919,29 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     play: () => {
       if (get().isPlaying) return
+      const startWindow = get().playbackWindow
+      const startFrame = get().currentFrameIndex
+      if (startWindow && (startFrame < startWindow.f0 || startFrame > startWindow.f1)) {
+        // A playback window is a clip, not merely a loop boundary. Starting
+        // outside it always begins at the clip's first frame. On a cold cache
+        // this records a pending seek; the interval below keeps playback from
+        // advancing outside the window while that frame arrives.
+        void get().actions.loadFrame(startWindow.f0)
+      }
       set({ isPlaying: true })
       const fps = getManifest().frameRate // Waymo=10Hz, nuScenes=2Hz
       const intervalMs = (1000 / fps) / get().playbackSpeed
       internal.playIntervalId = setInterval(async () => {
-        const next = get().currentFrameIndex + 1
-        // Time window: loop inside [f0, f1] instead of running to the end
         const win = get().playbackWindow
+        const current = get().currentFrameIndex
+        // A cold seek may still be showing its old frame. Hold at the window
+        // start rather than walking toward the range from outside it.
+        if (win && (current < win.f0 || current > win.f1)) {
+          await get().actions.loadFrame(win.f0)
+          return
+        }
+        const next = current + 1
+        // Time window: loop inside [f0, f1] instead of running to the end
         if (win && next > win.f1) {
           await get().actions.loadFrame(win.f0)
           return
@@ -1209,6 +1245,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     // Display settings
     setBgPreset: (id: BgPresetId) => set({ bgPreset: id }),
+
+    setTheme: (theme: ThemeName, accent?: string | null) => {
+      applyTheme(theme, document.documentElement, accent)
+      try { localStorage.setItem('egolens-theme', theme) } catch { /* private mode */ }
+      set({ theme })
+    },
     setPointShape: (shape: PointShape) => set({ pointShape: shape }),
     setPointSize: (size: number) => set({ pointSize: size }),
     setFollowCam: (follow: boolean) => set({ followCam: follow }),
@@ -2793,4 +2835,3 @@ export function getThumbnailResolver(): ((segmentId: string) => Promise<string |
   // Waymo: thumbnails not available without loading full Parquet
   return null
 }
-

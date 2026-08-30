@@ -14,7 +14,7 @@ import { PRESETS, isPresetUrl } from './utils/presets'
 import { buildShareUrl, parseViewParams, parseCamerasParam, hasUrlSource, getUrlSource, getInitialSearch, clearUrlSource, type ShareableState } from './utils/urlState'
 import { getCameraPose, setPendingCameraPose } from './components/LidarViewer/LidarViewer'
 import { resolveCameraParam } from './utils/cameraParam'
-import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected } from './utils/analytics'
+import { trackDatasetLoad, trackShareView, trackPresetClick, trackStarModalOpen, trackStarClick, trackStarDismiss, trackKeyboardShortcut, trackFolderRejected, trackThemeChange } from './utils/analytics'
 import { getEmbedParams, type EmbedParams } from './utils/embedParams'
 import { initEmbedApi } from './utils/embedApi'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -388,18 +388,13 @@ function App() {
   const isEmbed = embedParams.embed
   const showTimeline = !showDropZone && (!isEmbed || embedParams.controls !== 'none')
 
-  // Embed mode: custom background color
-  const bgColor = isEmbed && embedParams.bgcolor
-    ? `#${embedParams.bgcolor}`
-    : colors.bgBase
-
   return (
     <div style={{
       width: '100%',
       height: '100dvh',
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: bgColor,
+      backgroundColor: colors.bgBase,
       color: colors.textPrimary,
       fontFamily: fonts.sans,
       overflow: 'hidden',
@@ -709,7 +704,7 @@ function Header() {
                 fontSize: '10px',
                 fontFamily: fonts.sans,
                 color: colors.accent,
-                backgroundColor: 'rgba(26, 31, 53, 0.95)',
+                backgroundColor: alpha(colors.bgSurface, 0.95),
                 border: `1px solid ${colors.accent}`,
                 borderRadius: radius.sm,
                 whiteSpace: 'nowrap',
@@ -722,6 +717,7 @@ function Header() {
             )}
           </div>
         )}
+        <ThemeToggle isMobile={isMobile} />
         <button
           onClick={() => { setShowStarModal(true); trackStarModalOpen(isMobile ? 'mobile' : 'desktop') }}
           title="Star on GitHub"
@@ -762,7 +758,7 @@ function Header() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: colors.tintSink,
             backdropFilter: 'blur(4px)',
             padding: '24px',
           }}
@@ -771,7 +767,7 @@ function Header() {
             maxWidth: '340px',
             width: '100%',
             padding: '28px 24px',
-            backgroundColor: 'rgba(26, 31, 53, 0.97)',
+            backgroundColor: alpha(colors.bgSurface, 0.97),
             border: `1px solid ${colors.border}`,
             borderRadius: '16px',
             display: 'flex',
@@ -815,7 +811,7 @@ function Header() {
                 fontSize: '14px',
                 fontFamily: fonts.sans,
                 fontWeight: 600,
-                color: '#000',
+                color: colors.textOnAccent,
                 backgroundColor: '#FFD43B',
                 border: 'none',
                 borderRadius: radius.md,
@@ -869,6 +865,57 @@ function useIsMobile(breakpoint = 600) {
 // ---------------------------------------------------------------------------
 // Drop Zone — shown when no data is loaded
 // ---------------------------------------------------------------------------
+
+/**
+ * Light/dark switch.
+ *
+ * Until it is first used the theme follows `?theme=`, then a stored choice,
+ * then the OS. Pressing it makes the choice explicit and persistent — there is
+ * deliberately no way back to "follow the OS", because a third state costs a
+ * menu and nobody has asked for one.
+ */
+function ThemeToggle({ isMobile }: { isMobile: boolean }) {
+  const theme = useSceneStore((s) => s.theme)
+  const setTheme = useSceneStore((s) => s.actions.setTheme)
+  const next = theme === 'dark' ? 'light' : 'dark'
+
+  return (
+    <button
+      onClick={() => { setTheme(next); trackThemeChange(next) }}
+      title={`Switch to ${next} theme`}
+      aria-label={`Switch to ${next} theme`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '6px',
+        color: colors.textDim,
+        backgroundColor: 'transparent',
+        border: `1px solid ${colors.border}`,
+        borderRadius: radius.sm,
+        cursor: 'pointer',
+        transition: 'all 0.15s',
+        flexShrink: 0,
+        marginRight: isMobile ? '4px' : '6px',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = colors.accent; e.currentTarget.style.borderColor = colors.accent }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = colors.textDim; e.currentTarget.style.borderColor = colors.border }}
+    >
+      {theme === 'dark' ? (
+        // Sun — what pressing it gets you
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      ) : (
+        // Moon
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+      )}
+    </button>
+  )
+}
 
 function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map<string, File>>) => Promise<void> }) {
   const [dragging, setDragging] = useState(false)
@@ -995,9 +1042,9 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       <style>{`
         .dropzone-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .dropzone-scroll::-webkit-scrollbar-track { background: transparent; }
-        .dropzone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
-        .dropzone-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
-        .dropzone-scroll { scrollbar-color: rgba(255,255,255,0.15) transparent; scrollbar-width: thin; }
+        .dropzone-scroll::-webkit-scrollbar-thumb { background: var(--el-tint-raise-strong); border-radius: 3px; }
+        .dropzone-scroll::-webkit-scrollbar-thumb:hover { background: var(--el-tint-raise-strong); }
+        .dropzone-scroll { scrollbar-color: var(--el-tint-raise-strong) transparent; scrollbar-width: thin; }
       `}</style>
       {/* Safari warning — hidden on landing page for cleaner UX */}
 
@@ -1097,7 +1144,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                   fontSize: isMobile ? '12px' : '13px',
                   fontFamily: fonts.sans,
                   fontWeight: 600,
-                  color: isActive ? '#000' : colors.textPrimary,
+                  color: isActive ? colors.textOnAccent : colors.textPrimary,
                   backgroundColor: isActive ? colors.accent : colors.bgOverlay,
                   border: `1px solid ${isActive ? colors.accent : colors.border}`,
                   borderRadius: radius.md,
@@ -1125,7 +1172,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 <span style={{
                   fontSize: '10px',
                   fontWeight: 400,
-                  color: isActive ? 'rgba(0,0,0,0.6)' : colors.textDim,
+                  color: isActive ? colors.tintSink : colors.textDim,
                 }}>{isMobile ? preset.shortNote : preset.note}</span>
               </button>
             )
@@ -1236,7 +1283,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               fontFamily: fonts.sans,
               fontWeight: 600,
               backgroundColor: !urlInput.trim() || urlLoading ? colors.bgOverlay : colors.accent,
-              color: !urlInput.trim() || urlLoading ? colors.textDim : '#000',
+              color: !urlInput.trim() || urlLoading ? colors.textDim : colors.textOnAccent,
               border: 'none',
               borderRadius: radius.sm,
               cursor: !urlInput.trim() || urlLoading ? 'not-allowed' : 'pointer',
@@ -1303,7 +1350,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
             fontFamily: fonts.sans,
             color: colors.danger,
             padding: '6px 10px',
-            backgroundColor: 'rgba(255, 107, 107, 0.1)',
+            backgroundColor: alpha(colors.danger, 0.1),
             borderRadius: radius.sm,
             lineHeight: 1.5,
           }}>
@@ -1423,7 +1470,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                 color: colors.danger,
                 textAlign: 'center',
                 padding: '8px 16px',
-                backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                backgroundColor: alpha(colors.danger, 0.1),
                 borderRadius: radius.sm,
               }}>
                 {error}
@@ -1684,7 +1731,7 @@ function LoadErrorScreen() {
           fontSize: '13px',
           fontFamily: fonts.sans,
           fontWeight: 600,
-          color: '#000',
+          color: colors.textOnAccent,
           backgroundColor: colors.accent,
           border: 'none',
           borderRadius: radius.md,

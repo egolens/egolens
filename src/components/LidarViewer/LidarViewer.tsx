@@ -23,10 +23,10 @@ import CameraFrustums from './CameraFrustums'
 import WasdControls from './WasdControls'
 import { BevMinimapRenderer, BEV_ZOOM_LEVELS } from './BevMinimap'
 import BevOverlay from './BevOverlay'
-import { useSceneStore, BG_PRESETS, ALL_COLORMAP_MODES, COLORMAP_LABELS, getLoadedAV2HasAnnotations } from '../../stores/useSceneStore'
+import { useSceneStore, ALL_COLORMAP_MODES, COLORMAP_LABELS, getLoadedAV2HasAnnotations, resolveViewportBg } from '../../stores/useSceneStore'
 import type { ColormapMode } from '../../stores/useSceneStore'
 import { parseCameraCalibrations, type CameraCalib } from '../../utils/cameraCalibration'
-import { colors, fonts, radius, alpha } from '../../theme'
+import { colors, fonts, radius, alpha, sceneColors } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
 import { trackKeyboardShortcut } from '../../utils/analytics'
@@ -681,10 +681,13 @@ function PinCameraSync({ orbitRef, initialized }: { orbitRef: React.RefObject<Or
 function BgColorSync() {
   const { gl } = useThree()
   const bgPreset = useSceneStore((s) => s.bgPreset)
+  const theme = useSceneStore((s) => s.theme)
   useEffect(() => {
-    const hex = BG_PRESETS.find(p => p.id === bgPreset)?.color ?? colors.bgDeep
+    // viewportBg, not colors.bgDeep — that is a var() string now, and
+    // setClearColor would take it as black without complaining.
+    const hex = resolveViewportBg(bgPreset, theme)
     gl.setClearColor(hex)
-  }, [gl, bgPreset])
+  }, [gl, bgPreset, theme])
   return null
 }
 
@@ -741,6 +744,10 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
   // Orientation aids: only `none` loses them — they are how you tell which
   // way the vehicle is facing in a still-navigable view
   const hideOrientationAids = chrome === 'none'
+  // Scene colours are literal hex, resolved here rather than imported: they
+  // reach THREE.Color through the props below, and THREE cannot read var().
+  const theme = useSceneStore((s) => s.theme)
+  const scene = sceneColors(theme)
   const visibleSensors = useSceneStore((s) => s.visibleSensors)
   const toggleSensor = useSceneStore((s) => s.actions.toggleSensor)
   const sensorClouds = useSceneStore((s) => s.currentFrame?.sensorClouds)
@@ -905,7 +912,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
         raycaster={{ params: { Line: { threshold: 0.15 } } as never }}
         style={{ width: '100%', height: '100%' }}
         onCreated={({ gl }) => {
-          gl.setClearColor(BG_PRESETS.find(p => p.id === bgPreset)?.color ?? colors.bgDeep)
+          gl.setClearColor(resolveViewportBg(bgPreset, theme))
         }}
       >
         <BgColorSync />
@@ -926,7 +933,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
           {/* Vehicle origin marker (moves with vehicle in world mode) */}
           <mesh position={[0, 0, 0]}>
             <sphereGeometry args={[0.3, 16, 16]} />
-            <meshBasicMaterial color={colors.vehicleMarker} />
+            <meshBasicMaterial color={scene.vehicleMarker} />
           </mesh>
         </group>
 
@@ -944,7 +951,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
 
         {/* Ground grid (XY plane, Z=0) — stays at world origin */}
         <gridHelper
-          args={[200, 40, colors.gridMajor, colors.gridMinor]}
+          args={[200, 40, scene.gridMajor, scene.gridMinor]}
           rotation={[Math.PI / 2, 0, 0]}
         />
 
@@ -985,7 +992,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
         {!hideOrientationAids && (
           <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
             <GizmoViewport
-              axisColors={[colors.gizmoX, colors.gizmoY, colors.gizmoZ]}
+              axisColors={[scene.gizmoX, scene.gizmoY, scene.gizmoZ]}
               labelColor="white"
             />
           </GizmoHelper>
@@ -1014,7 +1021,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
           flexDirection: 'column',
           gap: 2,
           padding: 4,
-          backgroundColor: 'rgba(26, 31, 53, 0.75)',
+          backgroundColor: alpha(colors.bgSurface, 0.75),
           borderRadius: radius.md,
           backdropFilter: 'blur(12px)',
           border: `1px solid ${colors.border}`,
@@ -1196,7 +1203,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                 left: keysPopupPos.left,
                 padding: '8px 10px',
                 zIndex: 10000,
-                backgroundColor: 'rgba(26, 31, 53, 0.95)',
+                backgroundColor: alpha(colors.bgSurface, 0.95),
                 backdropFilter: 'blur(12px)',
                 border: `1px solid ${colors.border}`,
                 borderRadius: radius.md,
@@ -1242,7 +1249,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
         pointerEvents: 'auto',
         width: panelOpen ? 172 : 'auto',
         padding: 6,
-        backgroundColor: 'rgba(26, 31, 53, 0.75)',
+        backgroundColor: alpha(colors.bgSurface, 0.75),
         borderRadius: radius.md,
         backdropFilter: 'blur(12px)',
         border: `1px solid ${colors.border}`,
@@ -1322,7 +1329,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
             display: 'flex',
             borderRadius: radius.sm,
             overflow: 'hidden',
-            backgroundColor: 'rgba(255,255,255,0.04)',
+            backgroundColor: colors.tintRaise,
           }}>
             {([false, true] as const).map((isWorld) => {
               const active = worldMode === isWorld
@@ -1377,7 +1384,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                   display: 'flex', alignItems: 'center', gap: '8px',
                   padding: '4px 8px', fontSize: '11px', fontFamily: fonts.sans, fontWeight: 500,
                   border: 'none', borderRadius: radius.sm, cursor: 'pointer',
-                  backgroundColor: active ? 'rgba(255,255,255,0.06)' : 'transparent',
+                  backgroundColor: active ? colors.tintRaise : 'transparent',
                   color: active ? colors.textPrimary : colors.textDim,
                   opacity: active ? 1 : 0.6,
                   transition: 'opacity 0.15s, background-color 0.15s',
@@ -1469,7 +1476,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                 </div>
                 <div style={{
                   display: 'flex', borderRadius: radius.sm, overflow: 'hidden',
-                  backgroundColor: 'rgba(255,255,255,0.04)',
+                  backgroundColor: colors.tintRaise,
                 }}>
                   {availableModes.map(([mode, label]) => {
                     const active = colormapMode === mode
@@ -1640,7 +1647,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
             {/* Segmented control: Off | Boxes | Models */}
             <div style={{
               display: 'flex', borderRadius: radius.sm, overflow: 'hidden',
-              backgroundColor: 'rgba(255,255,255,0.04)',
+              backgroundColor: colors.tintRaise,
             }}>
               {([['off', 'Off'], ['box', 'Boxes'], ['model', 'Models']] as const).map(([mode, label]) => {
                 const active = boxMode === mode
@@ -1654,7 +1661,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
                       fontFamily: fonts.sans, fontWeight: active ? 600 : 400,
                       border: 'none', cursor: 'pointer',
                       backgroundColor: active
-                        ? (isOn ? alpha(colors.accentBlue, 0.15) : 'rgba(255,255,255,0.06)')
+                        ? (isOn ? alpha(colors.accentBlue, 0.15) : colors.tintRaise)
                         : 'transparent',
                       color: active
                         ? (isOn ? colors.accentBlue : colors.textPrimary)
@@ -1843,7 +1850,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
             fontFamily: fonts.sans,
             fontWeight: 500,
             color: colors.textPrimary,
-            backgroundColor: 'rgba(26, 31, 53, 0.9)',
+            backgroundColor: alpha(colors.bgSurface, 0.9),
             padding: '5px 12px',
             borderRadius: radius.sm,
             backdropFilter: 'blur(8px)',

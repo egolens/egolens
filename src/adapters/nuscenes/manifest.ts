@@ -8,7 +8,7 @@
  * Keyframe rate is 2 Hz; sweep support is deferred.
  */
 
-import { colors } from '../../theme'
+import { dataColors as colors } from '../../dataColors'
 import type { DatasetManifest } from '../../types/dataset'
 import { LIDARSEG_PALETTE, LIDARSEG_LABELS } from '../../utils/colormaps'
 
@@ -90,7 +90,7 @@ export const nuScenesManifest: DatasetManifest = {
     { id: CAM.FRONT,        label: 'FRONT',         color: colors.camFront,      width: 1600, height: 900, flex: 1.3 },
     { id: CAM.FRONT_RIGHT,  label: 'FRONT RIGHT',  color: colors.camFrontRight, width: 1600, height: 900, flex: 1 },
     { id: CAM.BACK_RIGHT,   label: 'BACK RIGHT',   color: colors.camSideRight,  width: 1600, height: 900, flex: 1 },
-    { id: CAM.BACK,         label: 'BACK',          color: colors.accentBlue,    width: 1600, height: 900, flex: 1 },
+    { id: CAM.BACK,         label: 'BACK',          color: colors.camBack,       width: 1600, height: 900, flex: 1 },
   ],
 
   boxTypes: [
@@ -132,7 +132,7 @@ export const nuScenesManifest: DatasetManifest = {
     [CAM.FRONT_LEFT]: colors.camFrontLeft,
     [CAM.FRONT_RIGHT]: colors.camFrontRight,
     [CAM.BACK_LEFT]: colors.camSideLeft,
-    [CAM.BACK]: colors.accentBlue,
+    [CAM.BACK]: colors.camBack,
     [CAM.BACK_RIGHT]: colors.camSideRight,
   },
 

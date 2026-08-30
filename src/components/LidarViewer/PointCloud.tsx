@@ -13,16 +13,16 @@
 import { useRef, useEffect, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useSceneStore } from '../../stores/useSceneStore'
+import { useSceneStore, resolveViewportBg } from '../../stores/useSceneStore'
 import type { FrameData } from '../../stores/useSceneStore'
 import { getManifest } from '../../adapters/registry'
 import { buildCameraProjectors, type CameraProjector } from '../../utils/lidarProjection'
 import {
-  COLORMAP_STOPS,
   ATTR_OFFSET,
   ATTR_RANGE,
   colormapColor,
   computePointColor,
+  colormapStopsFor,
 } from '../../utils/colormaps'
 import {
   createCameraColorMaterial,
@@ -333,7 +333,11 @@ export default function PointCloud() {
     const radarColArr = radarColorAttr.array as Float32Array
 
     // Non-camera colormap data
-    const stops = COLORMAP_STOPS[cmap]
+    // Ramps follow the viewport background, not the UI theme: the two are
+    // independent, and the dark-background ramps put 11 of 24 stops below
+    // 3:1 on white.
+    const { bgPreset, theme } = useSceneStore.getState()
+    const stops = colormapStopsFor(cmap, resolveViewportBg(bgPreset, theme))
     const attrOff = ATTR_OFFSET[cmap]
     const manifest = getManifest()
     const [attrMin, attrMax] = cmap === 'intensity' && manifest.intensityRange
