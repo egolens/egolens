@@ -194,11 +194,17 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
   if (!recipe.match.inventory.rootEntries.some((entry) => entry.required)) {
     diagnostics.push(diagnostic('INVENTORY_REQUIRED_ROOT_MISSING', 'At least one inventory root must be required for bounded pre-read detection.', '/match/inventory/rootEntries'))
   }
+  const versionRootCandidates = new Set(recipe.match.versionRoot?.candidates ?? [])
+  for (const candidate of versionRootCandidates) {
+    if (!rootPaths.has(candidate)) diagnostics.push(diagnostic('VERSION_ROOT_UNDECLARED', `Version-root candidate "${candidate}" is not declared in inventory.rootEntries.`, '/match/versionRoot/candidates'))
+  }
   const boundFields = new Map<string, string>()
   for (const [sourceId, source] of Object.entries(recipe.sources)) {
     const selector = source.files.exact ?? source.files.glob ?? ''
     const selectorRoot = selector.split('/')[0]
-    if (!rootPaths.has(selectorRoot)) diagnostics.push(diagnostic('SOURCE_ROOT_UNDECLARED', `Source "${sourceId}" selects undeclared inventory root "${selectorRoot}".`, `/sources/${sourceId}/files`))
+    if (selectorRoot === '{versionRoot}') {
+      if (versionRootCandidates.size === 0) diagnostics.push(diagnostic('VERSION_ROOT_SELECTOR_UNDECLARED', `Source "${sourceId}" uses {versionRoot} without match.versionRoot.`, `/sources/${sourceId}/files`))
+    } else if (!rootPaths.has(selectorRoot)) diagnostics.push(diagnostic('SOURCE_ROOT_UNDECLARED', `Source "${sourceId}" selects undeclared inventory root "${selectorRoot}".`, `/sources/${sourceId}/files`))
     for (const [role, field] of Object.entries(source.bindings ?? {})) {
       const previous = boundFields.get(role)
       if (previous && previous !== field) diagnostics.push(diagnostic('SOURCE_BINDING_AMBIGUOUS', `Source role "${role}" is bound to both "${previous}" and "${field}".`, `/sources/${sourceId}/bindings/${role}`))

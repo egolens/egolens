@@ -9,6 +9,8 @@
  */
 
 import { DataLoadError, classifyFetchError, classifyHttpError } from '../../utils/errors'
+import { selectVersionRootV1 } from '../../teachable/runtime/versionRoot'
+import { nuScenesRecipe } from './manifest'
 
 /** One scene entry in a split-level index.json. */
 export interface NuScenesIndexScene {
@@ -35,6 +37,27 @@ export interface NuScenesDiscoveredScene {
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`
+}
+
+/** Probe every allowlisted root so an ambiguous remote drop cannot be merged. */
+export async function detectNuScenesVersionRoot(baseUrl: string): Promise<string> {
+  const policy = nuScenesRecipe.match.versionRoot
+  if (!policy) throw new Error('The bundled nuScenes recipe has no version-root policy.')
+  const base = ensureTrailingSlash(baseUrl)
+  const probes = await Promise.all(policy.candidates.map(async (root) => {
+    const requiredFiles = await Promise.all(policy.requiredFiles.map(async (file) => {
+      try {
+        const response = await fetch(`${base}${root}/${file}`, { method: 'HEAD' })
+        const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+        // SPA hosts often answer a missing JSON path with 200 + index.html.
+        return response.ok && contentType.includes('json')
+      } catch {
+        return false
+      }
+    }))
+    return requiredFiles.every(Boolean) ? root : null
+  }))
+  return selectVersionRootV1(policy, probes.filter((root): root is string => root !== null))
 }
 
 /**

@@ -43,6 +43,7 @@ import {
   type NuScenesDatabase,
 } from '../adapters/nuscenes/metadata'
 import {
+  detectNuScenesVersionRoot,
   discoverNuScenesScenes,
   type NuScenesDiscoveredScene,
 } from '../adapters/nuscenes/remote'
@@ -89,6 +90,9 @@ import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkelet
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
 import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
+import { bindNuScenesRecipeSceneV1 } from '../teachable/runtime/NuScenesRecipeScene'
+import type { NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
+import { nuScenesCompiledRecipe } from '../adapters/recipes/bundled'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -409,6 +413,10 @@ const internal = {
   nuScenesSampleFiles: null as Map<string, File | string> | null,
   /** Discovered per-scene shards from an index.json root (sharded hosting mode) */
   nuScenesDiscoveredScenes: null as NuScenesDiscoveredScene[] | null,
+  /** Single metadata root selected by the bounded recipe binder. */
+  nuScenesVersionRoot: null as string | null,
+  /** Bound Phase 3 scene; the compatibility renderer remains the frame consumer during migration. */
+  normalizedScene: null as NormalizedSceneV1 | null,
   /**
    * Seek requested before its frame was cached (cold load). loadFrame drops
    * cache misses so it never fights the prefetch queue, which would silently
@@ -429,6 +437,8 @@ const internal = {
 }
 
 function resetInternal() {
+  internal.normalizedScene?.dispose()
+  internal.normalizedScene = null
   internal.parquetFiles.clear()
   internal.timestamps = []
   internal.pendingSeekFrame = null
@@ -665,11 +675,13 @@ async function loadLocalSegments(
   // Check for nuScenes sentinel key (produced by folder scanner)
   if (segments.has('__nuscenes__')) {
     const allFiles = segments.get('__nuscenes__')!
+    const versionRoot = allFiles.get('__versionRoot__')?.name ?? 'v1.0-mini'
 
     // Separate JSON metadata from sample data files
     const jsonFiles = new Map<string, File>()
     const sampleFiles = new Map<string, File>()
     for (const [path, file] of allFiles) {
+      if (path === '__versionRoot__') continue
       if (path.endsWith('.json')) {
         jsonFiles.set(path, file)
       } else {
@@ -694,6 +706,7 @@ async function loadLocalSegments(
     internal.datasetId = 'nuscenes'
     internal.nuScenesSampleFiles = sampleFiles
     internal.nuScenesDiscoveredScenes = null
+    internal.nuScenesVersionRoot = versionRoot
     activateAdapter('nuscenes')
 
     // Build one-time database from JSON tables
@@ -1160,9 +1173,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
           set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
           try {
-            const { db, sampleFiles } = await fetchNuScenesVersionData(entry.sceneUrl, set)
+            const { db, sampleFiles, versionRoot } = await fetchNuScenesVersionData(entry.sceneUrl, set)
             internal.nuScenesDb = db
             internal.nuScenesSampleFiles = sampleFiles
+            internal.nuScenesVersionRoot = versionRoot
           } catch (e) {
             failLoad(set, e, 'selectSegment:nuScenesShard')
             return
@@ -1396,13 +1410,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
             const sceneUrl = `${base}${initialScene}/`
             try {
-              const { db, sampleFiles } = await fetchNuScenesVersionData(sceneUrl, set)
+              const { db, sampleFiles, versionRoot } = await fetchNuScenesVersionData(sceneUrl, set)
               if (db.scenes.some(s => s.name === initialScene)) {
                 console.log(`[loadFromUrl] nuScenes direct scene: ${sceneUrl}`)
                 internal.datasetId = 'nuscenes'
                 internal.nuScenesDiscoveredScenes = [{ name: initialScene, sceneUrl }]
                 internal.nuScenesDb = db
                 internal.nuScenesSampleFiles = sampleFiles
+                internal.nuScenesVersionRoot = versionRoot
                 activateAdapter('nuscenes')
                 set({ availableSegments: [initialScene], loadProgress: 0.25 })
 
@@ -1439,9 +1454,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           internal.datasetId = 'nuscenes'
           activateAdapter('nuscenes')
 
-          const { db, sampleFiles } = await fetchNuScenesVersionData(baseUrl, set)
+          const { db, sampleFiles, versionRoot } = await fetchNuScenesVersionData(baseUrl, set)
           internal.nuScenesDb = db
           internal.nuScenesSampleFiles = sampleFiles
+          internal.nuScenesVersionRoot = versionRoot
 
           // Set available scenes and auto-select first
           const sceneNames = db.scenes.map(s => s.name).sort()
@@ -1860,28 +1876,10 @@ const NUSCENES_TABLE_SIZE_LIMIT = 400 * 1024 * 1024
 async function fetchNuScenesVersionData(
   baseUrl: string,
   set: (partial: Partial<SceneState>) => void,
-): Promise<{ db: NuScenesDatabase; sampleFiles: Map<string, string> }> {
+): Promise<{ db: NuScenesDatabase; sampleFiles: Map<string, string>; versionRoot: string }> {
   // 1. Auto-detect split by probing known metadata paths
-  const splits = ['v1.0-mini', 'v1.0-trainval', 'v1.0-test']
-  let detectedSplit: string | null = null
-
-  for (const split of splits) {
-    try {
-      const url = `${baseUrl}${split}/scene.json`
-      const res = await fetch(url, { method: 'HEAD' })
-      if (res.ok) {
-        detectedSplit = split
-        console.log(`[loadFromUrl] nuScenes detected: ${split}`)
-        break
-      }
-    } catch { /* try next split */ }
-  }
-
-  if (!detectedSplit) {
-    throw new Error(
-      'Could not detect nuScenes data. Expected v1.0-mini/, v1.0-trainval/, or v1.0-test/ folder with scene.json at the given URL.'
-    )
-  }
+  const detectedSplit = await detectNuScenesVersionRoot(baseUrl)
+  console.log(`[loadFromUrl] nuScenes detected: ${detectedSplit}`)
   set({ loadProgress: 0.05 })
 
   // Same string-limit guard as the local path — enforced only when the server
@@ -1947,7 +1945,7 @@ async function fetchNuScenesVersionData(
   }
   console.log(`[loadFromUrl] nuScenes file map: ${sampleFiles.size} entries`)
 
-  return { db, sampleFiles }
+  return { db, sampleFiles, versionRoot: detectedSplit }
 }
 
 async function loadNuScenesScene(
@@ -1964,7 +1962,7 @@ async function loadNuScenesScene(
     error: null,
     loadProgress: 0,
     loadStep: 'parsing' as LoadStep,
-    availableComponents: ['samples', 'v1.0-mini'],
+    availableComponents: ['samples', internal.nuScenesVersionRoot ?? 'v1.0-mini'],
     cachedFrames: [],
   })
 
@@ -1976,6 +1974,18 @@ async function loadNuScenesScene(
 
     // 2. Load scene metadata → MetadataBundle
     const bundle = loadNuScenesSceneMetadata(internal.nuScenesDb, scene.token)
+    const binding = bindNuScenesRecipeSceneV1({
+      compiledRecipe: nuScenesCompiledRecipe,
+      database: internal.nuScenesDb,
+      sceneToken: scene.token,
+      files: internal.nuScenesSampleFiles,
+      metadataBundle: bundle,
+    })
+    internal.normalizedScene?.dispose()
+    internal.normalizedScene = binding.scene
+    for (const diagnostic of binding.diagnostics) {
+      console.info(`[nuScenes recipe] ${diagnostic.code}: ${diagnostic.hint}`)
+    }
     set({ loadProgress: 0.2 })
 
     // 3. Extract frame batch info BEFORE applying bundle
@@ -1983,7 +1993,11 @@ async function loadNuScenesScene(
     const { lidarBatches, cameraBatches } = buildNuScenesFrameBatches(bundle)
 
     // 4. Apply metadata bundle to internal state
-    applyMetadataBundle(bundle, set, get)
+    applyMetadataBundle({
+      ...bundle,
+      hasBoxData: binding.scene.manifest.capabilities.has('boxes3d'),
+      hasSegmentation: binding.scene.manifest.capabilities.has('lidarSegmentation'),
+    }, set, get)
     set({ loadProgress: 0.3 })
     memLog.snap('nuscenes:metadata-applied', {
       note: `${bundle.timestamps.length} frames, ${lidarBatches.length} lidar batches, ${cameraBatches.length} camera batches`,

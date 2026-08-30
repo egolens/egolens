@@ -31,6 +31,7 @@ import { NUSCENES_CHANNEL_TO_ID, nuScenesManifest } from './manifest'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import { multiplyRowMajor4x4, invertRowMajor4x4 } from '../../utils/matrix'
 import { DataLoadError } from '../../utils/errors'
+import { decodeJsonRecordsV1 } from '../../teachable/operators/jsonRecords'
 
 // ---------------------------------------------------------------------------
 // Parsed database — built once, reused across scene switches
@@ -106,19 +107,17 @@ export async function readJsonTable<T>(
     return { status: 'unreadable', reason: e instanceof Error ? e.message : String(e) }
   }
 
-  let parsed: unknown
   try {
-    parsed = JSON.parse(text)
-  } catch {
+    return { status: 'ok', rows: decodeJsonRecordsV1<T>(text) }
+  } catch (error) {
+    if (error instanceof Error && !(error instanceof SyntaxError)) {
+      return { status: 'unreadable', reason: error.message }
+    }
     // A host that answers missing files with its index.html lands here. Quote
     // the opening bytes — "starts with <!doctype html" tells the whole story.
     const head = text.trimStart().slice(0, 40).replace(/\s+/g, ' ')
     return { status: 'unreadable', reason: `not JSON (starts with "${head}…")` }
   }
-  if (!Array.isArray(parsed)) {
-    return { status: 'unreadable', reason: `expected a JSON array, got ${typeof parsed}` }
-  }
-  return { status: 'ok', rows: parsed as T[] }
 }
 
 /** The six tables without which nothing renders, and what each one drives. */

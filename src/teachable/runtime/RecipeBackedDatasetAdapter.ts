@@ -25,10 +25,11 @@ export class RecipeBackedDatasetAdapter implements DatasetAdapter<PreparedRecipe
   constructor(
     recipe: EgoLensAdapterRecipeV1,
     operators: OperatorRegistry,
+    compiledRecipe?: CompiledRecipeV1,
   ) {
     this.recipe = recipe
     this.operators = operators
-    this.compiledRecipe = compileRecipeV1(recipe, operators)
+    this.compiledRecipe = compiledRecipe ?? compileRecipeV1(recipe, operators)
   }
 
   get id(): string {
@@ -43,6 +44,8 @@ export class RecipeBackedDatasetAdapter implements DatasetAdapter<PreparedRecipe
     const entries = new Set(evidence.entryNames)
     const inventory = this.recipe.match.inventory.rootEntries
     if (!inventory.filter((entry) => entry.required).every((entry) => entries.has(entry.path))) return false
+    const versionRoot = this.recipe.match.versionRoot
+    if (versionRoot && !versionRoot.candidates.some((candidate) => entries.has(candidate))) return false
     const evaluate = (rule: MatchRuleV1): boolean => matchesPathRule(rule, entries) ?? false
     const all = this.recipe.match.all?.every(evaluate) ?? true
     const any = this.recipe.match.any?.some(evaluate) ?? true

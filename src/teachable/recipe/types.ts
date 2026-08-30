@@ -36,6 +36,14 @@ export interface RecipeMatchV1 {
       readonly required: boolean
     }[]
   }
+  /**
+   * Select exactly one allowlisted metadata root before source paths bind.
+   * `{versionRoot}` in a source selector expands only to this selected value.
+   */
+  readonly versionRoot?: {
+    readonly candidates: readonly string[]
+    readonly requiredFiles: readonly string[]
+  }
   readonly all?: readonly MatchRuleV1[]
   readonly any?: readonly MatchRuleV1[]
   readonly none?: readonly MatchRuleV1[]

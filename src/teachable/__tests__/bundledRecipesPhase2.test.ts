@@ -45,7 +45,12 @@ describe('bundled Phase 2 recipes', () => {
       for (const source of Object.values(recipe.sources)) {
         const selector = source.files.exact ?? source.files.glob
         expect(selector).toBeDefined()
-        expect(roots).toContain(selector?.split('/')[0])
+        const selectorRoot = selector?.split('/')[0]
+        if (selectorRoot === '{versionRoot}') {
+          expect(recipe.match.versionRoot?.candidates.length).toBeGreaterThan(0)
+        } else {
+          expect(roots).toContain(selectorRoot)
+        }
       }
     }
   })
@@ -64,6 +69,22 @@ describe('bundled Phase 2 recipes', () => {
       'timeline', 'egoPoses', 'pointClouds', 'cameraImages', 'boxes3d', 'boxes2d',
       'trajectories', 'segmentMetadata',
     ]))
+  })
+
+  it('uses closed contracts for every operator on the executable nuScenes graph', () => {
+    const isClosed = (contract: Readonly<Record<string, unknown>>): boolean => {
+      if (contract.additionalProperties === false) return true
+      const alternatives = contract.oneOf
+      return Array.isArray(alternatives)
+        && alternatives.every((alternative) => isClosed(alternative as Readonly<Record<string, unknown>>))
+    }
+    for (const [name, dependency] of Object.entries(nuScenesCompiledRecipe.recipe.engine.requiredOperators)) {
+      const descriptor = bundledPhase2OperatorRegistry.resolve(name, dependency)
+      expect(descriptor, name).not.toBeNull()
+      expect(isClosed(descriptor!.paramsContract), `${name} params`).toBe(true)
+      expect(isClosed(descriptor!.inputContract), `${name} input`).toBe(true)
+      expect(isClosed(descriptor!.outputContract), `${name} output`).toBe(true)
+    }
   })
 
   it('keeps display names out of stable format identity', () => {

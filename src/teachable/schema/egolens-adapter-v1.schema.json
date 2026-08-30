@@ -220,6 +220,27 @@
             }
           }
         },
+        "versionRoot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidates", "requiredFiles"],
+          "properties": {
+            "candidates": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+            },
+            "requiredFiles": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+            }
+          }
+        },
         "all": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/matchRule" } },
         "any": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/matchRule" } },
         "none": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/matchRule" } }

@@ -539,7 +539,6 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
     "pointStride": 4,
     "requiredComponents": [
       "samples",
-      "v1.0-mini",
     ],
     "semanticLabels": [
       "noise",

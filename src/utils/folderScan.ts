@@ -15,6 +15,8 @@
  */
 
 import { getAllKnownComponents, detectDataset } from '../adapters/registry'
+import { nuScenesRecipe } from '../adapters/nuscenes/manifest'
+import { selectVersionRootV1 } from '../teachable/runtime/versionRoot'
 
 // ---------------------------------------------------------------------------
 // File System Access API typings not yet in this project's lib.dom setup
@@ -240,18 +242,26 @@ async function scanNuScenesDirectoryHandle(
 ): Promise<Map<string, Map<string, File>>> {
   const allFiles = new Map<string, File>()
 
-  // Read JSON files from metadata directory (v1.0-mini, v1.0-trainval, v1.0-test)
-  const metaDirNames = ['v1.0-mini', 'v1.0-trainval', 'v1.0-test']
-  for (const name of metaDirNames) {
+  const policy = nuScenesRecipe.match.versionRoot
+  if (!policy) throw new Error('The bundled nuScenes recipe has no version-root policy.')
+  const filesByRoot = new Map<string, Map<string, File>>()
+  for (const name of policy.candidates) {
     const dir = componentDirs.get(name)
     if (!dir) continue
+    const files = new Map<string, File>()
     for await (const [fileName, handle] of dir) {
       if ((handle as FileSystemHandle).kind === 'file' && fileName.endsWith('.json')) {
-        allFiles.set(fileName, await (handle as FileSystemFileHandle).getFile())
+        files.set(fileName, await (handle as FileSystemFileHandle).getFile())
       }
     }
-    break // Only use the first metadata directory found
+    filesByRoot.set(name, files)
   }
+  const viableRoots = [...filesByRoot]
+    .filter(([, files]) => policy.requiredFiles.every((file) => files.has(file)))
+    .map(([root]) => root)
+  const selectedRoot = selectVersionRootV1(policy, viableRoots)
+  for (const [fileName, file] of filesByRoot.get(selectedRoot) ?? []) allFiles.set(fileName, file)
+  allFiles.set('__versionRoot__', new File([], selectedRoot))
 
   // Read lidarseg/panoptic label files (flat: {dir}/{split}/{token}.bin or .npz)
   for (const dirName of ['lidarseg', 'panoptic'] as const) {
@@ -259,6 +269,7 @@ async function scanNuScenesDirectoryHandle(
     if (!dir) continue
     // One level: lidarseg/v1.0-mini/<token>_lidarseg.bin
     for await (const [splitName, handle] of dir) {
+      if (splitName !== selectedRoot) continue
       if ((handle as FileSystemHandle).kind !== 'directory') continue
       const splitDir = handle as FileSystemDirectoryHandle
       for await (const [fileName, fileHandle] of splitDir) {
