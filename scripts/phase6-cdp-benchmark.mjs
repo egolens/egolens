@@ -41,6 +41,7 @@ const timeoutMs = numberArg(options, 'timeout-ms', 180_000)
 const playbackLoops = numberArg(options, 'playback-loops', 2)
 const nominalFps = numberArg(options, 'fps', 10)
 const traceEventLimit = numberArg(options, 'trace-event-limit', 100_000)
+const traceEnabled = options.trace !== 'off'
 if (!Number.isSafeInteger(traceEventLimit) || traceEventLimit <= 0) {
   throw new Error('--trace-event-limit must be a positive integer')
 }
@@ -556,12 +557,14 @@ async function runScenario(client, browserVersion, runIndex) {
     soakCheckpoints: [],
     soakForcedGcCheckpoints: [],
   }
-  await client.send('Tracing.start', {
-    categories: 'devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing,loading,v8',
-    options: 'record-as-much-as-possible',
-    transferMode: 'ReportEvents',
-    bufferUsageReportingInterval: 1000,
-  }, pageSession)
+  if (traceEnabled) {
+    await client.send('Tracing.start', {
+      categories: 'devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing,loading,v8',
+      options: 'record-as-much-as-possible',
+      transferMode: 'ReportEvents',
+      bufferUsageReportingInterval: 1000,
+    }, pageSession)
+  }
   await client.send('Page.navigate', { url: withPerf(options.url) }, pageSession)
   await waitFor(client, pageSession, 'Boolean(globalThis.__EGOLENS_PERF__)')
   await waitFor(client, pageSession, 'globalThis.__EGOLENS_BENCHMARK_READY__ === true')
@@ -665,8 +668,10 @@ async function runScenario(client, browserVersion, runIndex) {
     }
   }
 
-  await client.send('Tracing.end', {}, pageSession)
-  await Promise.race([traceComplete, delay(30_000)])
+  if (traceEnabled) {
+    await client.send('Tracing.end', {}, pageSession)
+    await Promise.race([traceComplete, delay(30_000)])
+  }
   // Some Chrome builds detach the page before acknowledging closeTarget.
   // Cleanup is best-effort after all required evidence has been captured.
   await client.send('Target.closeTarget', { targetId: target.targetId }, undefined, 10_000).catch(() => {})
@@ -687,38 +692,69 @@ async function runScenario(client, browserVersion, runIndex) {
       droppedRelevantEvents: traceEventsDropped,
       limit: traceEventLimit,
       truncated: traceEventsDropped > 0,
-      complete: traceCompleteObserved,
+      complete: traceEnabled ? traceCompleteObserved : null,
+      enabled: traceEnabled,
     },
   }
 }
 
-const profileDir = await mkdtemp(path.join(tmpdir(), 'egolens-phase6-chrome-'))
-const port = 9222 + Math.floor(Math.random() * 500)
-const chrome = spawn(CHROME, [
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profileDir}`,
-  '--headless=new',
-  '--disable-background-networking',
-  '--disable-component-update',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--enable-precise-memory-info',
-  '--use-angle=metal',
-  'about:blank',
-], { stdio: 'ignore' })
+async function launchBrowser() {
+  const profileDir = await mkdtemp(path.join(tmpdir(), 'egolens-phase6-chrome-'))
+  const port = 9222 + Math.floor(Math.random() * 500)
+  const chrome = spawn(CHROME, [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profileDir}`,
+    '--headless=new',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--enable-precise-memory-info',
+    '--use-angle=metal',
+    'about:blank',
+  ], { stdio: 'ignore' })
+  let client
+  try {
+    const endpoint = await waitForEndpoint(port, chrome)
+    client = await CdpClient.connect(endpoint.webSocketDebuggerUrl)
+    const browserVersion = await client.send('Browser.getVersion')
+    return { profileDir, chrome, client, browserVersion }
+  } catch (error) {
+    if (chrome.exitCode === null) chrome.kill('SIGTERM')
+    await rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    throw error
+  }
+}
 
-let client
-try {
-  const endpoint = await waitForEndpoint(port, chrome)
-  client = await CdpClient.connect(endpoint.webSocketDebuggerUrl)
-  const browserVersion = await client.send('Browser.getVersion')
-  const warmups = []
-  const samples = []
-  for (let index = 0; index < warmupCount + runCount; index++) {
-    const run = await runScenario(client, browserVersion, index)
+async function closeBrowser({ profileDir, chrome, client }) {
+  client.close()
+  if (chrome.exitCode === null) {
+    const exited = new Promise((resolve) => chrome.once('exit', resolve))
+    chrome.kill('SIGTERM')
+    await Promise.race([exited, delay(5_000)])
+  }
+  await rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+}
+
+const warmups = []
+const samples = []
+let recordedBrowserVersion = null
+for (let index = 0; index < warmupCount + runCount; index++) {
+  const isolatedBrowser = await launchBrowser()
+  recordedBrowserVersion ??= isolatedBrowser.browserVersion
+  const startedAt = Date.now()
+  process.stderr.write(`[phase6] ${index < warmupCount ? 'warmup' : 'sample'} ${index + 1}/${warmupCount + runCount} started\n`)
+  try {
+    const run = await runScenario(isolatedBrowser.client, isolatedBrowser.browserVersion, index)
     if (index < warmupCount) warmups.push(run)
     else samples.push(run)
+  } finally {
+    await closeBrowser(isolatedBrowser)
   }
+  process.stderr.write(`[phase6] run ${index + 1}/${warmupCount + runCount} completed in ${Math.round((Date.now() - startedAt) / 1000)}s\n`)
+}
+
+{
   const output = {
     schemaVersion: 1,
     scenario: {
@@ -733,6 +769,8 @@ try {
       playbackLoops,
       settleMs,
       traceEventLimit,
+      traceEnabled,
+      browserIsolation: 'per-run',
       viewport: { width: viewport[0], height: viewport[1] },
     },
     environment: {
@@ -744,7 +782,7 @@ try {
       cpu: os.cpus()[0]?.model ?? 'unknown',
       cpuCount: os.cpus().length,
       memoryBytes: os.totalmem(),
-      browser: browserVersion,
+      browser: recordedBrowserVersion,
       heapAggregation: 'sum of Runtime.getHeapUsage.usedSize across the page and attached worker targets; not total browser memory',
     },
     warmups,
@@ -752,12 +790,4 @@ try {
     summary: aggregate(samples),
   }
   await writeFile(path.resolve(String(options.output)), `${JSON.stringify(output, null, 2)}\n`)
-} finally {
-  client?.close()
-  if (chrome.exitCode === null) {
-    const exited = new Promise((resolve) => chrome.once('exit', resolve))
-    chrome.kill('SIGTERM')
-    await Promise.race([exited, delay(5_000)])
-  }
-  await rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
 }

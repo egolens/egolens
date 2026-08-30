@@ -64,7 +64,8 @@ function check(name, pass, evidence) {
 
 const comparableScenarioFields = [
   'dataset', 'url', 'seeks', 'sceneSwitches', 'crossDatasetSwitches',
-  'switchScenarioDatasets', 'playbackLoops', 'settleMs', 'traceEventLimit', 'viewport',
+  'switchScenarioDatasets', 'playbackLoops', 'settleMs', 'traceEventLimit',
+  'traceEnabled', 'browserIsolation', 'viewport',
 ]
 const baselineScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, canonicalScenarioValue(key, baseline.scenario?.[key])]))
 const candidateScenario = Object.fromEntries(comparableScenarioFields.map((key) => [key, canonicalScenarioValue(key, candidate.scenario?.[key])]))

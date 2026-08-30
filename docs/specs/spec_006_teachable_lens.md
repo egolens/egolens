@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed twelve renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed thirteen renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1355,6 +1355,12 @@ normative for later Teachable Lens work:
   least-squares line measures dataset size and GC timing rather than a leak.
   Likewise, steady FPS is limited to the initial live scene and excludes later
   dataset loading intervals.
+- benchmark browser processes are themselves part of measurement isolation.
+  Each warm-up or measured run must use a fresh Chrome process and profile;
+  closing only its page target can leave a renderer from an earlier trace alive,
+  consuming CPU and heap while the next run loads. A trace-free lifecycle
+  artifact may supplement, but not replace, the exact-commit traced candidate
+  artifact used for latency and FPS comparison.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.

@@ -1,6 +1,6 @@
 # Spec 012 — Teachable Lens Phase 6 performance and lifecycle gate
 
-**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; Waymo disposal smoke passes; normative performance evidence and hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-30
+**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; isolated cross-dataset disposal smoke passes; normative evidence promotion and hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-30
 
 **Relationship to Spec 006**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 6. Phase 6 may
@@ -98,9 +98,25 @@ replace the natural checkpoint or rescue a failure in any natural ownership
 invariant. Steady traced FPS is computed only between the initial scene's ready
 mark and its first replacement/disposal mark, excluding later loading periods.
 
-### Browser renderer lifecycle finding
+Every warm-up and measured run must start a fresh Chrome process with a fresh
+user-data directory. `Target.closeTarget` is not a sufficient run boundary:
+Chrome may keep a renderer from a completed trace alive after its page target
+disappears, and that renderer can consume CPU and heap while a later run loads.
+The runner must terminate the isolated browser process, wait for exit, and
+remove its profile before starting the next run. The artifact records this as
+`scenario.browserIsolation = "per-run"`.
 
-The Phase 6 Waymo production smoke and normative switch soak exposed four browser-framework retention
+A lifecycle-only candidate artifact may disable CDP tracing to remove tracing
+overhead while it exercises switches, forced-GC diagnostics, ownership, and
+disposal. Such an artifact must record `scenario.traceEnabled = false` and may
+only supplement a traced performance candidate captured from the same
+production-app commit. It cannot supply or waive latency, FPS, or long-task
+budgets, and a trace-free artifact must never be compared to a traced baseline
+as if their workloads were identical.
+
+### Browser renderer lifecycle findings
+
+The Phase 6 Waymo production smoke and normative switch soak exposed five browser-framework retention
 edges that are not visible in Zustand cache gauges:
 
 1. `@react-three/fiber` 9.5 keeps its last frame state/subscription variables
@@ -119,6 +135,13 @@ edges that are not visible in Zustand cache gauges:
    control DOM reachable. Viewer teardown must clear all model URLs it owns
    from the loader cache. Browser HTTP caching remains independent and may
    continue to serve later model loads.
+5. A closed CDP page target does not prove that its Chrome renderer process has
+   exited. Reusing one browser for all benchmark runs left a prior traced
+   renderer consuming about 3.5 GiB RSS and multiple CPU cores while the next
+   Waymo load waited at its first frame. Per-run browser-process isolation
+   removed the survivor; a trace-free nuScenes → Waymo smoke then completed in
+   75 seconds, and a six-switch Waymo/nuScenes/AV2 lifecycle smoke completed in
+   97 seconds with no browser process left behind.
 
 The production build therefore applies a fail-closed R3F 9.5 lifecycle patch:
 it releases last-frame variables at the loop terminal and clears the disposed
