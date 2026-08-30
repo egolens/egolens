@@ -88,7 +88,7 @@ natural ownership invariant.
 
 ### Browser renderer lifecycle finding
 
-The Phase 6 Waymo production smoke exposed three browser-framework retention
+The Phase 6 Waymo production smoke and normative switch soak exposed four browser-framework retention
 edges that are not visible in Zustand cache gauges:
 
 1. `@react-three/fiber` 9.5 keeps its last frame state/subscription variables
@@ -100,6 +100,13 @@ edges that are not visible in Zustand cache gauges:
    itself. Every geometry rendered by the main viewer or the secondary BEV
    renderer must emit `dispose` before renderer disposal, including shared
    Three.js Sprite geometry used through a portal scene.
+4. `useLoader` uses the process-wide `suspend-react` response cache. A cached
+   GLTF response strongly retains its shared geometries; if a transient model
+   is rendered between ownership samples, that response can keep the geometry,
+   its `WebGLBuffer`, the dead WebGL context, detached canvases, and viewer
+   control DOM reachable. Viewer teardown must clear all model URLs it owns
+   from the loader cache. Browser HTTP caching remains independent and may
+   continue to serve later model loads.
 
 The production build therefore applies a fail-closed R3F 9.5 lifecycle patch:
 it releases last-frame variables at the loop terminal and clears the disposed

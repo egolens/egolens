@@ -31,6 +31,7 @@ import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
 import { trackKeyboardShortcut } from '../../utils/analytics'
 import { disposeThreeRendererResources } from '../../utils/threeRendererDisposal'
+import { clearObjectModelCache } from './ObjectModels'
 import {
   currentPerformanceSceneGeneration,
   markRenderedFrame,
@@ -818,6 +819,7 @@ function RendererPerformanceReporter() {
       ownedGeometries.current,
       ownedMaterials.current,
     )
+    clearObjectModelCache()
   }, [gl, scene])
 
   return null

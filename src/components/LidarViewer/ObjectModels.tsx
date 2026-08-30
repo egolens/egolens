@@ -16,6 +16,22 @@ import * as THREE from 'three'
 import { useLoader } from '@react-three/fiber'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
+const objectModelUrls = {
+  car: `${import.meta.env.BASE_URL}models/car.glb`,
+  person: `${import.meta.env.BASE_URL}models/person.glb`,
+  sign: `${import.meta.env.BASE_URL}models/sign.glb`,
+  cyclist: `${import.meta.env.BASE_URL}models/cyclist.glb`,
+  cone: `${import.meta.env.BASE_URL}models/cone.glb`,
+  barrier: `${import.meta.env.BASE_URL}models/barrier.glb`,
+  bicycle: `${import.meta.env.BASE_URL}models/bicycle.glb`,
+  motorcycle: `${import.meta.env.BASE_URL}models/motorcycle.glb`,
+} as const
+
+/** Drop suspend-react's process-wide GLTF responses when the viewer is gone. */
+export function clearObjectModelCache(): void {
+  for (const url of Object.values(objectModelUrls)) useLoader.clear(GLTFLoader, url)
+}
+
 // ============================================================================
 // Axis correction: GLB (Y-up, -Z-forward) → Waymo (Z-up, X-forward)
 // ============================================================================
@@ -136,7 +152,7 @@ function FallbackBox({ color, opacity }: { color: string; opacity: number }) {
 export function VehicleModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/car.glb`} color={color} opacity={opacity} yawOffset={Math.PI} />
+      <GLBModel url={objectModelUrls.car} color={color} opacity={opacity} yawOffset={Math.PI} />
     </Suspense>
   )
 }
@@ -148,7 +164,7 @@ export function VehicleModel({ color, opacity }: { color: string; opacity: numbe
 export function PedestrianModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/person.glb`} color={color} opacity={opacity} />
+      <GLBModel url={objectModelUrls.person} color={color} opacity={opacity} />
     </Suspense>
   )
 }
@@ -160,7 +176,7 @@ export function PedestrianModel({ color, opacity }: { color: string; opacity: nu
 export function SignModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/sign.glb`} color={color} opacity={opacity} preserveDepth />
+      <GLBModel url={objectModelUrls.sign} color={color} opacity={opacity} preserveDepth />
     </Suspense>
   )
 }
@@ -172,7 +188,7 @@ export function SignModel({ color, opacity }: { color: string; opacity: number }
 export function CyclistModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/cyclist.glb`} color={color} opacity={opacity} yawOffset={Math.PI / 2} />
+      <GLBModel url={objectModelUrls.cyclist} color={color} opacity={opacity} yawOffset={Math.PI / 2} />
     </Suspense>
   )
 }
@@ -184,7 +200,7 @@ export function CyclistModel({ color, opacity }: { color: string; opacity: numbe
 export function TrafficConeModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/cone.glb`} color={color} opacity={opacity} />
+      <GLBModel url={objectModelUrls.cone} color={color} opacity={opacity} />
     </Suspense>
   )
 }
@@ -196,7 +212,7 @@ export function TrafficConeModel({ color, opacity }: { color: string; opacity: n
 export function BarrierModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/barrier.glb`} color={color} opacity={opacity} />
+      <GLBModel url={objectModelUrls.barrier} color={color} opacity={opacity} />
     </Suspense>
   )
 }
@@ -208,7 +224,7 @@ export function BarrierModel({ color, opacity }: { color: string; opacity: numbe
 export function BicycleModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/bicycle.glb`} color={color} opacity={opacity} yawOffset={Math.PI} />
+      <GLBModel url={objectModelUrls.bicycle} color={color} opacity={opacity} yawOffset={Math.PI} />
     </Suspense>
   )
 }
@@ -220,7 +236,7 @@ export function BicycleModel({ color, opacity }: { color: string; opacity: numbe
 export function MotorcycleModel({ color, opacity }: { color: string; opacity: number }) {
   return (
     <Suspense fallback={<FallbackBox color={color} opacity={opacity} />}>
-      <GLBModel url={`${import.meta.env.BASE_URL}models/motorcycle.glb`} color={color} opacity={opacity} yawOffset={Math.PI / 2} />
+      <GLBModel url={objectModelUrls.motorcycle} color={color} opacity={opacity} yawOffset={Math.PI / 2} />
     </Suspense>
   )
 }
