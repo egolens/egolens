@@ -475,7 +475,7 @@ export default function SearchableSelect({
                 fontSize: '11px',
                 fontFamily: fonts.sans,
                 fontWeight: active ? 600 : 400,
-                color: active ? '#000' : colors.textSecondary,
+                color: active ? colors.textOnAccent : colors.textSecondary,
                 backgroundColor: active ? colors.accent : 'transparent',
                 border: `1px solid ${active ? colors.accent : colors.border}`,
                 borderRadius: '999px',

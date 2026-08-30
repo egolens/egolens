@@ -786,7 +786,6 @@ Phase 0 (Prerequisites) ✅ DONE — commit 93d4111
 - [ ] `&camera=ring_front_center` starts in POV of that camera
 - [ ] `&autoplay=true` begins playback automatically after first frame loads
 - [ ] `&colormap=height` sets initial point cloud colormap
-- [ ] `&bgcolor=000000` sets canvas background (for dark host pages)
 - [ ] `&lang=ko` shows UI strings in Korean (i18n, stretch goal)
 - [ ] Host page can send `postMessage({ type: 'setFrame', frame: 50 })` → viewer jumps to frame 50
 - [ ] Viewer sends `postMessage({ type: 'ready' })` to host when first frame renders
@@ -1031,7 +1030,6 @@ Inspired by Matterport's `<iframe src="https://my.matterport.com/show/?m=xxx&hel
 | `camera` | (none) | camera name string | Start in POV of specific camera (e.g., `ring_front_center`). If omitted, starts in orbital/BEV view. |
 | `autoplay` | `false` | `true`, `false` | Auto-play after first frame loads. Like Matterport's `play=0` (show play button) vs auto-start. |
 | `colormap` | `intensity` | `intensity`, `height`, `range`, `elongation`, `segment`, `camera` | Initial point cloud colormap. |
-| `bgcolor` | `111111` | hex color (no #) | Canvas background color. Useful for matching host page theme. |
 | `speed` | `1` | `0.5`, `1`, `2`, `4` | Playback speed multiplier. |
 | `loop` | `false` | `true`, `false` | Loop playback (like Matterport's `lp` param for guided tour looping). |
 | `cameras` | `true` | `true`, `false` | Show/hide camera image panel strip. |

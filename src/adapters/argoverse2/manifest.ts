@@ -9,7 +9,7 @@
  * LiDAR rate is 10 Hz; ring cameras are 20 fps; stereo cameras are 20 fps.
  */
 
-import { colors } from '../../theme'
+import { dataColors as colors } from '../../dataColors'
 import type { DatasetManifest } from '../../types/dataset'
 
 /**

@@ -9,6 +9,7 @@
  *   - `{ type: 'play' }`                     → start playback
  *   - `{ type: 'pause' }`                    → stop playback
  *   - `{ type: 'setColormap', colormap: string }` → change colormap
+ *   - `{ type: 'setTheme', theme: 'dark' | 'light' | 'auto', accent?: string | null }`
  *   - `{ type: 'getState' }`                 → viewer replies with current state
  *
  * ## Outbound (viewer → host):
@@ -27,6 +28,8 @@
 import { useSceneStore } from '../stores/useSceneStore'
 import type { ColormapMode } from '../stores/useSceneStore'
 import type { EmbedParams } from './embedParams'
+import { trackThemeChange } from './analytics'
+import { isAccent, resolveThemePreference, type ThemePreference } from './themeParams'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +43,7 @@ export type InboundMessage =
   | { type: 'setColormap'; colormap: string }
   | { type: 'setScene'; scene: string }
   | { type: 'setWindow'; t0: string | null; t1?: string }
+  | { type: 'setTheme'; theme: ThemePreference; accent?: string | null }
   | { type: 'getState' }
 
 /** Outbound message types (viewer → host) */
@@ -47,7 +51,7 @@ export type OutboundMessage =
   | { type: 'ready' }
   | { type: 'frameChange'; frame: number; totalFrames: number }
   | { type: 'sceneChange'; scene: string; totalFrames: number }
-  | { type: 'stateReply'; frame: number; totalFrames: number; isPlaying: boolean; colormap: string; status: string; scene: string | null; window: { f0: number; f1: number; t0: string; t1: string } | null }
+  | { type: 'stateReply'; frame: number; totalFrames: number; isPlaying: boolean; colormap: string; status: string; scene: string | null; window: { f0: number; f1: number; t0: string; t1: string } | null; theme: string; accent: string | null }
   | { type: 'error'; message: string }
 
 // Valid colormap values for validation
@@ -124,6 +128,15 @@ function handleInbound(msg: InboundMessage): void {
       }
       break
     }
+    case 'setTheme': {
+      if (msg.theme !== 'dark' && msg.theme !== 'light' && msg.theme !== 'auto') break
+      if (msg.accent !== undefined && msg.accent !== null && !isAccent(msg.accent)) break
+      const theme = resolveThemePreference(msg.theme)
+      const accent = typeof msg.accent === 'string' ? msg.accent.toUpperCase() : msg.accent
+      actions.setTheme(theme, accent)
+      trackThemeChange(theme, 'embed', accent)
+      break
+    }
     case 'getState': {
       // Reply will be sent by the frame change listener
       const reply: OutboundMessage = {
@@ -135,6 +148,8 @@ function handleInbound(msg: InboundMessage): void {
         status: state.status,
         scene: state.currentSegment,
         window: state.playbackWindow,
+        theme: state.theme,
+        accent: document.documentElement.dataset.accent ?? null,
       }
       // Need to access the origin from somewhere — we'll use the stored one
       sendToHost(reply, _storedOrigin)

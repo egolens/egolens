@@ -70,7 +70,7 @@
       than excluded.
     -->
     <style>
-      /* Cross-browser range slider — teal accent on dark track */
+      /* Cross-browser range slider — follows the chrome theme and custom accent. */
       input[type="range"] {
         -webkit-appearance: none;
         appearance: none;
@@ -80,12 +80,12 @@
       input[type="range"]::-webkit-slider-runnable-track {
         height: 4px;
         border-radius: 2px;
-        background: #232940;
+        background: var(--el-bg-overlay, #232940);
       }
       input[type="range"]::-moz-range-track {
         height: 4px;
         border-radius: 2px;
-        background: #232940;
+        background: var(--el-bg-overlay, #232940);
         border: none;
       }
       input[type="range"]::-webkit-slider-thumb {
@@ -93,27 +93,27 @@
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        background: #00E89D;
-        border: 2px solid #111628;
+        background: var(--el-accent, #00E89D);
+        border: 2px solid var(--el-bg-base, #111628);
         margin-top: -5px;
-        box-shadow: 0 0 4px rgba(0,232,157,0.4);
+        box-shadow: 0 0 4px color-mix(in srgb, var(--el-accent, #00E89D) 40%, transparent);
       }
       input[type="range"]::-moz-range-thumb {
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        background: #00E89D;
-        border: 2px solid #111628;
-        box-shadow: 0 0 4px rgba(0,232,157,0.4);
+        background: var(--el-accent, #00E89D);
+        border: 2px solid var(--el-bg-base, #111628);
+        box-shadow: 0 0 4px color-mix(in srgb, var(--el-accent, #00E89D) 40%, transparent);
       }
       /* Blue accent variant for trail slider */
       input[type="range"].trail-slider::-webkit-slider-thumb {
-        background: #00C9DB;
-        box-shadow: 0 0 4px rgba(0,201,219,0.4);
+        background: var(--el-accent-blue, #00C9DB);
+        box-shadow: 0 0 4px color-mix(in srgb, var(--el-accent-blue, #00C9DB) 40%, transparent);
       }
       input[type="range"].trail-slider::-moz-range-thumb {
-        background: #00C9DB;
-        box-shadow: 0 0 4px rgba(0,201,219,0.4);
+        background: var(--el-accent-blue, #00C9DB);
+        box-shadow: 0 0 4px color-mix(in srgb, var(--el-accent-blue, #00C9DB) 40%, transparent);
       }
     </style>
   </head>

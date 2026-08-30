@@ -17,12 +17,14 @@ vi.mock('../../stores/useSceneStore', () => {
     currentSegment: null,
     availableSegments: [],
     playbackWindow: null,
+    theme: 'dark',
     actions: {
       seekFrame: vi.fn(),
       togglePlayback: vi.fn(),
       setColormapMode: vi.fn(),
       selectSegment: vi.fn().mockResolvedValue(undefined),
       setPlaybackWindow: vi.fn(),
+      setTheme: vi.fn(),
     },
   }
   return {
@@ -47,12 +49,14 @@ vi.mock('../../stores/useSceneStore', () => {
           currentSegment: null,
           availableSegments: [],
           playbackWindow: null,
+          theme: 'dark',
           actions: {
             seekFrame: vi.fn(),
             togglePlayback: vi.fn(),
             setColormapMode: vi.fn(),
             selectSegment: vi.fn().mockResolvedValue(undefined),
             setPlaybackWindow: vi.fn(),
+            setTheme: vi.fn(),
           },
         }
         subscribers.clear()
@@ -80,7 +84,8 @@ function makeEmbedParams(overrides: Partial<EmbedParams> = {}): EmbedParams {
     camera: null,
     autoplay: false,
     colormap: null,
-    bgcolor: null,
+    theme: null,
+    accent: null,
     origin: null,
     ...overrides,
   }
@@ -202,6 +207,27 @@ describe('embedApi', () => {
     expect(actions.setColormapMode).not.toHaveBeenCalled()
   })
 
+  it('handles setTheme with a custom accent', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setTheme', theme: 'light', accent: 'ff6f00' },
+    }))
+    const actions = store.getState().actions as { setTheme: ReturnType<typeof vi.fn> }
+    expect(actions.setTheme).toHaveBeenCalledWith('light', 'FF6F00')
+  })
+
+  it('rejects invalid themes and accent strings', () => {
+    cleanup = initEmbedApi(makeEmbedParams())
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setTheme', theme: 'solarized' },
+    }))
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'setTheme', theme: 'dark', accent: '#ff6f00' },
+    }))
+    const actions = store.getState().actions as { setTheme: ReturnType<typeof vi.fn> }
+    expect(actions.setTheme).not.toHaveBeenCalled()
+  })
+
   it('handles setScene inbound message for a known scene', () => {
     cleanup = initEmbedApi(makeEmbedParams())
     store._setState({ availableSegments: ['scene-a', 'scene-b'], currentSegment: 'scene-a' })
@@ -251,6 +277,8 @@ describe('embedApi', () => {
     const replies = postMessageSpy.mock.calls.filter(([msg]: [{ type: string }]) => msg.type === 'stateReply')
     expect(replies.length).toBe(1)
     expect(replies[0][0].scene).toBe('scene-x')
+    expect(replies[0][0].theme).toBe('dark')
+    expect(replies[0][0].accent).toBeNull()
   })
 
   it('handles setWindow inbound message', () => {

@@ -19,9 +19,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  colors, alpha, applyTheme, cssVarName, sceneColors, viewportBg,
+  colors, alpha, applyTheme, contrastText, cssVarName, sceneColors, viewportBg,
   CHROME_PALETTES, CHROME_KEYS, initialTheme, type ThemeName,
 } from '../theme'
+import { dataColors } from '../dataColors'
 
 const SRC = join(__dirname, '..')
 const THEMES: ThemeName[] = ['dark', 'light']
@@ -35,7 +36,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   }
   return out
 }
-const files = sourceFiles(SRC).filter((f) => !f.endsWith('theme.ts'))
+const files = sourceFiles(SRC).filter((f) => !f.endsWith('theme.ts') && !f.endsWith('dataColors.ts'))
 const rel = (f: string) => f.slice(SRC.length + 1)
 const HEX = /^#[0-9A-Fa-f]{6}$/
 
@@ -46,7 +47,7 @@ describe('the two palettes stay in step', () => {
   })
 
   it('differ in every key — a token identical in both is probably DATA', () => {
-    const same = CHROME_KEYS.filter((k) => CHROME_PALETTES.dark[k] === CHROME_PALETTES.light[k])
+    const same = CHROME_KEYS.filter((k) => k !== 'textOnAccent' && CHROME_PALETTES.dark[k] === CHROME_PALETTES.light[k])
     expect(same).toEqual([])
   })
 
@@ -89,9 +90,26 @@ describe('chrome is delivered as custom properties', () => {
     }
   })
 
+  it('a custom accent overrides only accent and its contrast-coupled text', () => {
+    const seen: Record<string, string> = {}
+    const root = { style: { setProperty: (k: string, v: string) => { seen[k] = v }, colorScheme: '' }, dataset: {} } as unknown as HTMLElement
+    applyTheme('dark', root, 'FF6F00')
+    expect(seen['--el-accent']).toBe('#FF6F00')
+    expect(seen['--el-text-on-accent']).toBe(contrastText('#FF6F00'))
+    expect(seen['--el-accent-blue']).toBe(CHROME_PALETTES.dark.accentBlue)
+    expect(root.dataset.accent).toBe('FF6F00')
+  })
+
   it('cssVarName kebab-cases', () => {
     expect(cssVarName('bgDeep')).toBe('--el-bg-deep')
     expect(cssVarName('accent')).toBe('--el-accent')
+  })
+
+  it('index.html slider chrome consumes the same custom properties', () => {
+    const html = readFileSync(join(SRC, '..', 'index.html'), 'utf8')
+    for (const variable of ['--el-bg-overlay', '--el-bg-base', '--el-accent', '--el-accent-blue']) {
+      expect(html, variable).toContain(`var(${variable}`)
+    }
   })
 })
 
@@ -206,8 +224,19 @@ describe('the palette itself', () => {
 
   it('keeps DATA colours literal — a sensor identity is not themed', () => {
     for (const k of ['sensorTop', 'radarFront', 'camFront']) {
-      expect((colors as Record<string, string>)[k]).toMatch(HEX)
+      expect((dataColors as Record<string, string>)[k]).toMatch(HEX)
+      expect(colors).not.toHaveProperty(k)
     }
+  })
+
+  it('keeps adapters on the data-only module', () => {
+    const adapterDir = join(SRC, 'adapters')
+    const adapterFiles = sourceFiles(adapterDir)
+    for (const file of adapterFiles) {
+      const text = readFileSync(file, 'utf8')
+      expect(text, rel(file)).not.toMatch(/from ['"].*theme['"]/)
+    }
+    expect(Object.values(dataColors).every((value) => HEX.test(value))).toBe(true)
   })
 })
 
@@ -227,6 +256,7 @@ describe('the theme= URL parameter', () => {
     try { localStorage.setItem('egolens-theme', 'dark') } catch { /* private mode */ }
     expect(withSearch('?theme=light')).toBe('light')
     expect(withSearch('?theme=dark')).toBe('dark')
+    expect(THEMES).toContain(withSearch('?theme=auto'))
   })
 
   it('falls through to the stored choice when absent', () => {

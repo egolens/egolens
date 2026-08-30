@@ -142,12 +142,24 @@ export function trackPovSwitch(camera: string) {
   track('pov_switch', { camera })
 }
 
-/** User toggled an overlay (keypoints, segmentation, boxes, etc.) */
-/** User switched the UI theme. `theme` is the one they switched TO. */
-export function trackThemeChange(theme: string) {
-  track('theme_change', { theme })
+/** A URL configured the initial theme/accent. Values stay deliberately low-cardinality. */
+export function trackThemeConfig(theme: string | null, accent: string | null) {
+  track('theme_config', {
+    theme: theme ?? 'default',
+    custom_accent: accent !== null,
+  })
 }
 
+/** User or embed host switched the UI theme. `theme` is the resolved theme. */
+export function trackThemeChange(theme: string, source: 'toggle' | 'embed' = 'toggle', accent?: string | null) {
+  track('theme_change', {
+    theme,
+    source,
+    ...(accent === undefined ? {} : { custom_accent: accent !== null }),
+  })
+}
+
+/** User toggled an overlay (keypoints, segmentation, boxes, etc.) */
 export function trackOverlayToggle(overlay: string, enabled: boolean) {
   track('overlay_toggle', { overlay, enabled })
 }

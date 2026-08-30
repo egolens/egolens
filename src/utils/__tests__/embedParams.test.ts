@@ -10,7 +10,8 @@ describe('parseEmbedParams', () => {
     expect(p.camera).toBeNull()
     expect(p.autoplay).toBe(false)
     expect(p.colormap).toBeNull()
-    expect(p.bgcolor).toBeNull()
+    expect(p.theme).toBeNull()
+    expect(p.accent).toBeNull()
   })
 
   it('parses embed=true', () => {
@@ -103,31 +104,25 @@ describe('parseEmbedParams', () => {
     expect(p.colormap).toBeNull()
   })
 
-  // Background color
-  it('bgcolor=000000 is valid (6 hex)', () => {
-    const p = parseEmbedParams('?bgcolor=000000')
-    expect(p.bgcolor).toBe('000000')
+  // Theme
+  it('theme accepts dark, light, and auto', () => {
+    expect(parseEmbedParams('?theme=dark').theme).toBe('dark')
+    expect(parseEmbedParams('?theme=light').theme).toBe('light')
+    expect(parseEmbedParams('?theme=auto').theme).toBe('auto')
   })
 
-  it('bgcolor=fff is valid (3 hex)', () => {
-    const p = parseEmbedParams('?bgcolor=fff')
-    expect(p.bgcolor).toBe('fff')
+  it('rejects an unknown theme', () => {
+    expect(parseEmbedParams('?theme=solarized').theme).toBeNull()
   })
 
-  it('bgcolor=1a1f35ff is valid (8 hex with alpha)', () => {
-    const p = parseEmbedParams('?bgcolor=1a1f35ff')
-    expect(p.bgcolor).toBe('1a1f35ff')
+  it('accent accepts exactly RRGGBB and canonicalizes case', () => {
+    expect(parseEmbedParams('?accent=ff6f00').accent).toBe('FF6F00')
   })
 
-  it('bgcolor=zzzzzz is rejected', () => {
-    const p = parseEmbedParams('?bgcolor=zzzzzz')
-    expect(p.bgcolor).toBeNull()
-  })
-
-  it('bgcolor=#000000 (with hash) is rejected', () => {
-    // The # gets URL-encoded, but even if not, we reject it
-    const p = parseEmbedParams('?bgcolor=%23000000')
-    expect(p.bgcolor).toBeNull()
+  it('accent rejects shorthand, alpha, hashes, and non-hex values', () => {
+    for (const value of ['fff', '1a1f35ff', '%23FF6F00', 'orange']) {
+      expect(parseEmbedParams(`?accent=${value}`).accent).toBeNull()
+    }
   })
 
   // Origin
@@ -139,7 +134,7 @@ describe('parseEmbedParams', () => {
   // Combined
   it('parses all params together', () => {
     const p = parseEmbedParams(
-      '?embed=true&controls=minimal&frame=10&camera=FRONT&autoplay=true&colormap=range&bgcolor=1a1f35&origin=https://host.com'
+      '?embed=true&controls=minimal&frame=10&camera=FRONT&autoplay=true&colormap=range&theme=light&accent=ff6f00&origin=https://host.com'
     )
     expect(p.embed).toBe(true)
     expect(p.controls).toBe('minimal')
@@ -147,7 +142,8 @@ describe('parseEmbedParams', () => {
     expect(p.camera).toBe('FRONT')
     expect(p.autoplay).toBe(true)
     expect(p.colormap).toBe('range')
-    expect(p.bgcolor).toBe('1a1f35')
+    expect(p.theme).toBe('light')
+    expect(p.accent).toBe('FF6F00')
     expect(p.origin).toBe('https://host.com')
   })
 })

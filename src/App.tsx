@@ -388,18 +388,13 @@ function App() {
   const isEmbed = embedParams.embed
   const showTimeline = !showDropZone && (!isEmbed || embedParams.controls !== 'none')
 
-  // Embed mode: custom background color
-  const bgColor = isEmbed && embedParams.bgcolor
-    ? `#${embedParams.bgcolor}`
-    : colors.bgBase
-
   return (
     <div style={{
       width: '100%',
       height: '100dvh',
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: bgColor,
+      backgroundColor: colors.bgBase,
       color: colors.textPrimary,
       fontFamily: fonts.sans,
       overflow: 'hidden',
@@ -816,7 +811,7 @@ function Header() {
                 fontSize: '14px',
                 fontFamily: fonts.sans,
                 fontWeight: 600,
-                color: '#000',
+                color: colors.textOnAccent,
                 backgroundColor: '#FFD43B',
                 border: 'none',
                 borderRadius: radius.md,
@@ -1149,7 +1144,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                   fontSize: isMobile ? '12px' : '13px',
                   fontFamily: fonts.sans,
                   fontWeight: 600,
-                  color: isActive ? '#000' : colors.textPrimary,
+                  color: isActive ? colors.textOnAccent : colors.textPrimary,
                   backgroundColor: isActive ? colors.accent : colors.bgOverlay,
                   border: `1px solid ${isActive ? colors.accent : colors.border}`,
                   borderRadius: radius.md,
@@ -1288,7 +1283,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               fontFamily: fonts.sans,
               fontWeight: 600,
               backgroundColor: !urlInput.trim() || urlLoading ? colors.bgOverlay : colors.accent,
-              color: !urlInput.trim() || urlLoading ? colors.textDim : '#000',
+              color: !urlInput.trim() || urlLoading ? colors.textDim : colors.textOnAccent,
               border: 'none',
               borderRadius: radius.sm,
               cursor: !urlInput.trim() || urlLoading ? 'not-allowed' : 'pointer',
@@ -1736,7 +1731,7 @@ function LoadErrorScreen() {
           fontSize: '13px',
           fontFamily: fonts.sans,
           fontWeight: 600,
-          color: '#000',
+          color: colors.textOnAccent,
           backgroundColor: colors.accent,
           border: 'none',
           borderRadius: radius.md,

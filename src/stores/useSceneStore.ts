@@ -199,7 +199,7 @@ interface SceneActions {
   toggleCameraSeg: () => void
   // Display settings
   setBgPreset: (id: BgPresetId) => void
-  setTheme: (theme: ThemeName) => void
+  setTheme: (theme: ThemeName, accent?: string | null) => void
   setPointShape: (shape: PointShape) => void
   setPointSize: (size: number) => void
   setFollowCam: (follow: boolean) => void
@@ -1230,8 +1230,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     // Display settings
     setBgPreset: (id: BgPresetId) => set({ bgPreset: id }),
 
-    setTheme: (theme: ThemeName) => {
-      applyTheme(theme, document.documentElement)
+    setTheme: (theme: ThemeName, accent?: string | null) => {
+      applyTheme(theme, document.documentElement, accent)
       try { localStorage.setItem('egolens-theme', theme) } catch { /* private mode */ }
       set({ theme })
     },
@@ -2819,4 +2819,3 @@ export function getThumbnailResolver(): ((segmentId: string) => Promise<string |
   // Waymo: thumbnails not available without loading full Parquet
   return null
 }
-

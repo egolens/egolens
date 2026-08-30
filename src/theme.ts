@@ -20,6 +20,8 @@
  * manifest (`boxTypes[].color`), for the same reason as DATA.
  */
 
+import { parseAccent, parseThemePreference, resolveThemePreference, systemTheme } from './utils/themeParams'
+
 export type ThemeName = 'dark' | 'light'
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,7 @@ export type ThemeName = 'dark' | 'light'
  */
 const CHROME_DARK = {
   accent: '#00E89D',
+  textOnAccent: '#000000',
   accentBlue: '#00C9DB',
   danger: '#FF6B6B',
 
@@ -71,6 +74,7 @@ const CHROME_LIGHT: Record<keyof typeof CHROME_DARK, string> = {
   // Accents are darkened until they carry text on white: the dark-theme teal
   // is 1.6:1 there, which is not a colour, it is a rumour.
   accent: '#008C5E',
+  textOnAccent: '#000000',
   accentBlue: '#00808F',
   danger: '#E03131',
 
@@ -155,42 +159,15 @@ export function viewportBg(theme: ThemeName): string {
   return CHROME_PALETTES[theme].bgDeep
 }
 
-// ---------------------------------------------------------------------------
-// Data — never themed
-// ---------------------------------------------------------------------------
-
-const DATA = {
-  /** Semantic — sensor LiDAR (cool-tone family) */
-  sensorTop: '#00E89D',
-  sensorFront: '#00C9DB',
-  sensorSideL: '#4DA8FF',
-  sensorSideR: '#7B6FFF',
-  sensorRear: '#B490FF',
-
-  /** Semantic — radar sensors (warm-tone family to distinguish from LiDAR) */
-  radarFront: '#FF6B6B',
-  radarFrontLeft: '#FF9F43',
-  radarFrontRight: '#FECA57',
-  radarBackLeft: '#FF6348',
-  radarBackRight: '#EE5A24',
-
-  /** Semantic — cameras (harmonized with sensors) */
-  camFront: '#FFFFFF',
-  camFrontLeft: '#00E89D',
-  camFrontRight: '#00C9DB',
-  camSideLeft: '#4DA8FF',
-  camSideRight: '#B490FF',
-} as const
-
 /**
  * The palette every component reads.
  *
- * Chrome entries are `var()` strings; data entries are literal hex. Scene
- * colours are deliberately absent — see `sceneColors()`.
+ * Every entry is chrome and resolves through CSS custom properties. Data
+ * colours live in dataColors.ts; scene colours are deliberately absent — see
+ * `sceneColors()`.
  */
 export const colors = {
   ...chromeVars,
-  ...DATA,
   /** Derived from the accent, so they follow it through a theme switch. */
   get accentDim() { return alpha(chromeVars.accent, 0.3) },
   get accentGlow() { return alpha(chromeVars.accent, 0.15) },
@@ -207,9 +184,18 @@ export const colors = {
  * again on every switch. Nothing re-renders: the browser repaints from the
  * cascade.
  */
-export function applyTheme(theme: ThemeName, root: HTMLElement): void {
+export function applyTheme(theme: ThemeName, root: HTMLElement, accent?: string | null): void {
   const palette = CHROME_PALETTES[theme]
   for (const key of CHROME_KEYS) root.style.setProperty(cssVarName(key), palette[key])
+  const nextAccent = accent === undefined ? root.dataset.accent ?? null : accent
+  if (nextAccent) {
+    const hex = `#${nextAccent}`
+    root.style.setProperty(cssVarName('accent'), hex)
+    root.style.setProperty(cssVarName('textOnAccent'), contrastText(hex))
+    root.dataset.accent = nextAccent
+  } else {
+    delete root.dataset.accent
+  }
   // A dark drop shadow is invisible on dark; the two themes need different ones.
   root.style.setProperty('--el-shadow-card', SHADOWS[theme])
   root.dataset.theme = theme
@@ -229,14 +215,32 @@ export function initialTheme(): ThemeName {
   // in normal mode too — a scene link pasted into a paper's supplement wants
   // the same control an iframe does.
   const param = new URLSearchParams(window.location.search).get('theme')
-  if (param === 'light' || param === 'dark') return param
-  if (param) console.warn(`[theme] ignoring theme=${param}; expected "light" or "dark"`)
+  const preference = parseThemePreference(window.location.search)
+  if (preference) return resolveThemePreference(preference)
+  if (param) console.warn(`[theme] ignoring theme=${param}; expected "light", "dark", or "auto"`)
 
   try {
     const saved = localStorage.getItem('egolens-theme')
     if (saved === 'light' || saved === 'dark') return saved
   } catch { /* private mode */ }
-  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+  return systemTheme()
+}
+
+/** Custom chrome accent from `?accent=RRGGBB`, or null for the theme default. */
+export function initialAccent(): string | null {
+  if (typeof window === 'undefined') return null
+  return parseAccent(window.location.search)
+}
+
+/** Pick whichever of black/white has the stronger WCAG contrast with a hex colour. */
+export function contrastText(hex: string): '#000000' | '#FFFFFF' {
+  const raw = hex.replace('#', '')
+  const channels = [0, 2, 4].map((i) => parseInt(raw.slice(i, i + 2), 16) / 255)
+  const linear = channels.map((c) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+  const blackContrast = (luminance + 0.05) / 0.05
+  const whiteContrast = 1.05 / (luminance + 0.05)
+  return blackContrast >= whiteContrast ? '#000000' : '#FFFFFF'
 }
 
 const SHADOWS: Record<ThemeName, string> = {
