@@ -24,8 +24,12 @@ import type {
 } from './types'
 import { createWorkerMemoryLogger } from '../utils/memoryLogger'
 import { resolveFileEntry } from './fetchHelper'
-import { NUSCENES_POINT_STRIDE } from '../types/nuscenes'
 import { parseNpzUint16 } from '../utils/npz'
+import {
+  decodeInterleavedRecordsV1,
+  decodePcdRecordsV1,
+  transformInterleavedXyzV1,
+} from '../teachable/operators/binaryReaders'
 
 // ---------------------------------------------------------------------------
 // Init message
@@ -92,9 +96,6 @@ let radarExtrinsics = new Map<number, number[]>()
 // LIDAR_TOP sensor ID (from nuScenes manifest)
 const LIDAR_TOP_ID = 1
 
-/** Bytes per point in radar PCD v0.7 binary data */
-const RADAR_POINT_BYTES = 43
-
 // ---------------------------------------------------------------------------
 // Point cloud parsing
 // ---------------------------------------------------------------------------
@@ -109,34 +110,18 @@ const RADAR_POINT_BYTES = 43
  *   [x', y', z'] = R × [x, y, z] + t   (row-major 4×4)
  */
 function parsePcdBin(buffer: ArrayBuffer): { positions: Float32Array; pointCount: number } {
-  const floats = new Float32Array(buffer)
-  const pointCount = Math.floor(floats.length / NUSCENES_POINT_STRIDE)
-
-  // Output: 4 floats per point [x, y, z, intensity]
-  const positions = new Float32Array(pointCount * 4)
-  const e = lidarExtrinsic
-
-  for (let i = 0; i < pointCount; i++) {
-    const srcOffset = i * NUSCENES_POINT_STRIDE
-    const dstOffset = i * 4
-    const sx = floats[srcOffset]
-    const sy = floats[srcOffset + 1]
-    const sz = floats[srcOffset + 2]
-
-    if (e) {
-      // Apply sensor→ego extrinsic: row-major 4×4 [R|t]
-      positions[dstOffset]     = e[0] * sx + e[1] * sy + e[2] * sz + e[3]
-      positions[dstOffset + 1] = e[4] * sx + e[5] * sy + e[6] * sz + e[7]
-      positions[dstOffset + 2] = e[8] * sx + e[9] * sy + e[10] * sz + e[11]
-    } else {
-      positions[dstOffset]     = sx
-      positions[dstOffset + 1] = sy
-      positions[dstOffset + 2] = sz
-    }
-    positions[dstOffset + 3] = floats[srcOffset + 3] // intensity
-  }
-
-  return { positions, pointCount }
+  const decoded = decodeInterleavedRecordsV1(buffer, {
+    strideBytes: 20,
+    littleEndian: true,
+    fields: [
+      { name: 'x', type: 'float32', offsetBytes: 0 },
+      { name: 'y', type: 'float32', offsetBytes: 4 },
+      { name: 'z', type: 'float32', offsetBytes: 8 },
+      { name: 'intensity', type: 'float32', offsetBytes: 12 },
+    ],
+  })
+  const transformed = transformInterleavedXyzV1(decoded, lidarExtrinsic)
+  return { positions: transformed.values, pointCount: transformed.pointCount }
 }
 
 /**
@@ -157,60 +142,23 @@ function parseRadarPcd(
   buffer: ArrayBuffer,
   extrinsic: number[] | null,
 ): { positions: Float32Array; pointCount: number } {
-  // Find end of ASCII header ("DATA binary\n")
-  const bytes = new Uint8Array(buffer)
-  let headerEnd = 0
-  const searchStr = 'DATA binary'
-  for (let i = 0; i < Math.min(bytes.length, 2048); i++) {
-    let match = true
-    for (let j = 0; j < searchStr.length; j++) {
-      if (bytes[i + j] !== searchStr.charCodeAt(j)) { match = false; break }
-    }
-    if (match) {
-      headerEnd = i + searchStr.length
-      if (bytes[headerEnd] === 0x0D) headerEnd++ // \r
-      if (bytes[headerEnd] === 0x0A) headerEnd++ // \n
-      break
-    }
+  const decoded = transformInterleavedXyzV1(decodePcdRecordsV1(buffer, {
+    data: 'binary',
+    trailingPadding: 'zero',
+    maxTrailingBytes: 4096,
+    fields: ['x', 'y', 'z', 'vx', 'vy', 'vx_comp', 'vy_comp'],
+  }), extrinsic)
+  const positions = new Float32Array(decoded.pointCount * 5)
+  for (let index = 0; index < decoded.pointCount; index += 1) {
+    const source = index * decoded.stride
+    const target = index * 5
+    positions[target] = decoded.values[source]
+    positions[target + 1] = decoded.values[source + 1]
+    positions[target + 2] = decoded.values[source + 2]
+    positions[target + 3] = Math.hypot(decoded.values[source + 5], decoded.values[source + 6])
+    positions[target + 4] = Math.hypot(decoded.values[source + 3], decoded.values[source + 4])
   }
-
-  if (headerEnd === 0) {
-    console.warn('[nuScenes Radar] Could not find DATA binary header')
-    return { positions: new Float32Array(0), pointCount: 0 }
-  }
-
-  const dataBytes = bytes.length - headerEnd
-  const pointCount = Math.floor(dataBytes / RADAR_POINT_BYTES)
-  const RADAR_STRIDE = 5 // x, y, z, speedComp, speedRaw
-  const positions = new Float32Array(pointCount * RADAR_STRIDE)
-  const dataView = new DataView(buffer, headerEnd)
-
-  for (let i = 0; i < pointCount; i++) {
-    const off = i * RADAR_POINT_BYTES
-    const sx = dataView.getFloat32(off, true)        // x @ offset 0
-    const sy = dataView.getFloat32(off + 4, true)     // y @ offset 4
-    const sz = dataView.getFloat32(off + 8, true)     // z @ offset 8
-    const vx = dataView.getFloat32(off + 19, true)    // vx @ offset 19
-    const vy = dataView.getFloat32(off + 23, true)    // vy @ offset 23
-    const vxComp = dataView.getFloat32(off + 27, true) // vx_comp @ offset 27
-    const vyComp = dataView.getFloat32(off + 31, true) // vy_comp @ offset 31
-
-    const dst = i * RADAR_STRIDE
-    if (extrinsic) {
-      const e = extrinsic
-      positions[dst]     = e[0] * sx + e[1] * sy + e[2] * sz + e[3]
-      positions[dst + 1] = e[4] * sx + e[5] * sy + e[6] * sz + e[7]
-      positions[dst + 2] = e[8] * sx + e[9] * sy + e[10] * sz + e[11]
-    } else {
-      positions[dst]     = sx
-      positions[dst + 1] = sy
-      positions[dst + 2] = sz
-    }
-    positions[dst + 3] = Math.sqrt(vxComp * vxComp + vyComp * vyComp) // speedComp (world)
-    positions[dst + 4] = Math.sqrt(vx * vx + vy * vy)                 // speedRaw (vehicle)
-  }
-
-  return { positions, pointCount }
+  return { positions, pointCount: decoded.pointCount }
 }
 
 // ---------------------------------------------------------------------------

@@ -91,7 +91,7 @@
         },
         {
           "path": "v1.0-mini",
-          "required": true
+          "required": false
         },
         {
           "path": "v1.0-trainval",
@@ -107,15 +107,25 @@
         }
       ]
     },
+    "versionRoot": {
+      "candidates": [
+        "v1.0-mini",
+        "v1.0-trainval",
+        "v1.0-test"
+      ],
+      "requiredFiles": [
+        "scene.json",
+        "sample.json",
+        "sample_data.json",
+        "ego_pose.json",
+        "calibrated_sensor.json",
+        "sensor.json"
+      ]
+    },
     "all": [
       {
         "kind": "path",
         "glob": "samples",
-        "minCount": 1
-      },
-      {
-        "kind": "path",
-        "glob": "v1.0-mini",
         "minCount": 1
       }
     ]
@@ -124,49 +134,49 @@
     "samples": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/sample.json"
+        "exact": "{versionRoot}/sample.json"
       }
     },
     "sampleData": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/sample_data.json"
+        "exact": "{versionRoot}/sample_data.json"
       }
     },
     "egoPoses": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/ego_pose.json"
+        "exact": "{versionRoot}/ego_pose.json"
       }
     },
     "calibrations": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/calibrated_sensor.json"
+        "exact": "{versionRoot}/calibrated_sensor.json"
       }
     },
     "sensors": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/sensor.json"
+        "exact": "{versionRoot}/sensor.json"
       }
     },
     "annotations": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/sample_annotation.json"
+        "exact": "{versionRoot}/sample_annotation.json"
       }
     },
     "instances": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/instance.json"
+        "exact": "{versionRoot}/instance.json"
       }
     },
     "categories": {
       "reader": "json.records",
       "files": {
-        "exact": "v1.0-mini/category.json"
+        "exact": "{versionRoot}/category.json"
       }
     },
     "lidarRecords": {
@@ -176,14 +186,29 @@
         "order": "lexical-path"
       },
       "params": {
-        "scalar": "float32-le",
         "strideBytes": 20,
+        "littleEndian": true,
         "fields": [
-          "x",
-          "y",
-          "z",
-          "intensity",
-          "ring"
+          {
+            "name": "x",
+            "type": "float32",
+            "offsetBytes": 0
+          },
+          {
+            "name": "y",
+            "type": "float32",
+            "offsetBytes": 4
+          },
+          {
+            "name": "z",
+            "type": "float32",
+            "offsetBytes": 8
+          },
+          {
+            "name": "intensity",
+            "type": "float32",
+            "offsetBytes": 12
+          }
         ]
       }
     },
@@ -194,7 +219,18 @@
         "order": "lexical-path"
       },
       "params": {
-        "data": "binary"
+        "data": "binary",
+        "trailingPadding": "zero",
+        "maxTrailingBytes": 4096,
+        "fields": [
+          "x",
+          "y",
+          "z",
+          "vx",
+          "vy",
+          "vx_comp",
+          "vy_comp"
+        ]
       }
     },
     "cameraBytes": {
@@ -210,25 +246,29 @@
     "lidarLabels": {
       "reader": "binary.interleaved_records",
       "files": {
-        "glob": "lidarseg/v1.0-mini/*.bin",
+        "glob": "lidarseg/{versionRoot}/*.bin",
         "order": "lexical-path"
       },
       "params": {
-        "scalar": "uint8",
         "strideBytes": 1,
+        "littleEndian": true,
         "fields": [
-          "semantic"
+          {
+            "name": "semantic",
+            "type": "uint8",
+            "offsetBytes": 0
+          }
         ]
       }
     },
     "panopticLabels": {
       "reader": "archive.npz_array",
       "files": {
-        "glob": "panoptic/v1.0-mini/*.npz",
+        "glob": "panoptic/{versionRoot}/*.npz",
         "order": "lexical-path"
       },
       "params": {
-        "field": "data"
+        "arrayName": "data"
       }
     }
   },

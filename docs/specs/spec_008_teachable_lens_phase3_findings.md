@@ -1,6 +1,6 @@
 # Spec 008 — Teachable Lens Phase 3 implementation findings
 
-**Status**: planned · **Date**: 2026-08-29
+**Status**: shipped · **Date**: 2026-08-29
 
 **Relationship to Spec 006**: this is the normative implementation addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 3 and later

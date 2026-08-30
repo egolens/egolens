@@ -3,6 +3,11 @@ import type { OperatorDependencyV1 } from '../recipe/types'
 
 export type OperatorJsonSchema = Readonly<Record<string, unknown>>
 
+export interface OperatorParameterValidationError {
+  readonly message: string
+  readonly instancePath?: string
+}
+
 interface OperatorDescriptorBase {
   readonly name: string
   readonly majorVersion: number
@@ -11,6 +16,8 @@ interface OperatorDescriptorBase {
   readonly outputContract: OperatorJsonSchema
   readonly execution: 'main' | 'worker'
   readonly deterministic: true
+  /** Trusted core-side validation for relationships JSON Schema cannot express. */
+  readonly validateParams?: (params: unknown) => readonly OperatorParameterValidationError[]
 }
 
 export interface CoreOperatorDescriptor extends OperatorDescriptorBase {
@@ -77,11 +84,12 @@ export class OperatorRegistry {
     return this.resolve(name, dependency) !== null
   }
 
-  validateParams(name: string, dependency: OperatorDependencyV1, params: unknown): readonly ErrorObject[] {
-    if (!this.resolve(name, dependency)) return []
+  validateParams(name: string, dependency: OperatorDependencyV1, params: unknown): readonly (ErrorObject | OperatorParameterValidationError)[] {
+    const operator = this.resolve(name, dependency)
+    if (!operator) return []
     const validator = this.#paramsValidators.get(registryKey(name, dependency.major))
-    if (!validator || validator(params)) return []
-    return validator.errors ?? []
+    if (!validator || !validator(params)) return validator?.errors ?? []
+    return operator.validateParams?.(params) ?? []
   }
 
   list(): readonly RecipeOperatorDescriptor[] {

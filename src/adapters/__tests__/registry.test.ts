@@ -63,9 +63,9 @@ describe('adapter registry', () => {
     expect(getManifest().id).toBe('waymo')
   })
 
-  it('exposes legacy datasets through the formal adapter strategy boundary', () => {
+  it('migrates nuScenes to the recipe strategy while retaining other legacy adapters', () => {
     expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
-    expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'legacy', adapterId: 'nuscenes' })
+    expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'nuscenes' })
     expect(getAdapterById('missing')).toBeNull()
   })
 
@@ -141,6 +141,11 @@ describe('detectDataset', () => {
   it('detects nuScenes with only required components', () => {
     const result = detectDataset(['samples', 'v1.0-mini'])
     expect(result).toBe(nuScenesManifest)
+  })
+
+  it('detects every allowlisted nuScenes version root', () => {
+    expect(detectDatasetAdapter(['samples', 'v1.0-trainval'])).toMatchObject({ id: 'nuscenes', kind: 'recipe' })
+    expect(detectDatasetAdapter(['samples', 'v1.0-test'])).toMatchObject({ id: 'nuscenes', kind: 'recipe' })
   })
 
   it('returns Waymo (not nuScenes) when both could match but Waymo is first', () => {

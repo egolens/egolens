@@ -7,7 +7,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchNuScenesIndex, discoverNuScenesScenes, type NuScenesIndex } from '../remote'
+import {
+  detectNuScenesVersionRoot,
+  fetchNuScenesIndex,
+  discoverNuScenesScenes,
+  type NuScenesIndex,
+} from '../remote'
 import { DataLoadError } from '../../../utils/errors'
 
 const mockFetch = vi.fn()
@@ -33,6 +38,7 @@ function jsonResponse(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers({ 'content-type': 'application/json' }),
     json: async () => body,
   }
 }
@@ -105,5 +111,47 @@ describe('discoverNuScenesScenes', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(SAMPLE_INDEX))
     await discoverNuScenesScenes('https://data.egolens.org/nuscenes-full')
     expect(mockFetch.mock.calls[0][0]).toBe(`${BASE}index.json`)
+  })
+})
+
+describe('detectNuScenesVersionRoot', () => {
+  it.each([
+    'v1.0-mini',
+    'v1.0-trainval',
+    'v1.0-test',
+  ] as const)('selects %s in URL mode only when every required file exists', async (expected) => {
+    mockFetch.mockImplementation((url: string, options?: RequestInit) => {
+      expect(options).toEqual({ method: 'HEAD' })
+      return Promise.resolve(jsonResponse({}, url.includes(`/${expected}/`) ? 200 : 404))
+    })
+    expect(await detectNuScenesVersionRoot(BASE)).toBe(expected)
+    expect(mockFetch).toHaveBeenCalledTimes(18)
+  })
+
+  it('rejects multiple viable URL roots deterministically', async () => {
+    mockFetch.mockImplementation((url: string) => Promise.resolve(
+      jsonResponse({}, url.includes('/v1.0-test/') ? 404 : 200),
+    ))
+    await expect(detectNuScenesVersionRoot(BASE)).rejects.toMatchObject({
+      code: 'VERSION_ROOT_AMBIGUOUS',
+    })
+  })
+
+  it('ignores 200 HTML SPA fallbacks during root probing', async () => {
+    mockFetch.mockImplementation((url: string) => Promise.resolve(
+      url.includes('/v1.0-mini/')
+        ? jsonResponse({}, 200)
+        : { ...jsonResponse({}, 200), headers: new Headers({ 'content-type': 'text/html' }) },
+    ))
+    expect(await detectNuScenesVersionRoot(BASE)).toBe('v1.0-mini')
+  })
+
+  it('rejects a candidate with only a partial metadata root', async () => {
+    mockFetch.mockImplementation((url: string) => Promise.resolve(
+      jsonResponse({}, url.endsWith('/scene.json') ? 200 : 404),
+    ))
+    await expect(detectNuScenesVersionRoot(BASE)).rejects.toMatchObject({
+      code: 'VERSION_ROOT_MISSING',
+    })
   })
 })

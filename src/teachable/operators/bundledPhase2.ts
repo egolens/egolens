@@ -1,5 +1,6 @@
 import type { CoreOperatorDescriptor, OperatorJsonSchema } from './registry'
 import { OperatorRegistry } from './registry'
+import { assertValidInterleavedRecordsParamsV1 } from './binaryReaders'
 
 const objectContract: OperatorJsonSchema = {
   type: 'object',
@@ -10,29 +11,237 @@ const paramsContract: OperatorJsonSchema = {
   additionalProperties: true,
 }
 
+const byteInputContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    buffer: { type: 'object' },
+  },
+  required: ['buffer'],
+  additionalProperties: false,
+}
+
+const numericRecordsOutputContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    values: { type: 'object' },
+    pointCount: { type: 'integer', minimum: 0 },
+    stride: { type: 'integer', minimum: 1, maximum: 64 },
+    attributes: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 64,
+      items: { type: 'string' },
+    },
+  },
+  required: ['values', 'pointCount', 'stride', 'attributes'],
+  additionalProperties: false,
+}
+
+const positiveLimit = { type: 'integer', minimum: 1 }
+
+const interleavedParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    strideBytes: { type: 'integer', minimum: 1, maximum: 4096 },
+    littleEndian: { type: 'boolean' },
+    fields: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 64,
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,95}$' },
+          type: { enum: ['float32', 'float64', 'uint8', 'uint16', 'uint32', 'int8', 'int16', 'int32'] },
+          offsetBytes: { type: 'integer', minimum: 0, maximum: 4095 },
+        },
+        required: ['name', 'type', 'offsetBytes'],
+        additionalProperties: false,
+      },
+    },
+    maxRecords: positiveLimit,
+    maxOutputBytes: positiveLimit,
+  },
+  required: ['strideBytes', 'littleEndian', 'fields'],
+  additionalProperties: false,
+}
+
+const pcdParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    data: { const: 'binary' },
+    trailingPadding: { const: 'zero' },
+    maxTrailingBytes: { type: 'integer', minimum: 1, maximum: 65536 },
+    fields: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 64,
+      uniqueItems: true,
+      items: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_]{0,95}$' },
+    },
+    maxHeaderBytes: positiveLimit,
+    maxPoints: positiveLimit,
+    maxOutputBytes: positiveLimit,
+  },
+  required: ['data', 'fields'],
+  additionalProperties: false,
+}
+
+const npzParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    arrayName: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,95}$' },
+    maxEntries: positiveLimit,
+    maxExpandedBytes: positiveLimit,
+    maxCompressionRatio: { type: 'number', exclusiveMinimum: 0 },
+    maxElements: positiveLimit,
+    maxRank: { type: 'integer', minimum: 1, maximum: 16 },
+  },
+  required: ['arrayName'],
+  additionalProperties: false,
+}
+
+const emptyParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {},
+  additionalProperties: false,
+}
+
+function closedParams(
+  properties: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+): OperatorJsonSchema {
+  return { type: 'object', properties, required, additionalProperties: false }
+}
+
+function recordContract(fields: readonly string[]): OperatorJsonSchema {
+  return {
+    type: 'object',
+    properties: Object.fromEntries(fields.map((field) => [field, {}])),
+    required: fields,
+    additionalProperties: false,
+  }
+}
+
+const strictNuScenesGraphOperators: readonly CoreOperatorDescriptor[] = [
+  ['geometry.normalize_boxes2d', recordContract(['boxes3d', 'cameraImages', 'calibration']), {
+    oneOf: [
+      closedParams({ source: { const: 'projected-box3d' }, clipToImage: { type: 'boolean' } }, ['source', 'clipToImage']),
+      closedParams({ geometry: { const: 'center-size-pixels' } }, ['geometry']),
+    ],
+  }, recordContract(['boxes'])],
+  ['geometry.normalize_boxes3d', recordContract(['annotations', 'instances', 'categories']), closedParams({
+    quaternionOrder: { const: 'wxyz' },
+    frameId: { type: 'string', minLength: 1, maxLength: 96 },
+  }, ['frameId']), recordContract(['boxes'])],
+  ['image.bind_camera_frame', recordContract(['bytes', 'sampleData', 'calibration']), {
+    oneOf: [
+      closedParams({ timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['timestampField']),
+      closedParams({ timestampFrom: { const: 'numeric-path' } }, ['timestampFrom']),
+      closedParams({ encoding: { const: 'jpeg' } }, ['encoding']),
+    ],
+  }, recordContract(['images'])],
+  ['image.encoded_bytes', byteInputContract, closedParams({
+    mimeType: { enum: ['image/jpeg', 'image/png', 'image/webp'] },
+  }, ['mimeType']), recordContract(['bytes'])],
+  ['json.records', byteInputContract, emptyParamsContract, recordContract(['rows'])],
+  ['labels.attach_by_point_index', recordContract(['pointClouds', 'labels']), closedParams({
+    taxonomy: { type: 'string', minLength: 1, maxLength: 96 },
+  }, ['taxonomy']), recordContract(['segmentation'])],
+  ['records.select', recordContract(['rows']), closedParams({
+    fields: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
+    frameId: { type: 'string', minLength: 1, maxLength: 96 },
+  }, ['fields']), recordContract(['records'])],
+  ['relations.token_join', recordContract(['sampleData', 'poses']), closedParams({
+    leftKey: { type: 'string', minLength: 1, maxLength: 256 },
+    rightKey: { type: 'string', minLength: 1, maxLength: 256 },
+  }, ['leftKey', 'rightKey']), recordContract(['rows'])],
+  ['timeline.join', recordContract(['records', 'sampleData', 'calibration']), closedParams({
+    mode: { enum: ['token', 'nearest'] },
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+  }, ['mode']), recordContract(['pointClouds'])],
+  ['timeline.sort', recordContract(['samples']), {
+    oneOf: [
+      closedParams({ timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['timestampField']),
+      closedParams({
+        timestampFrom: { const: 'numeric-path' },
+        timestampUnit: { enum: ['ns', 'us', 'ms', 's'] },
+      }, ['timestampFrom', 'timestampUnit']),
+    ],
+  }, recordContract(['frames'])],
+  ['tracks.derive_trajectories', recordContract(['boxes']), closedParams({
+    objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
+  }, ['objectIdField']), recordContract(['trajectories'])],
+].map(([name, inputContract, operatorParamsContract, outputContract]): CoreOperatorDescriptor => ({
+  name: name as string,
+  majorVersion: 1,
+  provider: 'core',
+  tier: 1,
+  inputContract: inputContract as OperatorJsonSchema,
+  paramsContract: operatorParamsContract as OperatorJsonSchema,
+  outputContract: outputContract as OperatorJsonSchema,
+  execution: 'worker',
+  deterministic: true,
+}))
+
+const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
+  {
+    name: 'archive.npz_array',
+    majorVersion: 1,
+    provider: 'core',
+    tier: 1,
+    inputContract: byteInputContract,
+    paramsContract: npzParamsContract,
+    outputContract: {
+      type: 'object',
+      properties: { values: { type: 'object' } },
+      required: ['values'],
+      additionalProperties: false,
+    },
+    execution: 'worker',
+    deterministic: true,
+  },
+  {
+    name: 'binary.interleaved_records',
+    majorVersion: 1,
+    provider: 'core',
+    tier: 1,
+    inputContract: byteInputContract,
+    paramsContract: interleavedParamsContract,
+    outputContract: numericRecordsOutputContract,
+    validateParams: (params) => {
+      try {
+        assertValidInterleavedRecordsParamsV1(params as never)
+        return []
+      } catch (error) {
+        return [{ message: error instanceof Error ? error.message : String(error) }]
+      }
+    },
+    execution: 'worker',
+    deterministic: true,
+  },
+  {
+    name: 'binary.pcd_records',
+    majorVersion: 1,
+    provider: 'core',
+    tier: 1,
+    inputContract: byteInputContract,
+    paramsContract: pcdParamsContract,
+    outputContract: numericRecordsOutputContract,
+    execution: 'worker',
+    deterministic: true,
+  },
+]
+
 const workerOperators = [
-  'archive.npz_array',
-  'binary.interleaved_records',
-  'binary.pcd_records',
   'feather.columns',
-  'geometry.normalize_boxes2d',
-  'geometry.normalize_boxes3d',
   'geometry.normalize_keypoints',
   'geometry.range_image_to_cartesian',
   'geometry.relative_poses',
-  'image.bind_camera_frame',
-  'image.encoded_bytes',
-  'json.records',
-  'labels.attach_by_point_index',
   'labels.decode_camera_mask',
   'labels.panoptic_split',
   'parquet.columns',
-  'records.select',
   'relations.composite_key_join',
-  'relations.token_join',
-  'timeline.join',
-  'timeline.sort',
-  'tracks.derive_trajectories',
 ] as const
 
 /**
@@ -41,8 +250,10 @@ const workerOperators = [
  * phases; recipe compilation never treats a missing implementation as an
  * implicit dataset-specific escape hatch.
  */
-export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescriptor[] =
-  workerOperators.map((name) => ({
+export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescriptor[] = [
+  ...strictBinaryOperators,
+  ...strictNuScenesGraphOperators,
+  ...workerOperators.map((name): CoreOperatorDescriptor => ({
     name,
     majorVersion: 1,
     provider: 'core',
@@ -52,7 +263,8 @@ export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescripto
     outputContract: objectContract,
     execution: 'worker',
     deterministic: true,
-  }))
+  })),
+]
 
 export const bundledPhase2OperatorRegistry = new OperatorRegistry(
   BUNDLED_PHASE2_OPERATOR_DESCRIPTORS,
