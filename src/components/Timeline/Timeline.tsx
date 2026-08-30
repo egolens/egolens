@@ -306,14 +306,38 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
               }} />
             )}
 
-            {/* Time-window boundaries. Handles provide the affordance in the
-                full viewer; minimal/embed mode uses ticks because its window
-                is controlled by the host. */}
+            {/* Time window — fade the track outside [f0, f1] with the existing
+                base surface. This keeps the effect identical across themes
+                without introducing a dedicated scrim colour token. */}
             {playbackWindow && maxFrame > 0 && (() => {
               const leftPct = (playbackWindow.f0 / maxFrame) * 100
               const rightPct = (playbackWindow.f1 / maxFrame) * 100
               return (
                 <>
+                  {playbackWindow.f0 > 0 && (
+                    <div style={{
+                      position: 'absolute',
+                      left: 0,
+                      width: `${leftPct}%`,
+                      height: '16px',
+                      backgroundColor: colors.bgBase,
+                      opacity: 0.82,
+                      borderRadius: `${radius.pill} 0 0 ${radius.pill}`,
+                      pointerEvents: 'none',
+                    }} />
+                  )}
+                  {playbackWindow.f1 < maxFrame && (
+                    <div style={{
+                      position: 'absolute',
+                      left: `${rightPct}%`,
+                      right: 0,
+                      height: '16px',
+                      backgroundColor: colors.bgBase,
+                      opacity: 0.82,
+                      borderRadius: `0 ${radius.pill} ${radius.pill} 0`,
+                      pointerEvents: 'none',
+                    }} />
+                  )}
                   {minimal && (
                     // Minimal/embed: boundary ticks only — the window is host-controlled
                     <>
