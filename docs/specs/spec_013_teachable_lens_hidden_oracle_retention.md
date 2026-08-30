@@ -113,6 +113,12 @@ wait for the requested `currentFrameIndex` and non-null frame, fail on scene
 error, and time out rather than hash the previously displayed frame. Settling
 and image-complete checks occur only after that barrier.
 
+The initial-load command has the same ordering requirement. The CDP runner may
+observe the performance probe before React has committed the URL-load effect,
+so it must wait for an explicit benchmark-command-ready signal before sending
+the one-shot start event. A fixed delay alone is not a valid synchronization
+barrier.
+
 ### 5. Phase 6 deletion and merge gate
 
 Removal of a dataset's obsolete production path is accepted only when a trusted

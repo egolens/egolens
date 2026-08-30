@@ -125,7 +125,11 @@ function useUrlAutoLoad() {
     // path. Sampling the read-only probe itself never triggers this event.
     if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') {
       window.addEventListener('egolens:benchmark-start', start, { once: true })
-      return () => window.removeEventListener('egolens:benchmark-start', start)
+      window.__EGOLENS_BENCHMARK_READY__ = true
+      return () => {
+        window.__EGOLENS_BENCHMARK_READY__ = false
+        window.removeEventListener('egolens:benchmark-start', start)
+      }
     }
     start()
   }, [status, loadFromUrl])
@@ -198,6 +202,7 @@ interface BrowserConformanceCaptureV1 {
 
 declare global {
   interface Window {
+    __EGOLENS_BENCHMARK_READY__?: boolean
     __EGOLENS_ORACLE_CAPTURE__?: BrowserConformanceCaptureV1
   }
 }

@@ -513,6 +513,7 @@ async function runScenario(client, browserVersion, runIndex) {
   }, pageSession)
   await client.send('Page.navigate', { url: withPerf(options.url) }, pageSession)
   await waitFor(client, pageSession, 'Boolean(globalThis.__EGOLENS_PERF__)')
+  await waitFor(client, pageSession, 'globalThis.__EGOLENS_BENCHMARK_READY__ === true')
   // The pre-scene comparison point must represent a committed, naturally
   // settled landing view. Sampling immediately after the hook appears races
   // React effects and produces false DOM/listener growth after disposal.
