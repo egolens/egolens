@@ -182,7 +182,12 @@ judge key is release evidence work, not browser runtime functionality.
 
 For the initial promotion, the protected GitHub Environment is
 `phase6-oracle-judge`. It requires `happyhj` approval, disallows administrator
-bypass, and accepts deployments only from `codex/spec-006-phase-6` or `main`.
+bypass, and accepts deployments only from `codex/spec-006-phase-6`, `main`, or
+the current PR's synthetic merge ref (`refs/pull/20/merge`). GitHub evaluates an
+Environment used by a `pull_request` job against that synthetic ref rather than
+the head branch name; the workflow separately requires the same-repository
+`codex/spec-006-phase-6` head and the evidence label before the secret-bearing
+job can run.
 Because the repository is public, hidden bundles and candidates are compressed
 into a bounded, integrity-checked Environment-secret envelope. Only public
 signed receipts and the gate report may be retained as ordinary Actions

@@ -172,6 +172,13 @@ The secret-bearing job fetches only this commit; it never checks out, installs,
 or executes the PR candidate. The candidate enters the judge solely as the
 integrity-checked artifact whose provenance commit must equal the PR HEAD.
 
+For a `pull_request` workflow, the Environment deployment branch policy must
+also allow the PR's synthetic merge ref (for example,
+`refs/pull/20/merge`). GitHub evaluates the Environment against that ref, not
+only the PR head branch. Keep the workflow's same-repository, exact-head-branch,
+and evidence-label conditions in place so allowing the synthetic ref does not
+broaden which candidate can reach protected inputs.
+
 ## 4. Enforce the deletion gate
 
 Create a reviewed requirements document outside the author workspace. It has
