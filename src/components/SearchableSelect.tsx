@@ -47,12 +47,12 @@ export interface SelectItem {
 }
 
 const TAG_COLORS = {
-  default: { text: '#7dd3c8', border: 'rgba(125, 211, 200, 0.4)' },
-  warning: { text: '#f0c674', border: 'rgba(240, 198, 116, 0.45)' },
+  default: colors.accent,
+  warning: colors.warning,
 } as const
 
 function TagPill({ tag, tone }: { tag: string; tone: 'default' | 'warning' }) {
-  const c = TAG_COLORS[tone]
+  const color = TAG_COLORS[tone]
   return (
     <span
       style={{
@@ -60,8 +60,9 @@ function TagPill({ tag, tone }: { tag: string; tone: 'default' | 'warning' }) {
         padding: '1px 7px',
         fontSize: '10px',
         fontFamily: fonts.sans,
-        color: c.text,
-        border: `1px solid ${c.border}`,
+        color,
+        backgroundColor: alpha(color, 0.08),
+        border: `1px solid ${alpha(color, 0.4)}`,
         borderRadius: '999px',
         lineHeight: 1.5,
       }}
@@ -582,7 +583,7 @@ export default function SearchableSelect({
             zIndex: 9999,
             display: 'flex',
             flexDirection: 'column',
-            background: colors.tintSink,
+            background: colors.shadowInk,
             backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => {
@@ -654,7 +655,7 @@ export default function SearchableSelect({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: colors.tintSink,
+            background: colors.shadowInk,
             backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => {

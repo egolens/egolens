@@ -67,6 +67,7 @@ describe('the two palettes stay in step', () => {
       expect(ratio(p.textSecondary, p.bgBase), `${theme} textSecondary`).toBeGreaterThan(4)
       // The accent carries small text and active-state labels.
       expect(ratio(p.accent, p.bgBase), `${theme} accent`).toBeGreaterThan(3)
+      expect(ratio(p.warning, p.bgBase), `${theme} warning`).toBeGreaterThan(3)
     }
   })
 })

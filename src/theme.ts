@@ -38,6 +38,7 @@ const CHROME_DARK = {
   textOnAccent: '#000000',
   accentBlue: '#00C9DB',
   danger: '#FF6B6B',
+  warning: '#F0C674',
 
   bgDeep: '#0C0F1A',
   bgBase: '#111628',
@@ -72,6 +73,7 @@ const CHROME_LIGHT: Record<keyof typeof CHROME_DARK, string> = {
   textOnAccent: '#000000',
   accentBlue: '#00808F',
   danger: '#E03131',
+  warning: '#8A5A00',
 
   bgDeep: '#FFFFFF',
   bgBase: '#F2F5F9',
