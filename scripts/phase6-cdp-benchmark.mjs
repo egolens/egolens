@@ -174,13 +174,13 @@ async function waitForEndpoint(port, processHandle) {
   throw new Error('Timed out waiting for the Chrome debugging endpoint')
 }
 
-async function evaluate(client, sessionId, expression) {
+async function evaluate(client, sessionId, expression, commandTimeoutMs = 60_000) {
   const result = await client.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,
     returnByValue: true,
     userGesture: true,
-  }, sessionId)
+  }, sessionId, commandTimeoutMs)
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Runtime.evaluate failed')
   return result.result?.value
 }
@@ -237,7 +237,12 @@ async function captureConformanceArtifact(client, pageSession) {
       throw new Error('Each perceptual capture requires id, frameIndex, and selector')
     }
     await evaluate(client, pageSession, `globalThis.__EGOLENS_ORACLE_CAPTURE__.setPresentation(${JSON.stringify(capture.presentation ?? {})}); true`)
-    const actualFrame = await evaluate(client, pageSession, `globalThis.__EGOLENS_ORACLE_CAPTURE__.seekFrame(${capture.frameIndex})`)
+    const actualFrame = await evaluate(
+      client,
+      pageSession,
+      `globalThis.__EGOLENS_ORACLE_CAPTURE__.seekFrame(${capture.frameIndex})`,
+      timeoutMs,
+    )
     if (actualFrame !== capture.frameIndex) throw new Error(`Failed to present conformance frame ${capture.frameIndex}`)
     await waitFor(client, pageSession, `[...document.images].every((image) => image.complete)`)
     await delay(settleMs)
@@ -279,7 +284,7 @@ async function captureConformanceArtifact(client, pageSession) {
     requiredCapabilities: conformanceConfig.requiredCapabilities,
     sampleValuesPerBuffer: conformanceConfig.sampleValuesPerBuffer ?? 64,
     perceptualReferences: references,
-  })})`)
+  })})`, timeoutMs)
   if (!artifact?.artifactHash) throw new Error('Conformance capture returned no artifact')
   await mkdir(path.dirname(conformanceOutput), { recursive: true })
   await writeFile(conformanceOutput, `${JSON.stringify(artifact)}\n`, { flag: 'wx' })

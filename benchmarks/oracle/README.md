@@ -79,7 +79,10 @@ the barrier also waits for every requested JPEG to finish decoding and for its
 camera view to publish the requested frame index. A non-empty camera cache,
 `document.images.complete`, or a fixed settle delay is insufficient because the
 flicker-free camera component intentionally keeps the prior blob URL visible
-until the replacement has decoded.
+until the replacement has decoded. The CDP `Runtime.evaluate` command that
+awaits this barrier uses the configured capture timeout, rather than the
+shorter default command timeout, so a valid cold Waymo row-group load is not
+aborted before the application-level deadline.
 
 ## 2. Capture the candidate
 
