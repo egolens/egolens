@@ -221,6 +221,18 @@ describe('Phase 2 contract decisions', () => {
     expect(manifest.cameraSemanticLabels).toEqual(['Sky'])
   })
 
+  it('allows renderer IDs to overlap across point-sensor and camera namespaces', () => {
+    const candidate = structuredClone(recipe())
+    candidate.scene.sensors = [
+      { id: 'lidar', rendererId: 1, label: 'LIDAR', modality: 'lidar', frameId: 'ego', color: '#ffffff' },
+      {
+        id: 'camera', rendererId: 1, label: 'CAMERA', modality: 'camera', frameId: 'ego', color: '#ffffff',
+        image: { width: 100, height: 100, model: 'pinhole', view: 'front' },
+      },
+    ]
+    expect(() => compileRecipeV1(candidate, registry())).not.toThrow()
+  })
+
   it('rejects manifest fragments: Phase 2 assets remain complete recipe shells', () => {
     const fragment = structuredClone(minimalJson) as unknown as Record<string, unknown>
     delete fragment.pipelines

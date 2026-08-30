@@ -1,0 +1,1478 @@
+{
+  "kind": "egolens-adapter",
+  "schemaVersion": 1,
+  "engine": {
+    "minimumVersion": "1.0.0",
+    "requiredOperators": {
+      "geometry.normalize_boxes2d": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.normalize_boxes3d": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.normalize_keypoints": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.range_image_to_cartesian": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.relative_poses": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.bind_camera_frame": {
+        "major": 1,
+        "provider": "core"
+      },
+      "labels.attach_by_point_index": {
+        "major": 1,
+        "provider": "core"
+      },
+      "labels.decode_camera_mask": {
+        "major": 1,
+        "provider": "core"
+      },
+      "parquet.columns": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.select": {
+        "major": 1,
+        "provider": "core"
+      },
+      "relations.composite_key_join": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.sort": {
+        "major": 1,
+        "provider": "core"
+      },
+      "tracks.derive_trajectories": {
+        "major": 1,
+        "provider": "core"
+      }
+    }
+  },
+  "identity": {
+    "name": "Waymo Open Dataset",
+    "description": "Waymo Open Dataset v2 component tables and range images."
+  },
+  "match": {
+    "inventory": {
+      "rootEntries": [
+        {
+          "path": "vehicle_pose",
+          "required": true
+        },
+        {
+          "path": "lidar_calibration",
+          "required": false
+        },
+        {
+          "path": "camera_calibration",
+          "required": false
+        },
+        {
+          "path": "lidar_box",
+          "required": false
+        },
+        {
+          "path": "lidar",
+          "required": true
+        },
+        {
+          "path": "camera_image",
+          "required": true
+        },
+        {
+          "path": "stats",
+          "required": false
+        },
+        {
+          "path": "lidar_pose",
+          "required": false
+        },
+        {
+          "path": "lidar_camera_projection",
+          "required": false
+        },
+        {
+          "path": "camera_box",
+          "required": false
+        },
+        {
+          "path": "projected_lidar_box",
+          "required": false
+        },
+        {
+          "path": "lidar_segmentation",
+          "required": false
+        },
+        {
+          "path": "camera_segmentation",
+          "required": false
+        },
+        {
+          "path": "lidar_hkp",
+          "required": false
+        },
+        {
+          "path": "camera_hkp",
+          "required": false
+        },
+        {
+          "path": "lidar_camera_synced_box",
+          "required": false
+        },
+        {
+          "path": "camera_to_lidar_box_association",
+          "required": false
+        }
+      ]
+    },
+    "all": [
+      {
+        "kind": "path",
+        "glob": "vehicle_pose",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "lidar",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "camera_image",
+        "minCount": 1
+      }
+    ]
+  },
+  "sources": {
+    "poseRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "vehicle_pose/**/*.parquet",
+        "order": "numeric-path",
+        "minCount": 1
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "[VehiclePoseComponent].world_from_vehicle.transform"
+      ],
+      "bindings": {
+        "timestamp": "key.frame_timestamp_micros",
+        "egoPose": "[VehiclePoseComponent].world_from_vehicle.transform"
+      }
+    },
+    "lidarRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "lidar/**/*.parquet",
+        "order": "numeric-path",
+        "minCount": 1
+      },
+      "columns": [
+        "key.frame_timestamp_micros",
+        "key.laser_name",
+        "[LiDARComponent].range_image_return1.shape",
+        "[LiDARComponent].range_image_return1.values"
+      ],
+      "bindings": {
+        "timestamp": "key.frame_timestamp_micros",
+        "sensorId": "key.laser_name",
+        "rangeImageShape": "[LiDARComponent].range_image_return1.shape",
+        "rangeImageValues": "[LiDARComponent].range_image_return1.values"
+      }
+    },
+    "lidarCalibrationRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "lidar_calibration/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "cameraCalibrationRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "camera_calibration/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "cameraImageRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "camera_image/**/*.parquet",
+        "order": "numeric-path",
+        "minCount": 1
+      }
+    },
+    "box3dRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "lidar_box/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "box2dRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "camera_box/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "associationRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "camera_to_lidar_box_association/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "lidarSegmentationRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "lidar_segmentation/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "cameraSegmentationRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "camera_segmentation/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "keypoints3dRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "lidar_hkp/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "keypoints2dRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "camera_hkp/**/*.parquet",
+        "order": "numeric-path"
+      }
+    },
+    "statsRows": {
+      "reader": "parquet.columns",
+      "files": {
+        "glob": "stats/**/*.parquet",
+        "order": "numeric-path"
+      }
+    }
+  },
+  "scene": {
+    "formatId": "waymo",
+    "timeline": {
+      "timestampUnit": "us",
+      "nominalFrameRate": 10
+    },
+    "coordinateFrames": [
+      {
+        "id": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar-top-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar-front-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar-side-left-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar-side-right-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar-rear-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera-side-left-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera-front-left-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera-front-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera-front-right-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera-side-right-frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      }
+    ],
+    "sensors": [
+      {
+        "id": "lidar-top",
+        "rendererId": 1,
+        "label": "TOP",
+        "modality": "lidar",
+        "frameId": "lidar-top-frame",
+        "color": "#00E89D"
+      },
+      {
+        "id": "lidar-front",
+        "rendererId": 2,
+        "label": "FRONT",
+        "modality": "lidar",
+        "frameId": "lidar-front-frame",
+        "color": "#00C9DB"
+      },
+      {
+        "id": "lidar-side-left",
+        "rendererId": 3,
+        "label": "SIDE_L",
+        "modality": "lidar",
+        "frameId": "lidar-side-left-frame",
+        "color": "#4DA8FF"
+      },
+      {
+        "id": "lidar-side-right",
+        "rendererId": 4,
+        "label": "SIDE_R",
+        "modality": "lidar",
+        "frameId": "lidar-side-right-frame",
+        "color": "#7B6FFF"
+      },
+      {
+        "id": "lidar-rear",
+        "rendererId": 5,
+        "label": "REAR",
+        "modality": "lidar",
+        "frameId": "lidar-rear-frame",
+        "color": "#B490FF"
+      },
+      {
+        "id": "camera-side-left",
+        "rendererId": 4,
+        "label": "SIDE LEFT",
+        "modality": "camera",
+        "frameId": "camera-side-left-frame",
+        "color": "#4DA8FF",
+        "image": {
+          "width": 1920,
+          "height": 886,
+          "model": "pinhole",
+          "view": "side-left",
+          "povLabel": "SL"
+        }
+      },
+      {
+        "id": "camera-front-left",
+        "rendererId": 2,
+        "label": "FRONT LEFT",
+        "modality": "camera",
+        "frameId": "camera-front-left-frame",
+        "color": "#00E89D",
+        "image": {
+          "width": 1920,
+          "height": 1280,
+          "model": "pinhole",
+          "view": "front-left",
+          "povLabel": "FL"
+        }
+      },
+      {
+        "id": "camera-front",
+        "rendererId": 1,
+        "label": "FRONT",
+        "modality": "camera",
+        "frameId": "camera-front-frame",
+        "color": "#FFFFFF",
+        "image": {
+          "width": 1920,
+          "height": 1280,
+          "model": "pinhole",
+          "view": "front",
+          "povLabel": "FRONT"
+        }
+      },
+      {
+        "id": "camera-front-right",
+        "rendererId": 3,
+        "label": "FRONT RIGHT",
+        "modality": "camera",
+        "frameId": "camera-front-right-frame",
+        "color": "#00C9DB",
+        "image": {
+          "width": 1920,
+          "height": 1280,
+          "model": "pinhole",
+          "view": "front-right",
+          "povLabel": "FR"
+        }
+      },
+      {
+        "id": "camera-side-right",
+        "rendererId": 5,
+        "label": "SIDE RIGHT",
+        "modality": "camera",
+        "frameId": "camera-side-right-frame",
+        "color": "#B490FF",
+        "image": {
+          "width": 1920,
+          "height": 886,
+          "model": "pinhole",
+          "view": "side-right",
+          "povLabel": "SR"
+        }
+      }
+    ],
+    "taxonomies": [
+      {
+        "id": "objects",
+        "role": "objects",
+        "classes": [
+          {
+            "id": "unknown",
+            "rendererId": 0,
+            "label": "Unknown",
+            "color": "#6B7280"
+          },
+          {
+            "id": "vehicle",
+            "rendererId": 1,
+            "label": "Vehicle",
+            "color": "#FF9E00",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "pedestrian",
+            "rendererId": 2,
+            "label": "Pedestrian",
+            "color": "#CCFF00",
+            "modelHint": "pedestrian"
+          },
+          {
+            "id": "sign",
+            "rendererId": 3,
+            "label": "Sign",
+            "color": "#FF44FF",
+            "modelHint": "sign"
+          },
+          {
+            "id": "cyclist",
+            "rendererId": 4,
+            "label": "Cyclist",
+            "color": "#DC143C",
+            "modelHint": "cyclist"
+          }
+        ]
+      },
+      {
+        "id": "waymo-lidar-semantics",
+        "role": "lidar-semantics",
+        "classes": [
+          {
+            "id": "waymo-lidar-semantics-0",
+            "rendererId": 0,
+            "label": "Undefined",
+            "color": "#404040"
+          },
+          {
+            "id": "waymo-lidar-semantics-1",
+            "rendererId": 1,
+            "label": "Car",
+            "color": "#ff9e00"
+          },
+          {
+            "id": "waymo-lidar-semantics-2",
+            "rendererId": 2,
+            "label": "Truck",
+            "color": "#e67800"
+          },
+          {
+            "id": "waymo-lidar-semantics-3",
+            "rendererId": 3,
+            "label": "Bus",
+            "color": "#ffd600"
+          },
+          {
+            "id": "waymo-lidar-semantics-4",
+            "rendererId": 4,
+            "label": "Other Vehicle",
+            "color": "#a66e26"
+          },
+          {
+            "id": "waymo-lidar-semantics-5",
+            "rendererId": 5,
+            "label": "Motorcyclist",
+            "color": "#b30026"
+          },
+          {
+            "id": "waymo-lidar-semantics-6",
+            "rendererId": 6,
+            "label": "Bicyclist",
+            "color": "#db143d"
+          },
+          {
+            "id": "waymo-lidar-semantics-7",
+            "rendererId": 7,
+            "label": "Pedestrian",
+            "color": "#ccff00"
+          },
+          {
+            "id": "waymo-lidar-semantics-8",
+            "rendererId": 8,
+            "label": "Sign",
+            "color": "#ff45ff"
+          },
+          {
+            "id": "waymo-lidar-semantics-9",
+            "rendererId": 9,
+            "label": "Traffic Light",
+            "color": "#00e6e6"
+          },
+          {
+            "id": "waymo-lidar-semantics-10",
+            "rendererId": 10,
+            "label": "Pole",
+            "color": "#994de6"
+          },
+          {
+            "id": "waymo-lidar-semantics-11",
+            "rendererId": 11,
+            "label": "Construction Cone",
+            "color": "#ff66b3"
+          },
+          {
+            "id": "waymo-lidar-semantics-12",
+            "rendererId": 12,
+            "label": "Bicycle",
+            "color": "#ff6b9e"
+          },
+          {
+            "id": "waymo-lidar-semantics-13",
+            "rendererId": 13,
+            "label": "Motorcycle",
+            "color": "#d91a1a"
+          },
+          {
+            "id": "waymo-lidar-semantics-14",
+            "rendererId": 14,
+            "label": "Building",
+            "color": "#738cb3"
+          },
+          {
+            "id": "waymo-lidar-semantics-15",
+            "rendererId": 15,
+            "label": "Vegetation",
+            "color": "#1ab833"
+          },
+          {
+            "id": "waymo-lidar-semantics-16",
+            "rendererId": 16,
+            "label": "Tree Trunk",
+            "color": "#598033"
+          },
+          {
+            "id": "waymo-lidar-semantics-17",
+            "rendererId": 17,
+            "label": "Curb",
+            "color": "#808080"
+          },
+          {
+            "id": "waymo-lidar-semantics-18",
+            "rendererId": 18,
+            "label": "Road",
+            "color": "#66668c"
+          },
+          {
+            "id": "waymo-lidar-semantics-19",
+            "rendererId": 19,
+            "label": "Lane Marker",
+            "color": "#8cb3ff"
+          },
+          {
+            "id": "waymo-lidar-semantics-20",
+            "rendererId": 20,
+            "label": "Other Ground",
+            "color": "#998c66"
+          },
+          {
+            "id": "waymo-lidar-semantics-21",
+            "rendererId": 21,
+            "label": "Walkable",
+            "color": "#d1bf99"
+          },
+          {
+            "id": "waymo-lidar-semantics-22",
+            "rendererId": 22,
+            "label": "Sidewalk",
+            "color": "#8c8ca6"
+          }
+        ],
+        "palette": [
+          [
+            0.25,
+            0.25,
+            0.25
+          ],
+          [
+            1,
+            0.62,
+            0
+          ],
+          [
+            0.9,
+            0.47,
+            0
+          ],
+          [
+            1,
+            0.84,
+            0
+          ],
+          [
+            0.65,
+            0.43,
+            0.15
+          ],
+          [
+            0.7,
+            0,
+            0.15
+          ],
+          [
+            0.86,
+            0.08,
+            0.24
+          ],
+          [
+            0.8,
+            1,
+            0
+          ],
+          [
+            1,
+            0.27,
+            1
+          ],
+          [
+            0,
+            0.9,
+            0.9
+          ],
+          [
+            0.6,
+            0.3,
+            0.9
+          ],
+          [
+            1,
+            0.4,
+            0.7
+          ],
+          [
+            1,
+            0.42,
+            0.62
+          ],
+          [
+            0.85,
+            0.1,
+            0.1
+          ],
+          [
+            0.45,
+            0.55,
+            0.7
+          ],
+          [
+            0.1,
+            0.72,
+            0.2
+          ],
+          [
+            0.35,
+            0.5,
+            0.2
+          ],
+          [
+            0.5,
+            0.5,
+            0.5
+          ],
+          [
+            0.4,
+            0.4,
+            0.55
+          ],
+          [
+            0.55,
+            0.7,
+            1
+          ],
+          [
+            0.6,
+            0.55,
+            0.4
+          ],
+          [
+            0.82,
+            0.75,
+            0.6
+          ],
+          [
+            0.55,
+            0.55,
+            0.65
+          ]
+        ]
+      },
+      {
+        "id": "waymo-camera-semantics",
+        "role": "camera-semantics",
+        "classes": [
+          {
+            "id": "waymo-camera-semantics-0",
+            "rendererId": 0,
+            "label": "Undefined",
+            "color": "#404040"
+          },
+          {
+            "id": "waymo-camera-semantics-1",
+            "rendererId": 1,
+            "label": "Car",
+            "color": "#ff9e00"
+          },
+          {
+            "id": "waymo-camera-semantics-2",
+            "rendererId": 2,
+            "label": "Bus",
+            "color": "#ffd600"
+          },
+          {
+            "id": "waymo-camera-semantics-3",
+            "rendererId": 3,
+            "label": "Truck",
+            "color": "#e67800"
+          },
+          {
+            "id": "waymo-camera-semantics-4",
+            "rendererId": 4,
+            "label": "Other Large Vehicle",
+            "color": "#a66e26"
+          },
+          {
+            "id": "waymo-camera-semantics-5",
+            "rendererId": 5,
+            "label": "Trailer",
+            "color": "#bf8c40"
+          },
+          {
+            "id": "waymo-camera-semantics-6",
+            "rendererId": 6,
+            "label": "Ego Vehicle",
+            "color": "#666666"
+          },
+          {
+            "id": "waymo-camera-semantics-7",
+            "rendererId": 7,
+            "label": "Motorcycle",
+            "color": "#d91a1a"
+          },
+          {
+            "id": "waymo-camera-semantics-8",
+            "rendererId": 8,
+            "label": "Bicycle",
+            "color": "#ff6b9e"
+          },
+          {
+            "id": "waymo-camera-semantics-9",
+            "rendererId": 9,
+            "label": "Pedestrian",
+            "color": "#ccff00"
+          },
+          {
+            "id": "waymo-camera-semantics-10",
+            "rendererId": 10,
+            "label": "Motorcyclist",
+            "color": "#b30026"
+          },
+          {
+            "id": "waymo-camera-semantics-11",
+            "rendererId": 11,
+            "label": "Bicyclist",
+            "color": "#db143d"
+          },
+          {
+            "id": "waymo-camera-semantics-12",
+            "rendererId": 12,
+            "label": "Ground Animal",
+            "color": "#73cc33"
+          },
+          {
+            "id": "waymo-camera-semantics-13",
+            "rendererId": 13,
+            "label": "Bird",
+            "color": "#99d9f2"
+          },
+          {
+            "id": "waymo-camera-semantics-14",
+            "rendererId": 14,
+            "label": "Road",
+            "color": "#66668c"
+          },
+          {
+            "id": "waymo-camera-semantics-15",
+            "rendererId": 15,
+            "label": "Lane Marker",
+            "color": "#8cb3ff"
+          },
+          {
+            "id": "waymo-camera-semantics-16",
+            "rendererId": 16,
+            "label": "Curb",
+            "color": "#808080"
+          },
+          {
+            "id": "waymo-camera-semantics-17",
+            "rendererId": 17,
+            "label": "Walkable",
+            "color": "#d1bf99"
+          },
+          {
+            "id": "waymo-camera-semantics-18",
+            "rendererId": 18,
+            "label": "Sidewalk",
+            "color": "#8c8ca6"
+          },
+          {
+            "id": "waymo-camera-semantics-19",
+            "rendererId": 19,
+            "label": "Building",
+            "color": "#738cb3"
+          },
+          {
+            "id": "waymo-camera-semantics-20",
+            "rendererId": 20,
+            "label": "Pole",
+            "color": "#994de6"
+          },
+          {
+            "id": "waymo-camera-semantics-21",
+            "rendererId": 21,
+            "label": "Sign",
+            "color": "#ff45ff"
+          },
+          {
+            "id": "waymo-camera-semantics-22",
+            "rendererId": 22,
+            "label": "Traffic Light",
+            "color": "#00e6e6"
+          },
+          {
+            "id": "waymo-camera-semantics-23",
+            "rendererId": 23,
+            "label": "Construction Cone",
+            "color": "#ff66b3"
+          },
+          {
+            "id": "waymo-camera-semantics-24",
+            "rendererId": 24,
+            "label": "Vegetation",
+            "color": "#1ab833"
+          },
+          {
+            "id": "waymo-camera-semantics-25",
+            "rendererId": 25,
+            "label": "Sky",
+            "color": "#b3d9f2"
+          },
+          {
+            "id": "waymo-camera-semantics-26",
+            "rendererId": 26,
+            "label": "Ground",
+            "color": "#807359"
+          },
+          {
+            "id": "waymo-camera-semantics-27",
+            "rendererId": 27,
+            "label": "Static",
+            "color": "#595973"
+          },
+          {
+            "id": "waymo-camera-semantics-28",
+            "rendererId": 28,
+            "label": "Dynamic",
+            "color": "#bf9973"
+          }
+        ],
+        "palette": [
+          [
+            0.25,
+            0.25,
+            0.25
+          ],
+          [
+            1,
+            0.62,
+            0
+          ],
+          [
+            1,
+            0.84,
+            0
+          ],
+          [
+            0.9,
+            0.47,
+            0
+          ],
+          [
+            0.65,
+            0.43,
+            0.15
+          ],
+          [
+            0.75,
+            0.55,
+            0.25
+          ],
+          [
+            0.4,
+            0.4,
+            0.4
+          ],
+          [
+            0.85,
+            0.1,
+            0.1
+          ],
+          [
+            1,
+            0.42,
+            0.62
+          ],
+          [
+            0.8,
+            1,
+            0
+          ],
+          [
+            0.7,
+            0,
+            0.15
+          ],
+          [
+            0.86,
+            0.08,
+            0.24
+          ],
+          [
+            0.45,
+            0.8,
+            0.2
+          ],
+          [
+            0.6,
+            0.85,
+            0.95
+          ],
+          [
+            0.4,
+            0.4,
+            0.55
+          ],
+          [
+            0.55,
+            0.7,
+            1
+          ],
+          [
+            0.5,
+            0.5,
+            0.5
+          ],
+          [
+            0.82,
+            0.75,
+            0.6
+          ],
+          [
+            0.55,
+            0.55,
+            0.65
+          ],
+          [
+            0.45,
+            0.55,
+            0.7
+          ],
+          [
+            0.6,
+            0.3,
+            0.9
+          ],
+          [
+            1,
+            0.27,
+            1
+          ],
+          [
+            0,
+            0.9,
+            0.9
+          ],
+          [
+            1,
+            0.4,
+            0.7
+          ],
+          [
+            0.1,
+            0.72,
+            0.2
+          ],
+          [
+            0.7,
+            0.85,
+            0.95
+          ],
+          [
+            0.5,
+            0.45,
+            0.35
+          ],
+          [
+            0.35,
+            0.35,
+            0.45
+          ],
+          [
+            0.75,
+            0.6,
+            0.45
+          ]
+        ]
+      }
+    ],
+    "pointAttributes": [
+      {
+        "id": "x",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "y",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "z",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "intensity",
+        "storage": "float32"
+      },
+      {
+        "id": "range",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "elongation",
+        "storage": "float32"
+      }
+    ],
+    "pointLayout": {
+      "interleavedAttributes": [
+        "x",
+        "y",
+        "z",
+        "intensity",
+        "range",
+        "elongation"
+      ],
+      "colorModes": [
+        "intensity",
+        "range",
+        "elongation",
+        "segment",
+        "camera"
+      ]
+    }
+  },
+  "pipelines": {
+    "timeline": {
+      "nodes": [
+        {
+          "id": "sortTimeline",
+          "op": "timeline.sort",
+          "version": 1,
+          "inputs": {
+            "rows": "poseRows.rows"
+          },
+          "params": {
+            "timestampField": "key.frame_timestamp_micros"
+          }
+        }
+      ],
+      "result": "sortTimeline.frames"
+    },
+    "egoPoses": {
+      "nodes": [
+        {
+          "id": "normalizePoses",
+          "op": "geometry.relative_poses",
+          "version": 1,
+          "inputs": {
+            "rows": "poseRows.rows"
+          },
+          "params": {
+            "matrixField": "[VehiclePoseComponent].world_from_vehicle.transform"
+          }
+        }
+      ],
+      "result": "normalizePoses.poses"
+    },
+    "pointClouds": {
+      "nodes": [
+        {
+          "id": "decodeRangeImages",
+          "op": "geometry.range_image_to_cartesian",
+          "version": 1,
+          "inputs": {
+            "rangeImages": "lidarRows.rows",
+            "calibration": "lidarCalibrationRows.rows",
+            "poses": "poseRows.rows"
+          },
+          "params": {
+            "returns": [
+              1
+            ],
+            "outputFrame": "ego"
+          }
+        }
+      ],
+      "result": "decodeRangeImages.pointClouds"
+    },
+    "cameraImages": {
+      "nodes": [
+        {
+          "id": "bindCameraImages",
+          "op": "image.bind_camera_frame",
+          "version": 1,
+          "inputs": {
+            "rows": "cameraImageRows.rows",
+            "calibration": "cameraCalibrationRows.rows"
+          },
+          "params": {
+            "encoding": "jpeg"
+          }
+        }
+      ],
+      "result": "bindCameraImages.images"
+    },
+    "boxes3d": {
+      "nodes": [
+        {
+          "id": "normalizeBoxes3d",
+          "op": "geometry.normalize_boxes3d",
+          "version": 1,
+          "inputs": {
+            "rows": "box3dRows.rows"
+          },
+          "params": {
+            "frameId": "ego"
+          }
+        }
+      ],
+      "result": "normalizeBoxes3d.boxes"
+    },
+    "boxes2d": {
+      "nodes": [
+        {
+          "id": "normalizeBoxes2d",
+          "op": "geometry.normalize_boxes2d",
+          "version": 1,
+          "inputs": {
+            "rows": "box2dRows.rows"
+          },
+          "params": {
+            "geometry": "center-size-pixels"
+          }
+        }
+      ],
+      "result": "normalizeBoxes2d.boxes"
+    },
+    "boxAssociations": {
+      "nodes": [
+        {
+          "id": "associateBoxes",
+          "op": "relations.composite_key_join",
+          "version": 1,
+          "inputs": {
+            "boxes2d": "boxes2d.result",
+            "boxes3d": "boxes3d.result",
+            "associations": "associationRows.rows"
+          },
+          "params": {
+            "relation": "camera-object-to-lidar-object"
+          }
+        }
+      ],
+      "result": "associateBoxes.relations"
+    },
+    "trajectories": {
+      "nodes": [
+        {
+          "id": "deriveTrajectories",
+          "op": "tracks.derive_trajectories",
+          "version": 1,
+          "inputs": {
+            "boxes": "boxes3d.result"
+          },
+          "params": {
+            "objectIdField": "objectId"
+          }
+        }
+      ],
+      "result": "deriveTrajectories.trajectories"
+    },
+    "lidarSegmentation": {
+      "nodes": [
+        {
+          "id": "attachLidarLabels",
+          "op": "labels.attach_by_point_index",
+          "version": 1,
+          "inputs": {
+            "pointClouds": "pointClouds.result",
+            "labels": "lidarSegmentationRows.rows"
+          },
+          "params": {
+            "taxonomy": "waymo-lidar-semantics"
+          }
+        }
+      ],
+      "result": "attachLidarLabels.segmentation"
+    },
+    "cameraSegmentation": {
+      "nodes": [
+        {
+          "id": "decodeCameraLabels",
+          "op": "labels.decode_camera_mask",
+          "version": 1,
+          "inputs": {
+            "rows": "cameraSegmentationRows.rows"
+          },
+          "params": {
+            "encoding": "png-uint16",
+            "taxonomy": "waymo-camera-semantics"
+          }
+        }
+      ],
+      "result": "decodeCameraLabels.segmentation"
+    },
+    "keypoints3d": {
+      "nodes": [
+        {
+          "id": "normalizeKeypoints3d",
+          "op": "geometry.normalize_keypoints",
+          "version": 1,
+          "inputs": {
+            "rows": "keypoints3dRows.rows"
+          },
+          "params": {
+            "dimensions": 3,
+            "frameId": "ego"
+          }
+        }
+      ],
+      "result": "normalizeKeypoints3d.keypoints"
+    },
+    "keypoints2d": {
+      "nodes": [
+        {
+          "id": "normalizeKeypoints2d",
+          "op": "geometry.normalize_keypoints",
+          "version": 1,
+          "inputs": {
+            "rows": "keypoints2dRows.rows"
+          },
+          "params": {
+            "dimensions": 2,
+            "coordinateSpace": "pixels"
+          }
+        }
+      ],
+      "result": "normalizeKeypoints2d.keypoints"
+    },
+    "segmentMetadata": {
+      "nodes": [
+        {
+          "id": "selectSegmentMetadata",
+          "op": "records.select",
+          "version": 1,
+          "inputs": {
+            "rows": "statsRows.rows"
+          },
+          "params": {
+            "fields": [
+              "location",
+              "time_of_day",
+              "weather"
+            ]
+          }
+        }
+      ],
+      "result": "selectSegmentMetadata.records"
+    }
+  },
+  "outputs": {
+    "timeline": "timeline.result",
+    "egoPoses": "egoPoses.result",
+    "pointClouds": "pointClouds.result",
+    "cameraImages": "cameraImages.result",
+    "boxes3d": "boxes3d.result",
+    "boxes2d": "boxes2d.result",
+    "boxAssociations": "boxAssociations.result",
+    "trajectories": "trajectories.result",
+    "lidarSegmentation": "lidarSegmentation.result",
+    "cameraSegmentation": "cameraSegmentation.result",
+    "keypoints3d": "keypoints3d.result",
+    "keypoints2d": "keypoints2d.result",
+    "segmentMetadata": "segmentMetadata.result"
+  },
+  "validation": {
+    "sampleFrames": [
+      "first",
+      "middle",
+      "last"
+    ],
+    "assertions": [
+      {
+        "kind": "timestamps-strictly-increasing",
+        "output": "timeline"
+      },
+      {
+        "kind": "finite-ratio",
+        "output": "pointClouds",
+        "minimum": 0.9999
+      },
+      {
+        "kind": "box-dimensions-positive",
+        "output": "boxes3d"
+      },
+      {
+        "kind": "projection-in-frame-ratio",
+        "output": "cameraImages",
+        "minimum": 0.05
+      }
+    ],
+    "humanReview": [
+      "orientation",
+      "handedness",
+      "scale",
+      "box-alignment",
+      "camera-projection",
+      "temporal-synchronization",
+      "segmentation-alignment",
+      "keypoint-alignment"
+    ]
+  },
+  "provenance": {
+    "author": "registry",
+    "createdAt": "2026-08-29T00:00:00Z",
+    "summary": "Bundled Phase 2 declarative manifest migration."
+  }
+}
