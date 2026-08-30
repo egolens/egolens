@@ -44,15 +44,15 @@ function settledHeapDistribution(result) {
   return result.samples.map((run) => heapUsed(run.snapshots.afterSoak)).filter(Number.isFinite)
 }
 
-function linearSlope(values) {
-  if (values.length < 2) return 0
-  const meanX = (values.length - 1) / 2
-  const meanY = values.reduce((sum, entry) => sum + entry, 0) / values.length
+function linearSlope(points) {
+  if (points.length < 2) return 0
+  const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length
+  const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length
   let numerator = 0
   let denominator = 0
-  values.forEach((entry, index) => {
-    numerator += (index - meanX) * (entry - meanY)
-    denominator += (index - meanX) ** 2
+  points.forEach((point) => {
+    numerator += (point.x - meanX) * (point.y - meanY)
+    denominator += (point.x - meanX) ** 2
   })
   return denominator === 0 ? 0 : numerator / denominator
 }
@@ -225,16 +225,21 @@ for (const [runIndex, run] of candidate.samples.entries()) {
   for (const snapshot of forcedCheckpoints.filter(Boolean)) {
     const cache = snapshot.app?.scene?.cache
     const retained = heapUsed(snapshot) + (cache ? cache.pointBytes + cache.cameraBytes : 0)
-    const group = snapshot.label.match(/^cross-(.+)-switch-\d+-/)?.[1] ?? 'scene'
+    const crossMatch = snapshot.label.match(/^cross-(.+)-switch-(\d+)-/)
+    const switchMatch = snapshot.label.match(/-switch-(\d+)-/)
+    const group = crossMatch?.[1] ?? 'scene'
     const values = retainedByDataset.get(group) ?? []
-    values.push(retained)
+    values.push({
+      x: Number(crossMatch?.[2] ?? switchMatch?.[1] ?? values.length + 1),
+      y: retained,
+    })
     retainedByDataset.set(group, values)
   }
-  for (const [dataset, retained] of retainedByDataset) {
-    const slope = linearSlope(retained)
+  for (const [dataset, retainedPoints] of retainedByDataset) {
+    const slope = linearSlope(retainedPoints)
     check(`run ${runIndex + 1} forced-GC retained soak slope (${dataset})`,
-      retained.length > 1 && slope <= MiB,
-      { bytesPerRevisit: slope, maximumBytesPerRevisit: MiB, checkpoints: retained })
+      retainedPoints.length > 1 && slope <= MiB,
+      { bytesPerSwitch: slope, maximumBytesPerSwitch: MiB, checkpoints: retainedPoints })
   }
 }
 

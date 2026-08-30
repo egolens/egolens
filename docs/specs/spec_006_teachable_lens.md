@@ -1353,6 +1353,9 @@ normative for later Teachable Lens work:
   take a paired forced-GC diagnostic and compute retained-growth slopes per
   revisited dataset. Alternating Waymo, nuScenes, and AV2 heaps in one ordinary
   least-squares line measures dataset size and GC timing rather than a leak.
+  Preserve each checkpoint's original switch index when fitting those grouped
+  series; treating every third cross-dataset revisit as an adjacent sample
+  inflates a per-switch slope by the revisit interval.
   Likewise, steady FPS is limited to the initial live scene and excludes later
   dataset loading intervals.
 - benchmark browser processes are themselves part of measurement isolation.

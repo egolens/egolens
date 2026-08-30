@@ -1,6 +1,6 @@
 # Spec 012 — Teachable Lens Phase 6 performance and lifecycle gate
 
-**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; isolated cross-dataset disposal smoke passes; normative evidence promotion and hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-30
+**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; isolated 20-switch cross-dataset lifecycle soak passes; hidden-oracle promotion → spec 013 pending) · **Date**: 2026-08-30
 
 **Relationship to Spec 006**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 6. Phase 6 may
@@ -93,7 +93,10 @@ tree. During a heterogeneous cross-dataset soak, paired forced-GC diagnostics
 also provide the retained-memory series, grouped by revisited dataset. The
 runner must collect the page and every live worker target before sampling;
 page-only collection leaves worker V8 garbage in the series. Never fit
-differently sized dataset heaps into one slope. Forced diagnostics must not
+differently sized dataset heaps into one slope. Preserve the original global
+switch index as the independent variable after grouping: a dataset revisited
+every third switch still has three switches between samples, and the regression
+budget is bytes per global switch rather than bytes per revisit. Forced diagnostics must not
 replace the natural checkpoint or rescue a failure in any natural ownership
 invariant. Steady traced FPS is computed only between the initial scene's ready
 mark and its first replacement/disposal mark, excluding later loading periods.
@@ -276,9 +279,9 @@ description is not sufficient.
 
 - [ ] Baseline artifacts exist for all three datasets and include coordinated
       raw CDP traces/metrics and application-probe snapshots.
-- [ ] Resource ownership and byte budgets are implemented and tested.
-- [ ] `dispose()` and cancellation lifecycle invariants pass in CI.
-- [ ] The required browser soak scenarios pass without sustained growth.
+- [x] Resource ownership and byte budgets are implemented and tested.
+- [x] `dispose()` and cancellation lifecycle invariants pass in CI.
+- [x] The required browser soak scenarios pass without sustained growth.
 - [ ] Structural, numeric, and perceptual parity still pass.
 - [ ] Every regression budget passes for each dataset cutover.
 - [ ] Each live scene has one frame producer and one cache owner.
