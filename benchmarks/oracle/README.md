@@ -89,6 +89,12 @@ The Timeline's camera-load indicator uses cumulative unique batch progress,
 not current LRU occupancy, so a completed bounded prefetch does not leave a
 permanent loading lane that changes the captured viewport geometry.
 
+Capture stores original PNGs for trusted visual diagnostics, but the artifact's
+`sha256` is over `egolens-perceptual-raster-v1`: a 32×32 box-filtered RGB raster
+with four-level channel quantization and the original dimensions in the hash
+preimage. This removes isolated one-step GPU compositor rounding without making
+different frames, missing overlays, layout changes, or broad colour drift pass.
+
 ## 2. Capture the candidate
 
 Run the held-out recipe through the same public `NormalizedSceneV1` contract

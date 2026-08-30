@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import os from 'node:os'
 import path from 'node:path'
+import { perceptualRasterSha256V1 } from './lib/perceptual-raster.mjs'
 
 const CHROME = process.env.EGOLENS_CHROME
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -264,7 +264,7 @@ async function captureConformanceArtifact(client, pageSession) {
     const bytes = Buffer.from(screenshot.data, 'base64')
     const reference = {
       id: capture.id,
-      sha256: `sha256-${createHash('sha256').update(bytes).digest('hex')}`,
+      sha256: perceptualRasterSha256V1(bytes),
       width: Math.round(clip.width),
       height: Math.round(clip.height),
     }

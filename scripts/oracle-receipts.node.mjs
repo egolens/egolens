@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
+import UPNG from 'upng-js'
 import {
   judgeBundle,
   sha256Canonical,
@@ -12,6 +13,7 @@ import {
   verifyBundle,
   verifySignedReceipt,
 } from './lib/oracle-receipts.mjs'
+import { perceptualRasterSha256V1 } from './lib/perceptual-raster.mjs'
 
 const PRODUCER_COMMIT = 'a42f658e27fce118789d3648e2612f5d25b99488'
 const CANDIDATE_COMMIT = '1d34b6f000000000000000000000000000000000'
@@ -22,6 +24,25 @@ test('matches the browser canonical hash contract', () => {
     sha256Canonical({ z: [3, '한글', true], a: { n: null, value: 1.25 } }),
     'sha256-9fd43762a11e86d2c326684ff7e8bb29beaf2b394d60315a84b4fd6dbd37b991',
   )
+})
+
+function png(width, height, pixel) {
+  const rgba = new Uint8Array(width * height * 4)
+  for (let index = 0; index < width * height; index += 1) rgba.set([...pixel, 255], index * 4)
+  return Buffer.from(UPNG.encode([rgba.buffer], width, height, 0))
+}
+
+test('perceptual raster hash ignores isolated compositor rounding but catches visible drift', () => {
+  const baseline = png(64, 64, [80, 81, 87])
+  const roundingNoise = Buffer.from(baseline)
+  const decoded = UPNG.decode(roundingNoise.buffer.slice(roundingNoise.byteOffset, roundingNoise.byteOffset + roundingNoise.byteLength))
+  const rgba = new Uint8Array(UPNG.toRGBA8(decoded)[0])
+  rgba[0] += 1
+  const noisy = Buffer.from(UPNG.encode([rgba.buffer], 64, 64, 0))
+  const drift = png(64, 64, [120, 81, 87])
+
+  assert.equal(perceptualRasterSha256V1(baseline), perceptualRasterSha256V1(noisy))
+  assert.notEqual(perceptualRasterSha256V1(baseline), perceptualRasterSha256V1(drift))
 })
 
 function artifact(value = 1, datasetId = 'waymo', generatorCommit = CANDIDATE_COMMIT) {

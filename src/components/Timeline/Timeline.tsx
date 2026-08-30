@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { colors, fonts, radius, gradients, alpha } from '../../theme'
 import { syncWindowToUrl } from '../../utils/urlState'
+import { isCameraBufferLoadingV1 } from './timelineBuffer'
 
 // ---------------------------------------------------------------------------
 // Buffer segment computation (pure function, exported for testing)
@@ -42,11 +43,6 @@ export function computeBufferSegments(cachedFrames: number[], totalFrames: numbe
     }
   }
   return segments
-}
-
-/** Cache residency can shrink under LRU; loading progress is cumulative. */
-export function isCameraBufferLoadingV1(loadedBatches: number, totalBatches: number): boolean {
-  return totalBatches > 0 && loadedBatches > 0 && loadedBatches < totalBatches
 }
 
 // ---------------------------------------------------------------------------

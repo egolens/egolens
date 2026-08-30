@@ -56,7 +56,9 @@ contain:
 - deterministic numeric observations, including typed-buffer type, length,
   full SHA-256, finite-value statistics, and distributed samples;
 - perceptual reference identities and SHA-256 values for required rendered
-  views;
+  views. The SHA-256 input is the reviewed versioned perceptual raster
+  signature, not raw compositor PNG bytes; original PNGs remain protected
+  diagnostic evidence;
 - a bundle integrity hash over the canonical payload.
 
 Dataset URLs, credentials, raw licensed frames, and unredacted paths must not

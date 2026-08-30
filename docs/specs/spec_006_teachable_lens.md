@@ -1294,7 +1294,7 @@ remaining legacy code:
   disposal rules in
   [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
 
-Phase 6 oracle promotion exposed seven renderer-boundary and observation details that remain
+Phase 6 oracle promotion exposed eight renderer-boundary and observation details that remain
 normative for later Teachable Lens work:
 
 - normalized point buffers may be richer than a compatibility renderer buffer;
@@ -1324,7 +1324,11 @@ normative for later Teachable Lens work:
 - loading progress and cache residency are different signals. Cumulative unique
   batches drive progress UI, while the current LRU membership drives fast-seek
   availability; eviction after completed prefetch must not make the UI appear
-  permanently unfinished.
+  permanently unfinished;
+- perceptual parity hashes a versioned low-frequency raster signature, not raw
+  compositor PNG bytes. The original PNG remains protected diagnostic evidence;
+  the signature removes isolated one-level GPU colour-rounding noise while
+  retaining dimensions, scene content, overlays, and meaningful colour drift.
 
 These projections must be explicit and tested. They must not weaken the public
 normalized contract or leak dataset-specific parsing back into the renderer.
