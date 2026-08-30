@@ -38,6 +38,50 @@ Use at least five runs after one warm-up run. Compare distributions rather than
 a single fastest run. Store the benchmark scenario, commit, browser version,
 hardware, raw samples, and summary so a future regression can be reproduced.
 
+### Measurement source matrix
+
+The benchmark runner must use Chrome DevTools Protocol (CDP) as the external
+source of browser/runtime facts and a read-only EgoLens application probe for
+state whose meaning is not visible to the browser. A passing result may not be
+based on DevTools UI readings or manual observation.
+
+| Measurement | Authoritative source | Required collection method |
+|---|---|---|
+| main-page and worker JavaScript heap | CDP | attach to the page and every worker target through `Target`; record every field returned by `Runtime.getHeapUsage` separately per target |
+| worker lifetime and survivors after disposal | CDP | record `Target` creation/destruction and the attached worker target set at each snapshot |
+| documents, DOM nodes, and JavaScript event listeners | CDP | record `Memory.getDOMCounters` at the same lifecycle checkpoints |
+| HTTP requests, Range requests, encoded bytes, timing, and cache reuse | CDP | derive them from `Network` request/response/loading events, preserving URL, Range header, initiator, cache flags, and request identity |
+| long tasks, main-thread work, frame timing, and User Timing milestones | CDP | capture a bounded `Tracing` recording; use `Performance` metrics as supporting counters rather than as the sole frame-rate source |
+| dataset-ready, first-usable-frame, and input-to-frame latency | application marks + CDP | emit uniquely named `performance.mark()` entries and collect them through the trace or `Runtime.evaluate`; timestamps must use the page's monotonic clock |
+| row-group fetches | CDP + application probe | CDP proves physical requests; the probe maps requests/cache hits to logical row-group keys |
+| row-group decompressions and decoded frame/image bytes | application probe | expose cumulative operation counts plus current and peak retained bytes for each bounded cache |
+| worker-pool queue, in-flight, cancellation, and stale-drop state | application probe | expose current gauges and cumulative counters grouped by scene generation and operation type |
+| live object URLs and `ImageBitmap` objects | application probe | count creation and successful revoke/close operations; expose live identities or stable diagnostic IDs without retaining the resources themselves |
+| WebGL textures, geometries, programs, and scene-owned materials | application probe | snapshot Three.js `renderer.info` and the renderer bridge's explicit ownership registry before load and after disposal |
+| exact GPU memory bytes | unavailable portable metric | do not invent a byte estimate; use stable renderer resource counts, disposal assertions, and browser-process observations only as supporting evidence |
+
+The benchmark build must expose a versioned
+`globalThis.__EGOLENS_PERF__.snapshot()` (or an equivalent injected test hook)
+whose result is JSON-serializable and contains no live scene, buffer, bitmap,
+texture, worker, or DOM references. It must include the active scene generation,
+cache byte gauges and limits, cumulative fetch/decompression counters, worker
+pool gauges, cancellation/stale-response counters, live resource counts, and
+renderer resource counts. The hook is diagnostic-only, read-only from the
+benchmark's perspective, and must not change scheduling, cache policy, or
+resource lifetime when sampled.
+
+Each raw sample must retain the individual CDP heap fields and target identity.
+For the regression comparison, use one documented aggregation formula across
+both revisions; do not label a sum of V8, embedder, and backing-store fields as
+total browser or GPU memory. Shared browser processes and allocator behavior
+make that interpretation invalid.
+
+Capture coordinated CDP and application snapshots before scene load, after the
+warm-up/settle window, at every soak checkpoint, immediately after disposal,
+and after the post-disposal settle window. A forced-GC snapshot may be recorded
+as an additional diagnostic point, but it must not replace the naturally
+settled measurement or be the only evidence that resources were released.
+
 Phase 5 currently binds a shadow `NormalizedSceneV1` while compatibility
 workers still feed the renderer. Its duplicate timestamp/index scans are part
 of the measured starting state, not behavior to preserve. Phase 6 must remove
@@ -150,7 +194,8 @@ description is not sufficient.
 
 ## Phase 6 exit gate
 
-- [ ] Baseline artifacts exist for all three datasets and include raw samples.
+- [ ] Baseline artifacts exist for all three datasets and include coordinated
+      raw CDP traces/metrics and application-probe snapshots.
 - [ ] Resource ownership and byte budgets are implemented and tested.
 - [ ] `dispose()` and cancellation lifecycle invariants pass in CI.
 - [ ] The required browser soak scenarios pass without sustained growth.
