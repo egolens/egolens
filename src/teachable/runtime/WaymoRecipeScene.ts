@@ -32,6 +32,7 @@ export interface WaymoRecipeSceneInputV1 {
 export interface BoundWaymoRecipeSceneV1 {
   readonly scene: NormalizedSceneV1
   readonly diagnostics: readonly AdapterDiagnostic[]
+  readonly metadata: MetadataBundle
 }
 
 const OPTICAL_TO_SENSOR = [
@@ -116,9 +117,6 @@ function attachWaymoSegmentation(
 
 /** Bind Waymo v2 component Parquet files through the generic recipe-backed scene boundary. */
 export async function bindWaymoRecipeSceneV1(input: WaymoRecipeSceneInputV1): Promise<BoundWaymoRecipeSceneV1> {
-  if (input.compiledRecipe.normalizedManifest.id !== 'waymo') {
-    throw new Error(`Expected the Waymo compiled recipe, got ${input.compiledRecipe.normalizedManifest.id}.`)
-  }
   const parquetFiles = new Map(input.parquetFiles)
   const bundle = input.metadataBundle ?? await loadWaymoMetadata(parquetFiles)
   if (bundle.timestamps.length === 0) throw new Error('TIMELINE_BINDING_EMPTY: Waymo segment has no frames.')
@@ -452,5 +450,5 @@ export async function bindWaymoRecipeSceneV1(input: WaymoRecipeSceneInputV1): Pr
       box2dToBox3d.clear()
     },
   }
-  return { scene, diagnostics }
+  return { scene, diagnostics, metadata: bundle }
 }

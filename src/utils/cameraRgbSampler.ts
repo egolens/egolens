@@ -11,6 +11,7 @@
 
 import { type CameraProjector } from './lidarProjection'
 import { getManifest } from '../adapters/registry'
+import { closeTrackedImageBitmap, createTrackedImageBitmap } from '../teachable/runtime/performanceProbe'
 
 // ---------------------------------------------------------------------------
 // Decoded camera image cache
@@ -30,13 +31,16 @@ async function decodeCameraImages(
     entries.map(async ([camName, jpegBuf]) => {
       try {
         const blob = new Blob([jpegBuf], { type: 'image/jpeg' })
-        const bitmap = await createImageBitmap(blob)
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(bitmap, 0, 0)
-        bitmap.close()
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        return { camName, imageData }
+        const bitmap = await createTrackedImageBitmap(blob)
+        try {
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+          const ctx = canvas.getContext('2d')!
+          ctx.drawImage(bitmap, 0, 0)
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          return { camName, imageData }
+        } finally {
+          closeTrackedImageBitmap(bitmap)
+        }
       } catch {
         return null
       }

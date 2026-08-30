@@ -23,17 +23,6 @@ import type {
   CameraImageResult,
   CameraFrameResult,
   CameraBatchRequest,
-  CameraBatchResult,
-  CameraWorkerResponse,
-} from './types'
-
-// Re-export shared types so existing consumers can migrate gradually
-export type {
-  CameraImageResult,
-  CameraFrameResult,
-  CameraBatchResult,
-  CameraWorkerReady,
-  CameraWorkerError,
   CameraWorkerResponse,
 } from './types'
 
@@ -48,12 +37,6 @@ export interface WaymoCameraWorkerInit extends WorkerInitBase {
 }
 
 export type WaymoCameraWorkerRequest = WaymoCameraWorkerInit | CameraBatchRequest
-
-// Legacy aliases for gradual migration
-export type CameraWorkerInit = WaymoCameraWorkerInit
-export type CameraWorkerRequest = WaymoCameraWorkerRequest
-export type CameraWorkerRowGroupResult = CameraBatchResult
-export type CameraWorkerLoadRowGroup = CameraBatchRequest
 
 // ---------------------------------------------------------------------------
 // Worker state

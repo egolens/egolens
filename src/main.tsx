@@ -8,12 +8,17 @@ import { installLoadTelemetry } from './utils/loadTelemetry'
 import { applyTheme, initialAccent, initialTheme } from './theme'
 import { trackThemeConfig } from './utils/analytics'
 import { parseAccent, parseThemePreference } from './utils/themeParams'
+import { installPerformanceProbe } from './teachable/runtime/performanceProbe'
 
 // Global reset
 document.documentElement.style.margin = '0'
 document.documentElement.style.padding = '0'
 document.body.style.margin = '0'
 document.body.style.padding = '0'
+
+// Read-only diagnostics for CDP-driven Phase 6 benchmarks. Production builds
+// expose it only when the benchmark URL opts in with `?perf=1`.
+installPerformanceProbe()
 
 // Theme before render. Chrome tokens are `var(--el-*)` with a dark fallback, so
 // a late apply is not a broken page — it is a visible flash from dark to light.

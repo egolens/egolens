@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import type { ParquetRow } from '../../utils/merge'
+import { createTrackedObjectUrl, revokeTrackedObjectUrl } from '../../teachable/runtime/performanceProbe'
 import { colors, fonts, radius, shadows, alpha } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import ErrorBoundary from '../ErrorBoundary'
@@ -215,7 +216,7 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
 
     // Create blob URL for the new frame
     const blob = new Blob([imageBuffer], { type: 'image/jpeg' })
-    const newUrl = URL.createObjectURL(blob)
+    const newUrl = createTrackedObjectUrl(blob)
     pendingUrlRef.current = newUrl
 
     // Preload: only swap when the browser has the image decoded
@@ -223,17 +224,18 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
     img.onload = () => {
       // Only apply if this is still the most recent request
       if (pendingUrlRef.current !== newUrl) {
-        URL.revokeObjectURL(newUrl)
+        revokeTrackedObjectUrl(newUrl)
         return
       }
       // Revoke the previously displayed URL
-      if (activeUrlRef.current) URL.revokeObjectURL(activeUrlRef.current)
+      if (activeUrlRef.current) revokeTrackedObjectUrl(activeUrlRef.current)
       activeUrlRef.current = newUrl
+      pendingUrlRef.current = null
       setDisplayUrl(newUrl)
     }
     img.onerror = () => {
       // Corrupted frame — discard, keep previous image
-      URL.revokeObjectURL(newUrl)
+      revokeTrackedObjectUrl(newUrl)
       if (pendingUrlRef.current === newUrl) pendingUrlRef.current = null
     }
     img.src = newUrl
@@ -243,6 +245,17 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
       if (pendingUrlRef.current === newUrl) pendingUrlRef.current = null
     }
   }, [imageBuffer])
+
+  // The active URL intentionally survives frame changes for flicker-free swaps,
+  // so component teardown is the single place that releases both generations.
+  useEffect(() => () => {
+    const urls = new Set([activeUrlRef.current, pendingUrlRef.current])
+    activeUrlRef.current = null
+    pendingUrlRef.current = null
+    for (const url of urls) {
+      if (url) revokeTrackedObjectUrl(url)
+    }
+  }, [])
 
   // Derive flex and color from manifest
   const manifest = getManifest()

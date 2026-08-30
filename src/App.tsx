@@ -84,24 +84,71 @@ function useUrlAutoLoad() {
     if (!dataset || !dataUrl) return
     if (!SUPPORTED_URL_DATASETS.includes(dataset as UrlDataset)) return
 
-    urlAutoLoadStarted = true
-
-    try {
-      const baseUrl = normalizeBaseUrl(dataUrl)
-      // A Share View link carries view state; a bare ?dataset&data URL is an
-      // embed or a bookmark. Neither is a preset unless the URL is actually one.
-      const isShared = new URLSearchParams(window.location.search).has('frame')
-      trackDatasetLoad(
-        dataset,
-        isPresetUrl(dataUrl) ? 'preset' : isShared ? 'url_shared' : 'url_direct',
-        baseUrl,
-      )
-      loadFromUrl(dataset, baseUrl, scene)
-    } catch {
-      // Invalid URL — silently ignore, user will see the landing page
-      urlAutoLoadStarted = false
+    const start = () => {
+      if (urlAutoLoadStarted) return
+      urlAutoLoadStarted = true
+      try {
+        const baseUrl = normalizeBaseUrl(dataUrl)
+        // A Share View link carries view state; a bare ?dataset&data URL is an
+        // embed or a bookmark. Neither is a preset unless the URL is actually one.
+        const isShared = new URLSearchParams(window.location.search).has('frame')
+        trackDatasetLoad(
+          dataset,
+          isPresetUrl(dataUrl) ? 'preset' : isShared ? 'url_shared' : 'url_direct',
+          baseUrl,
+        )
+        loadFromUrl(dataset, baseUrl, scene)
+      } catch {
+        // Invalid URL — silently ignore, user will see the landing page
+        urlAutoLoadStarted = false
+      }
     }
+
+    // CDP captures the pre-scene checkpoint, then starts the ordinary command
+    // path. Sampling the read-only probe itself never triggers this event.
+    if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') {
+      window.addEventListener('egolens:benchmark-start', start, { once: true })
+      return () => window.removeEventListener('egolens:benchmark-start', start)
+    }
+    start()
   }, [status, loadFromUrl])
+}
+
+/**
+ * Benchmark-only command surface for cross-dataset lifecycle soaks. The
+ * performance probe remains read-only; this event enters the exact same store
+ * command path as the URL form after explicitly disposing the current scene.
+ */
+function useBenchmarkLoadCommand() {
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('perf') !== '1') return
+    const onLoad = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        dataset?: string
+        data?: string
+        scene?: string
+      }>).detail
+      if (!detail?.dataset || !detail.data) return
+      if (!SUPPORTED_URL_DATASETS.includes(detail.dataset as UrlDataset)) return
+      try {
+        const baseUrl = normalizeBaseUrl(detail.data)
+        const store = useSceneStore.getState()
+        store.actions.reset()
+        useSceneStore.setState({
+          availableSegments: [],
+          currentSegment: null,
+          segmentMetas: new Map(),
+        })
+        clearUrlSource()
+        trackDatasetLoad(detail.dataset, 'url_direct', baseUrl)
+        void store.actions.loadFromUrl(detail.dataset, baseUrl, detail.scene)
+      } catch {
+        // The benchmark runner observes the load timeout/error state.
+      }
+    }
+    window.addEventListener('egolens:benchmark-load', onLoad)
+    return () => window.removeEventListener('egolens:benchmark-load', onLoad)
+  }, [])
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +285,7 @@ function App() {
   const [embedParams] = useState(() => getEmbedParams())
   useSegmentDiscovery()
   useUrlAutoLoad()
+  useBenchmarkLoadCommand()
   useUrlViewRestore()
   useEmbedInitialState(embedParams)
 

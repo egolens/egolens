@@ -30,6 +30,11 @@ import { colors, fonts, radius, alpha, sceneColors } from '../../theme'
 import { getManifest } from '../../adapters/registry'
 import { isShareView } from '../../utils/urlState'
 import { trackKeyboardShortcut } from '../../utils/analytics'
+import {
+  currentPerformanceSceneGeneration,
+  markRenderedFrame,
+  updateRendererPerformanceInfo,
+} from '../../teachable/runtime/performanceProbe'
 
 // ---------------------------------------------------------------------------
 // Chase-cam defaults + reusable temp objects
@@ -738,6 +743,53 @@ export function setPendingCameraPose(
  */
 export type ViewerChrome = 'full' | 'minimal' | 'none'
 
+/** Samples renderer-owned resources without retaining any Three.js objects. */
+function RendererPerformanceReporter() {
+  const { gl, scene } = useThree()
+  const frame = useRef(0)
+  const lastPresented = useRef('')
+
+  useFrame(() => {
+    if (!window.__EGOLENS_PERF__) return
+    const sceneGeneration = currentPerformanceSceneGeneration()
+    const state = useSceneStore.getState()
+    if (sceneGeneration !== null && state.currentFrame) {
+      const key = `${sceneGeneration}:${state.currentFrameIndex}`
+      if (key !== lastPresented.current) {
+        lastPresented.current = key
+        markRenderedFrame(sceneGeneration, state.currentFrameIndex)
+      }
+    }
+    if (++frame.current % 30 !== 0) return
+    const materialIds = new Set<string>()
+    scene.traverse((object) => {
+      const material = (object as THREE.Object3D & {
+        material?: THREE.Material | THREE.Material[]
+      }).material
+      if (Array.isArray(material)) {
+        for (const entry of material) materialIds.add(entry.uuid)
+      } else if (material) {
+        materialIds.add(material.uuid)
+      }
+    })
+    updateRendererPerformanceInfo({
+      textures: gl.info.memory.textures,
+      geometries: gl.info.memory.geometries,
+      programs: gl.info.programs?.length ?? 0,
+      materials: materialIds.size,
+    })
+  })
+
+  useEffect(() => () => updateRendererPerformanceInfo({
+    textures: 0,
+    geometries: 0,
+    programs: 0,
+    materials: 0,
+  }), [])
+
+  return null
+}
+
 export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome } = {}) {
   // Panels and floating buttons: gone from `minimal` down
   const hideControls = chrome !== 'full'
@@ -915,6 +967,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
           gl.setClearColor(resolveViewportBg(bgPreset, theme))
         }}
       >
+        <RendererPerformanceReporter />
         <BgColorSync />
         <PinCameraSync orbitRef={orbitRef} initialized={cameraInitializedRef} />
         <ambientLight intensity={0.3} />

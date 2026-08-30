@@ -35,6 +35,7 @@ export interface AV2RecipeSceneInputV1 {
 export interface BoundAV2RecipeSceneV1 {
   readonly scene: NormalizedSceneV1
   readonly diagnostics: readonly AdapterDiagnostic[]
+  readonly metadata: MetadataBundle
 }
 
 interface FrameSensorFile {
@@ -70,9 +71,6 @@ function cameraTimestampMicros(filename: string, fallback: bigint): bigint {
 
 /** Bind AV2 tables and bytes through the same normalized scene boundary as nuScenes. */
 export function bindAV2RecipeSceneV1(input: AV2RecipeSceneInputV1): BoundAV2RecipeSceneV1 {
-  if (input.compiledRecipe.normalizedManifest.id !== 'argoverse2') {
-    throw new Error(`Expected the Argoverse 2 compiled recipe, got ${input.compiledRecipe.normalizedManifest.id}.`)
-  }
   const bundle = input.metadataBundle ?? loadAV2LogMetadata(input.database)
   if (bundle.timestamps.length === 0) throw new Error('TIMELINE_BINDING_EMPTY: Argoverse 2 log has no frames.')
   const recipe = input.compiledRecipe.recipe
@@ -275,5 +273,5 @@ export function bindAV2RecipeSceneV1(input: AV2RecipeSceneInputV1): BoundAV2Reci
       box2dToBox3d.clear()
     },
   }
-  return { scene, diagnostics }
+  return { scene, diagnostics, metadata: bundle }
 }

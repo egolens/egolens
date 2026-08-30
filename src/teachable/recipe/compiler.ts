@@ -18,7 +18,7 @@ export interface CompiledPipelineV1 {
 export interface CompiledRecipeV1 {
   readonly recipe: EgoLensAdapterRecipeV1
   readonly normalizedManifest: NormalizedManifestV1
-  readonly compatibilityManifest: DatasetManifest
+  readonly rendererManifest: DatasetManifest
   readonly pipelines: ReadonlyMap<string, CompiledPipelineV1>
   readonly operators: ReadonlyMap<string, RecipeOperatorDescriptor>
   readonly capabilities: ReadonlySet<NormalizedCapabilityV1>
@@ -262,7 +262,7 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
   return {
     recipe,
     normalizedManifest,
-    compatibilityManifest: normalizedManifestToDatasetManifest(normalizedManifest, recipeManifestProjection(recipe)),
+    rendererManifest: normalizedManifestToDatasetManifest(normalizedManifest, recipeManifestProjection(recipe)),
     pipelines,
     operators: resolvedOperators,
     capabilities,

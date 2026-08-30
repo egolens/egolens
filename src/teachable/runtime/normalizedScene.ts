@@ -200,7 +200,7 @@ export interface FrameCapabilityRequest {
   readonly signal?: AbortSignal
 }
 
-/** Dataset-neutral scene boundary consumed by recipe and migrated legacy paths. */
+/** Dataset-neutral scene boundary consumed by every recipe runtime path. */
 export interface NormalizedSceneV1 {
   readonly manifest: NormalizedManifestV1
   readonly index: NormalizedSceneIndexV1

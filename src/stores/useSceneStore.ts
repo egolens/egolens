@@ -17,16 +17,11 @@ import { create } from 'zustand'
 import type { ParquetRow } from '../utils/merge'
 import {
   openParquetFile,
-  buildHeavyFileFrameIndex,
-  readFrameData,
   type WaymoParquetFile,
-  type FrameRowIndex,
 } from '../utils/parquet'
 import {
-  convertAllSensors,
   type LidarCalibration,
   type PointCloud,
-  type RangeImage,
 } from '../utils/rangeImage'
 import type { LidarBatchResult } from '../workers/types'
 import type { CameraBatchResult } from '../workers/types'
@@ -36,10 +31,8 @@ import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
 import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
 import { getAdapterById, getManifest, setAdapter } from '../adapters/registry'
-import { loadWaymoMetadata } from '../adapters/waymo/metadata'
 import {
   buildNuScenesDatabase,
-  loadNuScenesSceneMetadata,
   type NuScenesDatabase,
 } from '../adapters/nuscenes/metadata'
 import {
@@ -54,7 +47,6 @@ import type {
 } from '../workers/nuScenesCameraWorker'
 import {
   buildAV2LogDatabase,
-  loadAV2LogMetadata,
   type AV2LogDatabase,
 } from '../adapters/argoverse2/metadata'
 import {
@@ -80,8 +72,8 @@ import type {
   AV2CameraImageDescriptor,
 } from '../workers/av2CameraWorker'
 
-import { multiplyRowMajor4x4 } from '../utils/matrix'
 import { clearCameraRgbCache } from '../utils/cameraRgbSampler'
+import { clearThumbnailCache } from '../hooks/useThumbnailCache'
 import { setUrlSource, clearUrlSource, getUrlSource, syncSegmentToUrl, syncWindowToUrl, getInitialSearch, parseViewParams, parseCamerasParam } from '../utils/urlState'
 import { resolveWindowToFrames } from '../utils/playbackWindow'
 import { getEmbedParams } from '../utils/embedParams'
@@ -90,13 +82,17 @@ import { setKeypointsByFrameRef } from '../components/LidarViewer/KeypointSkelet
 import { setCameraKeypointsByFrameRef } from '../components/CameraPanel/KeypointOverlay'
 import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverlay'
 import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
-import { bindNuScenesRecipeSceneV1 } from '../teachable/runtime/NuScenesRecipeScene'
-import type { NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
 import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe } from '../adapters/recipes/bundled'
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
-import { bindAV2RecipeSceneV1 } from '../teachable/runtime/AV2RecipeScene'
-import { bindWaymoRecipeSceneV1 } from '../teachable/runtime/WaymoRecipeScene'
+import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
+import {
+  manageNormalizedSceneV1,
+  type ManagedNormalizedSceneV1,
+} from '../teachable/runtime/ManagedNormalizedScene'
+import { bridgeNormalizedFrame } from '../teachable/runtime/compatibilityBridge'
+import { markPerformanceEvent, noteFrameRequest } from '../teachable/runtime/performanceProbe'
+import type { NormalizedCapabilityV1 } from '../teachable/runtime/normalizedScene'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -351,24 +347,9 @@ const internal = {
   lidarBoxByFrame: new Map<unknown, ParquetRow[]>(),
   cameraBoxByFrame: new Map<unknown, ParquetRow[]>(),
   vehiclePoseByFrame: new Map<unknown, ParquetRow[]>(),
-  /** No eviction needed — row-group loading caches all ~199 frames, which is the goal. */
-  frameCache: new Map<number, FrameData>(),
-  /** Separate camera image cache (frameIndex → cameraName → JPEG ArrayBuffer).
-   *  Stored independently so camera data is never lost due to lidar timing. */
-  cameraImageCache: new Map<number, Map<number, ArrayBuffer>>(),
   playIntervalId: null as ReturnType<typeof setInterval> | null,
   /** Camera refresh interval — polls for late-arriving camera data during playback */
   cameraRefreshId: null as ReturnType<typeof setInterval> | null,
-  /** Worker pool for parallel batch loading (lidar) */
-  workerPool: null as WorkerPool<Record<string, unknown>, LidarBatchResult> | null,
-  numBatches: 0,
-  /** Track which lidar batches have been loaded or are in-flight */
-  loadedRowGroups: new Set<number>(),
-  /** Camera worker pool */
-  cameraPool: null as WorkerPool<Record<string, unknown>, CameraBatchResult> | null,
-  cameraNumBatches: 0,
-  /** Track which camera batches have been loaded or are in-flight */
-  cameraLoadedRowGroups: new Set<number>(),
   cameraPrefetchStarted: false,
   /** Prevent duplicate prefetchAllRowGroups calls (React StrictMode) */
   prefetchStarted: false,
@@ -379,14 +360,10 @@ const internal = {
    * here and run later if something asks for images.
    */
   cameraPoolInit: null as (() => Promise<void>) | null,
-  /** Bumped on every scene reset — a late lazy start must not install a pool over a newer scene */
-  sceneToken: 0,
   /** Colormap waiting for the first camera images to arrive (see setColormapMode) */
   pendingCameraColormap: false,
   /** Last per-frame conversion time (for performance tracking) */
   lastConvertMs: 0,
-  /** Frame index for per-frame fallback (test env / no Worker) */
-  lidarFrameIndex: null as FrameRowIndex | null,
   /** Object trajectory index: objectId → sorted array of {frameIndex, x, y, z, type} */
   objectTrajectories: new Map<string, { frameIndex: number; x: number; y: number; z: number; type: number }[]>(),
   /** Association lookup: camera_object_id → laser_object_id */
@@ -399,8 +376,6 @@ const internal = {
   worldOriginInverse: null as number[] | null,
   /** File-based segments from drag & drop (segmentId → component → File) */
   filesBySegment: null as Map<string, Map<string, File>> | null,
-  /** Blob URLs created for workers — revoke on reset to free memory */
-  blobUrls: [] as string[],
   // -- Segmentation & keypoint internal caches --------------------------------
   /** 3D keypoint rows grouped by timestamp */
   keypointsByFrame: new Map<bigint, ParquetRow[]>(),
@@ -419,8 +394,8 @@ const internal = {
   nuScenesDiscoveredScenes: null as NuScenesDiscoveredScene[] | null,
   /** Single metadata root selected by the bounded recipe binder. */
   nuScenesVersionRoot: null as string | null,
-  /** Bound Phase 3 scene; the compatibility renderer remains the frame consumer during migration. */
-  normalizedScene: null as NormalizedSceneV1 | null,
+  /** Phase 6 authoritative scene: sole owner of workers and transferred frame/image buffers. */
+  normalizedScene: null as ManagedNormalizedSceneV1 | null,
   /**
    * Seek requested before its frame was cached (cold load). loadFrame drops
    * cache misses so it never fights the prefetch queue, which would silently
@@ -448,21 +423,18 @@ function resetInternal() {
   internal.pendingSeekFrame = null
   internal.cameraPoolInit = null
   internal.pendingCameraColormap = false
-  internal.sceneToken++
   internal.timestampToFrame.clear()
   internal.lidarBoxByFrame.clear()
   internal.cameraBoxByFrame.clear()
   internal.vehiclePoseByFrame.clear()
-  internal.frameCache.clear()
-  internal.cameraImageCache.clear()
   // Clear decoded camera RGB cache
   clearCameraRgbCache()
+  clearThumbnailCache()
   internal.objectTrajectories.clear()
   internal.assocCamToLaser.clear()
   internal.assocLaserToCams.clear()
   internal.poseByFrameIndex.clear()
   internal.worldOriginInverse = null
-  internal.loadedRowGroups.clear()
   internal.prefetchStarted = false
   if (internal.playIntervalId !== null) {
     clearInterval(internal.playIntervalId)
@@ -472,23 +444,7 @@ function resetInternal() {
     clearInterval(internal.cameraRefreshId)
     internal.cameraRefreshId = null
   }
-  if (internal.workerPool) {
-    internal.workerPool.terminate()
-    internal.workerPool = null
-  }
-  internal.numBatches = 0
-  if (internal.cameraPool) {
-    internal.cameraPool.terminate()
-    internal.cameraPool = null
-  }
-  internal.cameraNumBatches = 0
-  internal.cameraLoadedRowGroups.clear()
   internal.cameraPrefetchStarted = false
-  // Revoke blob URLs to free memory
-  for (const url of internal.blobUrls) {
-    URL.revokeObjectURL(url)
-  }
-  internal.blobUrls = []
   // Segmentation & keypoint caches
   internal.keypointsByFrame.clear()
   setKeypointsByFrameRef(internal.keypointsByFrame)
@@ -499,129 +455,18 @@ function resetInternal() {
 }
 
 // ---------------------------------------------------------------------------
-// Worker pool communication
+// Managed normalized-scene cache synchronization
 // ---------------------------------------------------------------------------
-
-function requestRowGroup(
-  rowGroupIndex: number,
-  opts?: { priority?: boolean },
-): Promise<LidarBatchResult> {
-  if (!internal.workerPool) {
-    return Promise.reject(new Error('Worker pool not initialized'))
-  }
-  return internal.workerPool.requestRowGroup(rowGroupIndex, opts)
-}
-
-/** Cache all frames from a row group result into internal.frameCache */
-function cacheRowGroupFrames(
-  result: LidarBatchResult,
-  set: (partial: Partial<SceneState>) => void,
-) {
-  for (const frame of result.frames) {
-    const timestamp = BigInt(frame.timestamp)
-    const frameIndex = internal.timestampToFrame.get(timestamp)
-    if (frameIndex === undefined) continue
-    if (internal.frameCache.has(frameIndex)) continue
-
-    const boxes = internal.lidarBoxByFrame.get(timestamp) ?? []
-    const cameraBoxes = internal.cameraBoxByFrame.get(timestamp) ?? []
-    const poseRows = internal.vehiclePoseByFrame.get(timestamp)
-    const poseCol = getManifest().columnMap.vehiclePose
-    // For Waymo: read pose from Parquet column. For nuScenes (empty poseCol): null.
-    const rawPose = poseCol ? (poseRows?.[0]?.[poseCol] as number[]) ?? null : null
-    // Waymo: multiply by worldOriginInverse. nuScenes: fall back to pre-computed poseByFrameIndex.
-    const vehiclePose = rawPose && internal.worldOriginInverse
-      ? multiplyRowMajor4x4(internal.worldOriginInverse, rawPose)
-      : rawPose ?? (internal.poseByFrameIndex.get(frameIndex) ?? null)
-
-    const sensorClouds = new Map<number, PointCloud>()
-    if (frame.sensorClouds) {
-      for (const sc of frame.sensorClouds) {
-        sensorClouds.set(sc.laserName, {
-          positions: sc.positions,
-          pointCount: sc.pointCount,
-          segLabels: sc.segLabels,
-          panopticLabels: sc.panopticLabels,
-          cameraProjection: sc.cameraProjection,
-        })
-      }
-    }
-
-    const frameData: FrameData = {
-      timestamp,
-      sensorClouds,
-      boxes,
-      cameraBoxes,
-      cameraImages: new Map(),
-      vehiclePose,
-    }
-
-    internal.frameCache.set(frameIndex, frameData)
-
-    // Track last conversion time from worker result
-    if (frame.convertMs > 0) {
-      internal.lastConvertMs = frame.convertMs
-    }
-  }
-
-  // Measure how much memory the cached point clouds occupy
-  let rgBytes = 0
-  for (const frame of result.frames) {
-    if (frame.sensorClouds) {
-      for (const sc of frame.sensorClouds) {
-        rgBytes += sc.positions.buffer.byteLength
-      }
-    }
-  }
-  memLog.snap(`cache:lidar-rg${result.batchIndex}`, {
-    dataSize: rgBytes,
-    note: `${result.frames.length} frames, ${internal.frameCache.size} total cached`,
-  })
-
-  syncCachedFrames(set)
-}
-
-/** Cache all camera images from a camera row group result (separate cache) */
-function cacheCameraRowGroupFrames(
-  result: CameraBatchResult,
-) {
-  for (const frame of result.frames) {
-    const timestamp = BigInt(frame.timestamp)
-    const frameIndex = internal.timestampToFrame.get(timestamp)
-    if (frameIndex === undefined) continue
-
-    let camMap = internal.cameraImageCache.get(frameIndex)
-    if (!camMap) {
-      camMap = new Map()
-      internal.cameraImageCache.set(frameIndex, camMap)
-    }
-    for (const img of frame.images) {
-      camMap.set(img.cameraName, img.jpeg)
-    }
-  }
-
-  // Measure cached JPEG sizes
-  let jpegBytes = 0
-  for (const frame of result.frames) {
-    for (const img of frame.images) {
-      jpegBytes += img.jpeg.byteLength
-    }
-  }
-  memLog.snap(`cache:camera-rg${result.batchIndex}`, {
-    dataSize: jpegBytes,
-    note: `${result.frames.length} frames, ${internal.cameraImageCache.size} total cached`,
-  })
-}
 
 /** Update the cachedFrames state for the buffer bar UI */
 function syncCachedFrames(set: (partial: Partial<SceneState>) => void) {
-  const indices = [...internal.frameCache.keys()].sort((a, b) => a - b)
+  const indices = [...(internal.normalizedScene?.cachedPointFrames() ?? [])]
   set({ cachedFrames: indices })
 
   // A deep-linked seek that missed the cache lands here, the moment its
   // frame arrives — otherwise a cold load strands the viewer at frame 0.
   const pending = internal.pendingSeekFrame
-  if (pending !== null && internal.frameCache.has(pending)) {
+  if (pending !== null && internal.normalizedScene?.hasPointFrame(pending)) {
     internal.pendingSeekFrame = null
     void useSceneStore.getState().actions.loadFrame(pending)
   }
@@ -629,7 +474,7 @@ function syncCachedFrames(set: (partial: Partial<SceneState>) => void) {
 
 /** Update the cameraCachedFrames state for the camera buffer lane UI */
 function syncCameraCachedFrames(set: (partial: Partial<SceneState>) => void) {
-  const indices = [...internal.cameraImageCache.keys()].sort((a, b) => a - b)
+  const indices = [...(internal.normalizedScene?.cachedCameraFrames() ?? [])]
   set({ cameraCachedFrames: indices })
 
   // A camera colormap held back while images loaded takes effect now
@@ -637,6 +482,43 @@ function syncCameraCachedFrames(set: (partial: Partial<SceneState>) => void) {
     internal.pendingCameraColormap = false
     set({ colormapMode: 'camera' })
   }
+}
+
+async function loadRendererFrame(
+  scene: ManagedNormalizedSceneV1,
+  frameIndex: number,
+): Promise<FrameData> {
+  const capabilities = rendererFrameCapabilities(scene, frameIndex)
+  const frame = await scene.loadFrame(frameIndex, { capabilities })
+  return bridgeNormalizedFrame(frame, scene.manifest)
+}
+
+function rendererFrameCapabilities(
+  scene: ManagedNormalizedSceneV1,
+  frameIndex: number,
+): Set<NormalizedCapabilityV1> {
+  const capabilities = new Set(scene.manifest.capabilities)
+  // Camera loading is intentionally lazy. A missing camera batch must not
+  // block the point-cloud first paint or trigger the delegate's second decoder.
+  if (!scene.hasCameraFrame(frameIndex)) capabilities.delete('cameraImages')
+  return capabilities
+}
+
+function getCachedRendererFrame(
+  scene: ManagedNormalizedSceneV1,
+  frameIndex: number,
+): FrameData | null {
+  const frame = scene.getCachedFrame(frameIndex, {
+    capabilities: rendererFrameCapabilities(scene, frameIndex),
+  })
+  return frame ? bridgeNormalizedFrame(frame, scene.manifest) : null
+}
+
+function batchIndexForFrame(frame: number, batchCount: number): number {
+  if (batchCount <= 0) return 0
+  const perBatch = Math.ceil(internal.timestamps.length / batchCount)
+  if (perBatch <= 0) return 0
+  return Math.min(Math.floor(frame / perBatch), batchCount - 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +723,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   actions: {
     loadDataset: async (sources) => {
       resetInternal()
+      markPerformanceEvent('scene-load-start', { dataset: 'waymo' })
       set({
         status: 'loading',
         availableComponents: [...sources.keys()],
@@ -873,7 +756,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         // 2. Load startup data (small files: poses, calibrations, boxes)
         set({ loadStep: 'parsing' as LoadStep })
-        await loadStartupData(set, get)
+        await bindParquetComponentScene(set, get)
         completed++
         set({ loadProgress: completed / totalSteps })
         memLog.snap('phase2:startup-data-loaded', { note: 'poses, calibrations, boxes, associations' })
@@ -891,14 +774,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         })
 
         // 4. Load first frames, display, and prefetch remaining
-        await runPostWorkerPipeline(set, get, 'waymo', async () => {
-          // Main-thread fallback for test env / no Worker
-          const lidarPf = internal.parquetFiles.get('lidar')
-          if (lidarPf) {
-            internal.lidarFrameIndex = await buildHeavyFileFrameIndex(lidarPf)
-            await loadFrameMainThread(0, set, get)
-          }
-        })
+        await runPostWorkerPipeline(set, get, 'waymo')
       } catch (e) {
         failLoad(set, e, 'loadDataset')
       }
@@ -906,31 +782,45 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
     loadFrame: async (frameIndex) => {
       if (frameIndex < 0 || frameIndex >= internal.timestamps.length) return
+      const scene = internal.normalizedScene
+      if (!scene) return
+      const requestMark = `frame-request-${scene.sceneGeneration}-${frameIndex}-${performance.now().toFixed(3)}`
+      markPerformanceEvent(requestMark, { frameIndex })
+      noteFrameRequest(scene.sceneGeneration, frameIndex)
 
-      // Cache hit — instant (the common case after prefetch completes)
-      const cached = internal.frameCache.get(frameIndex)
-      if (cached) {
-        // An explicit landing supersedes any queued deep-link seek
+      if (!scene.hasPointFrame(frameIndex)) {
+        internal.pendingSeekFrame = frameIndex
+        const batchIndex = batchIndexForFrame(frameIndex, scene.pointBatchCount)
+        void loadAndCacheRowGroup(batchIndex, set, { priority: true })
+        return
+      }
+
+      const hotFrame = getCachedRendererFrame(scene, frameIndex)
+      if (hotFrame) {
         internal.pendingSeekFrame = null
-        // Merge camera images from separate cache (always create new Map for re-render)
-        const camData = internal.cameraImageCache.get(frameIndex)
-        const cameraImages = camData ? new Map(camData) : new Map<number, ArrayBuffer>()
-
         set({
           currentFrameIndex: frameIndex,
-          currentFrame: {
-            ...cached,
-            cameraImages,
-          },
+          currentFrame: hotFrame,
           lastFrameLoadMs: 0,
-          lastConvertMs: cached.sensorClouds.size > 0 ? get().lastConvertMs : 0,
+          lastConvertMs: hotFrame.sensorClouds.size > 0 ? get().lastConvertMs : 0,
         })
         return
       }
 
-      // Cache miss — frame not yet prefetched, so don't fight the prefetch
-      // queue; remember it and let syncCachedFrames land it on arrival.
-      internal.pendingSeekFrame = frameIndex
+      try {
+        const frame = await loadRendererFrame(scene, frameIndex)
+        if (scene !== internal.normalizedScene || scene.disposed) return
+        internal.pendingSeekFrame = null
+        set({
+          currentFrameIndex: frameIndex,
+          currentFrame: frame,
+          lastFrameLoadMs: 0,
+          lastConvertMs: frame.sensorClouds.size > 0 ? get().lastConvertMs : 0,
+        })
+      } catch (error) {
+        if (scene !== internal.normalizedScene || scene.disposed) return
+        throw error
+      }
     },
 
     nextFrame: () => get().actions.loadFrame(get().currentFrameIndex + 1),
@@ -976,21 +866,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // Secondary interval: refresh current frame's camera images when they arrive late.
       // Camera workers may finish after LiDAR, so the displayed frame can have stale
       // (empty) camera data. This polls at ~4Hz and patches currentFrame if new images
-      // are available in cameraImageCache.
+      // are available in the managed normalized image cache.
       internal.cameraRefreshId = setInterval(() => {
         const fi = get().currentFrameIndex
         const currentFrame = get().currentFrame
         if (!currentFrame) return
-        const camData = internal.cameraImageCache.get(fi)
-        if (!camData || camData.size === 0) return
+        const scene = internal.normalizedScene
+        if (!scene?.hasCameraFrame(fi)) return
         // Skip if camera count hasn't changed (already up-to-date)
-        if (currentFrame.cameraImages.size === camData.size) return
-        set({
-          currentFrame: {
-            ...currentFrame,
-            cameraImages: new Map(camData),
-          },
-        })
+        void loadRendererFrame(scene, fi).then((frame) => {
+          if (scene !== internal.normalizedScene) return
+          if (currentFrame.cameraImages.size === frame.cameraImages.size) return
+          set({ currentFrame: frame })
+        }).catch(() => {})
       }, 250)
     },
 
@@ -1089,7 +977,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // (cameras=false), start them now and stay on the current colormap
       // until the first frames land — switching early would sample nothing
       // and freeze the cloud on stale or empty colour.
-      if (mode === 'camera' && internal.cameraImageCache.size === 0 && internal.cameraPoolInit) {
+      if (mode === 'camera' && (internal.normalizedScene?.cachedCameraFrames().length ?? 0) === 0 && internal.cameraPoolInit) {
         internal.pendingCameraColormap = true
         console.log('[camera] camera colormap requested — loading images first')
         void ensureCameraPool(set)
@@ -1188,7 +1076,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
 
         if (internal.nuScenesDb) {
-          await loadNuScenesScene(segmentId, set, get)
+          await loadTokenTableScene(segmentId, set, get)
           syncSegmentToUrl(segmentId, get().playbackWindow)
           return
         }
@@ -1217,7 +1105,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
 
         if (internal.av2Db) {
-          await loadAV2Scene(segmentId, set, get)
+          await loadFeatherLogScene(segmentId, set, get)
           syncSegmentToUrl(segmentId, get().playbackWindow)
           return
         }
@@ -1592,96 +1480,41 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function getLidarColumns(): string[] {
-  const cm = getManifest().columnMap
-  return [cm.frameTimestamp, cm.laserName, cm.rangeImageShape, cm.rangeImageValues]
-}
-
 /** Load entire row group via Worker and cache all its frames. */
 async function loadAndCacheRowGroup(
   rgIndex: number,
   set: (partial: Partial<SceneState>) => void,
   opts?: { priority?: boolean },
 ): Promise<void> {
-  if (internal.loadedRowGroups.has(rgIndex)) return
-  internal.loadedRowGroups.add(rgIndex) // Mark as in-flight to prevent duplicates
-
+  const scene = internal.normalizedScene
+  if (!scene || scene.loadedPointBatches().has(rgIndex)) return
   try {
-    const result = await requestRowGroup(rgIndex, opts)
-    cacheRowGroupFrames(result, set)
-  } catch {
-    // If loading failed, allow retry
-    internal.loadedRowGroups.delete(rgIndex)
-  }
-}
-
-/**
- * Main-thread fallback: load a SINGLE frame via per-frame row range.
- * Used in test env / File-based sources where Worker is not available.
- * Each call decompresses the full row group (wasteful), but only keeps
- * 5 rows in memory — avoids OOM that row-group-level caching would cause.
- */
-async function loadFrameMainThread(
-  frameIndex: number,
-  set: (partial: Partial<SceneState>) => void,
-  get: () => SceneState,
-): Promise<FrameData | null> {
-  const lidarPf = internal.parquetFiles.get('lidar')
-  if (!lidarPf || !internal.lidarFrameIndex) return null
-
-  const timestamp = internal.timestamps[frameIndex]
-  if (timestamp === undefined) return null
-
-  const cm = getManifest().columnMap
-  const lidarRows = await readFrameData(
-    lidarPf,
-    internal.lidarFrameIndex,
-    timestamp,
-    getLidarColumns(),
-  )
-
-  const rangeImages = new Map<number, RangeImage>()
-  for (const row of lidarRows) {
-    const laserName = row[cm.laserName] as number
-    rangeImages.set(laserName, {
-      shape: row[cm.rangeImageShape] as [number, number, number],
-      values: row[cm.rangeImageValues] as number[],
+    await scene.loadPointBatch(rgIndex, opts)
+    if (scene !== internal.normalizedScene) return
+    const snapshot = scene.snapshotPerformance()
+    internal.lastConvertMs = scene.lastConvertMs
+    memLog.snap(`cache:point-batch${rgIndex}`, {
+      dataSize: snapshot.cache.pointBytes,
+      note: `${snapshot.cache.pointFrames} frames retained by normalized scene`,
     })
+    syncCachedFrames(set)
+  } catch (error) {
+    if (scene === internal.normalizedScene && !scene.disposed) throw error
   }
-
-  const ct0 = performance.now()
-  const result = convertAllSensors(rangeImages, get().lidarCalibrations)
-  internal.lastConvertMs = performance.now() - ct0
-
-  const boxes = internal.lidarBoxByFrame.get(timestamp) ?? []
-  const cameraBoxes = internal.cameraBoxByFrame.get(timestamp) ?? []
-  const poseRows = internal.vehiclePoseByFrame.get(timestamp)
-  const vehiclePose = (poseRows?.[0]?.[cm.vehiclePose] as number[]) ?? null
-
-  const frameData: FrameData = {
-    timestamp,
-    sensorClouds: result.perSensor,
-    boxes,
-    cameraBoxes,
-    cameraImages: new Map(),
-    vehiclePose,
-  }
-
-  internal.frameCache.set(frameIndex, frameData)
-  syncCachedFrames(set)
-  return frameData
 }
 
-async function loadStartupData(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
-  // Delegate to Waymo adapter (returns dataset-agnostic MetadataBundle)
-  const bundle = await loadWaymoMetadata(internal.parquetFiles)
-  const binding = await bindWaymoRecipeSceneV1({
+async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
+  // Read the lightweight metadata tables before the managed worker path starts.
+  const binding = await bindRecipeSceneV1({
+    sourceFamily: 'parquet-components',
     compiledRecipe: waymoCompiledRecipe,
     parquetFiles: internal.parquetFiles,
-    metadataBundle: bundle,
   })
+  const bundle = binding.metadata
   internal.normalizedScene?.dispose()
-  internal.normalizedScene = binding.scene
+  internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
+    workerTimestamps: bundle.timestamps,
+  })
   for (const diagnostic of binding.diagnostics) {
     console.info(`[Waymo recipe] ${diagnostic.code}: ${diagnostic.hint}`)
   }
@@ -1774,12 +1607,16 @@ async function initDataWorker(
   _set: (partial: Partial<SceneState>) => void,
 ) {
   const lidarSource = sources.get('lidar')
-  if (!lidarSource) return
+  const owner = internal.normalizedScene
+  if (!lidarSource || !owner) return
 
   const pool = new WorkerPool<Record<string, unknown>, LidarBatchResult>(
     WORKER_CONCURRENCY,
     () => new Worker(new URL('../workers/waymoLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
+  // Ownership begins before asynchronous initialization so a scene switch can
+  // terminate workers that have not emitted their ready message yet.
+  owner.attachPointPool(pool, 0)
   // Pass segmentation parquet URL if available (Phase A worker protocol)
   const segSource = internal.parquetFiles.has('lidar_segmentation')
     ? sources.get('lidar_segmentation')
@@ -1794,8 +1631,11 @@ async function initDataWorker(
     } : {}),
   })
 
-  internal.workerPool = pool
-  internal.numBatches = numBatches
+  if (owner !== internal.normalizedScene || owner.disposed) {
+    pool.terminate()
+    return
+  }
+  owner.attachPointPool(pool, numBatches)
 }
 
 /** Initialize camera worker pool (separate from lidar pool) */
@@ -1803,21 +1643,26 @@ async function initCameraWorker(
   sources: Map<string, File | string>,
 ) {
   const cameraSource = sources.get('camera_image')
-  if (!cameraSource || !internal.parquetFiles.has('camera_image')) return
+  const owner = internal.normalizedScene
+  if (!cameraSource || !internal.parquetFiles.has('camera_image') || !owner) return
 
   const start = async () => {
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
     2,
     () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
   )
+  owner.attachCameraPool(pool, 0)
   const { numBatches } = await pool.init({
     cameraUrl: cameraSource,
     cameraReaderParams: waymoCompiledRecipe.recipe.sources.cameraImageRows.params as unknown as ParquetColumnsParamsV1,
   })
 
-  internal.cameraPool = pool
-  internal.cameraNumBatches = numBatches
-  useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+  if (owner !== internal.normalizedScene || owner.disposed) {
+    pool.terminate()
+    return
+  }
+  owner.attachCameraPool(pool, numBatches)
+  useSceneStore.setState({ cameraTotalCount: numBatches })
   }
 
   internal.cameraPoolInit = start
@@ -1978,7 +1823,7 @@ async function fetchNuScenesVersionData(
   return { db, sampleFiles, versionRoot: detectedSplit }
 }
 
-async function loadNuScenesScene(
+async function loadTokenTableScene(
   sceneName: string,
   set: (partial: Partial<SceneState>) => void,
   get: () => SceneState,
@@ -1997,22 +1842,25 @@ async function loadNuScenesScene(
   })
 
   try {
+    markPerformanceEvent('scene-load-start', { dataset: 'nuscenes', scene: sceneName })
     // 1. Find scene by name
     const scene = internal.nuScenesDb.scenes.find(s => s.name === sceneName)
     if (!scene) throw new Error(`Scene not found: ${sceneName}`)
     memLog.snap('nuscenes:scene-start', { note: sceneName })
 
     // 2. Load scene metadata → MetadataBundle
-    const bundle = loadNuScenesSceneMetadata(internal.nuScenesDb, scene.token)
-    const binding = bindNuScenesRecipeSceneV1({
+    const binding = await bindRecipeSceneV1({
+      sourceFamily: 'token-tables',
       compiledRecipe: nuScenesCompiledRecipe,
       database: internal.nuScenesDb,
       sceneToken: scene.token,
       files: internal.nuScenesSampleFiles,
-      metadataBundle: bundle,
     })
+    const bundle = binding.metadata
     internal.normalizedScene?.dispose()
-    internal.normalizedScene = binding.scene
+    internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
+      workerTimestamps: bundle.timestamps,
+    })
     for (const diagnostic of binding.diagnostics) {
       console.info(`[nuScenes recipe] ${diagnostic.code}: ${diagnostic.hint}`)
     }
@@ -2139,7 +1987,8 @@ async function initNuScenesLidarWorker(
   lidarExtrinsic?: number[],
   radarExtrinsics?: [number, number[]][],
 ) {
-  if (!internal.nuScenesSampleFiles || batches.length === 0) return
+  const owner = internal.normalizedScene
+  if (!internal.nuScenesSampleFiles || batches.length === 0 || !owner) return
 
   // Collect only the files referenced by the batches (LiDAR + radar + lidarseg)
   const neededFiles = new Set<string>()
@@ -2167,6 +2016,7 @@ async function initNuScenesLidarWorker(
     WORKER_CONCURRENCY,
     () => new Worker(new URL('../workers/nuScenesLidarWorker.ts', import.meta.url), { type: 'module' }),
   )
+  owner.attachPointPool(pool, 0)
   const { numBatches } = await pool.init({
     frameBatches: batches,
     fileEntries,
@@ -2174,15 +2024,19 @@ async function initNuScenesLidarWorker(
     radarExtrinsics,
   })
 
-  internal.workerPool = pool
-  internal.numBatches = numBatches
+  if (owner !== internal.normalizedScene || owner.disposed) {
+    pool.terminate()
+    return
+  }
+  owner.attachPointPool(pool, numBatches)
 }
 
 /** Init nuScenes camera worker pool with pre-built frame batches + file entries. */
 async function initNuScenesCameraWorker(
   batches: NuScenesCameraFrameDescriptor[][],
 ) {
-  if (!internal.nuScenesSampleFiles || batches.length === 0) return
+  const owner = internal.normalizedScene
+  if (!internal.nuScenesSampleFiles || batches.length === 0 || !owner) return
 
   // Collect only the files referenced by the batches
   const neededFiles = new Set<string>()
@@ -2204,14 +2058,18 @@ async function initNuScenesCameraWorker(
       2,
       () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
     )
+    owner.attachCameraPool(pool, 0)
     const { numBatches } = await pool.init({
       frameBatches: batches,
       fileEntries,
     })
 
-    internal.cameraPool = pool
-    internal.cameraNumBatches = numBatches
-    useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+    if (owner !== internal.normalizedScene || owner.disposed) {
+      pool.terminate()
+      return
+    }
+    owner.attachCameraPool(pool, numBatches)
+    useSceneStore.setState({ cameraTotalCount: numBatches })
   }
 
   internal.cameraPoolInit = start
@@ -2226,7 +2084,7 @@ async function initNuScenesCameraWorker(
 /** Number of frames per worker batch for AV2 */
 const AV2_BATCH_SIZE = 10
 
-async function loadAV2Scene(
+async function loadFeatherLogScene(
   logId: string,
   set: (partial: Partial<SceneState>) => void,
   get: () => SceneState,
@@ -2245,18 +2103,21 @@ async function loadAV2Scene(
   })
 
   try {
+    markPerformanceEvent('scene-load-start', { dataset: 'argoverse2', scene: logId })
     memLog.snap('av2:scene-start', { note: logId })
 
     // 1. Load metadata → MetadataBundle
-    const bundle = loadAV2LogMetadata(internal.av2Db)
-    const binding = bindAV2RecipeSceneV1({
+    const binding = await bindRecipeSceneV1({
+      sourceFamily: 'feather-log',
       compiledRecipe: argoverse2CompiledRecipe,
       database: internal.av2Db,
       files: internal.av2SampleFiles,
-      metadataBundle: bundle,
     })
+    const bundle = binding.metadata
     internal.normalizedScene?.dispose()
-    internal.normalizedScene = binding.scene
+    internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
+      workerTimestamps: bundle.timestamps,
+    })
     for (const diagnostic of binding.diagnostics) {
       console.info(`[AV2 recipe] ${diagnostic.code}: ${diagnostic.hint}`)
     }
@@ -2346,7 +2207,8 @@ function buildAV2FrameBatches(bundle: MetadataBundle) {
 
 /** Init AV2 LiDAR worker pool */
 async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
-  if (!internal.av2SampleFiles || batches.length === 0) return
+  const owner = internal.normalizedScene
+  if (!internal.av2SampleFiles || batches.length === 0 || !owner) return
 
   const neededFiles = new Set<string>()
   for (const batch of batches) {
@@ -2364,19 +2226,24 @@ async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
     WORKER_CONCURRENCY,
     () => new Worker(new URL('../workers/av2LidarWorker.ts', import.meta.url), { type: 'module' }),
   )
+  owner.attachPointPool(pool, 0)
   const { numBatches } = await pool.init({
     frameBatches: batches,
     fileEntries,
     readerParams: argoverse2CompiledRecipe.recipe.sources.lidarFrames.params as unknown as FeatherColumnsParamsV1,
   })
 
-  internal.workerPool = pool
-  internal.numBatches = numBatches
+  if (owner !== internal.normalizedScene || owner.disposed) {
+    pool.terminate()
+    return
+  }
+  owner.attachPointPool(pool, numBatches)
 }
 
 /** Init AV2 camera worker pool */
 async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
-  if (!internal.av2SampleFiles || batches.length === 0) return
+  const owner = internal.normalizedScene
+  if (!internal.av2SampleFiles || batches.length === 0 || !owner) return
 
   const neededFiles = new Set<string>()
   for (const batch of batches) {
@@ -2397,14 +2264,18 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
       2,
       () => new Worker(new URL('../workers/av2CameraWorker.ts', import.meta.url), { type: 'module' }),
     )
+    owner.attachCameraPool(pool, 0)
     const { numBatches } = await pool.init({
       frameBatches: batches,
       fileEntries,
     })
 
-    internal.cameraPool = pool
-    internal.cameraNumBatches = numBatches
-    useSceneStore.setState({ cameraTotalCount: internal.cameraNumBatches })
+    if (owner !== internal.normalizedScene || owner.disposed) {
+      pool.terminate()
+      return
+    }
+    owner.attachCameraPool(pool, numBatches)
+    useSceneStore.setState({ cameraTotalCount: numBatches })
   }
 
   internal.cameraPoolInit = start
@@ -2429,17 +2300,13 @@ function cameraImagesWanted(): boolean {
  * Start the camera pipeline that `cameraImagesWanted() === false` skipped.
  * No-op when the pool is already running or there is nothing deferred.
  *
- * Guarded by the scene token: an await here can outlive the scene that
- * queued it, and installing a stale pool over a new scene would feed it
- * another log's frames.
+ * Guarded by the managed-scene owner identity: an await here can outlive the
+ * scene that queued it, but may never attach work to its replacement.
  */
 async function ensureCameraPool(set: (partial: Partial<SceneState>) => void): Promise<void> {
-  // Read through a getter: a direct `internal.cameraPool` check narrows the
-  // property to null for the rest of the function, and init() assigns it.
-  const pool = () => internal.cameraPool
+  const scene = internal.normalizedScene
   const init = internal.cameraPoolInit
-  if (pool() || !init) return
-  const token = internal.sceneToken
+  if (!scene || scene.cameraBatchCount > 0 || !init) return
   internal.cameraPoolInit = null
 
   try {
@@ -2448,21 +2315,20 @@ async function ensureCameraPool(set: (partial: Partial<SceneState>) => void): Pr
     console.warn('[camera] deferred init failed:', e)
     return
   }
-  if (token !== internal.sceneToken) return  // scene changed under us
-  if (!pool()?.isReady()) return
+  if (scene !== internal.normalizedScene || scene.cameraBatchCount <= 0) return
 
   // Load the batch the viewer is actually on first — a plain prefetch would
   // start at batch 0 and hand the user images for every frame but theirs.
   const state = useSceneStore.getState()
-  const perBatch = internal.cameraNumBatches > 0
-    ? Math.ceil(internal.timestamps.length / internal.cameraNumBatches)
+  const perBatch = scene.cameraBatchCount > 0
+    ? Math.ceil(internal.timestamps.length / scene.cameraBatchCount)
     : internal.timestamps.length
   const visibleBatch = perBatch > 0
-    ? Math.min(Math.floor(state.currentFrameIndex / perBatch), internal.cameraNumBatches - 1)
+    ? Math.min(Math.floor(state.currentFrameIndex / perBatch), scene.cameraBatchCount - 1)
     : 0
   await loadAndCacheCameraRowGroup(visibleBatch, set, { priority: true }).catch(() => {})
 
-  if (token !== internal.sceneToken) return
+  if (scene !== internal.normalizedScene || scene.disposed) return
   if (!internal.cameraPrefetchStarted) {
     internal.cameraPrefetchStarted = true
     void prefetchAllCameraRowGroups(set)
@@ -2475,12 +2341,11 @@ async function loadAndCacheCameraRowGroup(
   set: (partial: Partial<SceneState>) => void,
   opts?: { priority?: boolean },
 ): Promise<void> {
-  if (internal.cameraLoadedRowGroups.has(rgIndex)) return
-  internal.cameraLoadedRowGroups.add(rgIndex)
-
+  const scene = internal.normalizedScene
+  if (!scene || scene.loadedCameraBatches().has(rgIndex)) return
   try {
-    const result = await internal.cameraPool!.requestRowGroup(rgIndex, opts)
-    cacheCameraRowGroupFrames(result)
+    await scene.loadCameraBatch(rgIndex, opts)
+    if (scene !== internal.normalizedScene) return
 
     // Update camera loading progress + buffer bar, and patch current frame
     // if new camera images arrived for it.  Merged into a single set() to
@@ -2488,27 +2353,23 @@ async function loadAndCacheCameraRowGroup(
     syncCameraCachedFrames(set)
     const state = useSceneStore.getState()
     const fi = state.currentFrameIndex
-    const cached = internal.frameCache.get(fi)
-    const camData = internal.cameraImageCache.get(fi)
     const currentFrame = state.currentFrame
-    // Only replace currentFrame when camera count actually increased —
-    // if loadFrame already merged the same images, skip the redundant update.
-    const needsFramePatch = cached && camData && camData.size > 0 &&
-      (!currentFrame || currentFrame.cameraImages.size !== camData.size)
-    if (needsFramePatch) {
+    const loadedCount = scene.loadedCameraBatches().size
+    if (scene.hasPointFrame(fi) && scene.hasCameraFrame(fi)) {
+      const frame = await loadRendererFrame(scene, fi)
+      if (scene !== internal.normalizedScene) return
+      const needsFramePatch = !currentFrame || currentFrame.cameraImages.size !== frame.cameraImages.size
       set({
-        cameraLoadedCount: internal.cameraLoadedRowGroups.size,
-        currentFrame: {
-          ...cached,
-          cameraImages: new Map(camData),
-        },
+        cameraLoadedCount: loadedCount,
+        ...(needsFramePatch ? { currentFrame: frame } : {}),
       })
     } else {
-      set({ cameraLoadedCount: internal.cameraLoadedRowGroups.size })
+      set({ cameraLoadedCount: loadedCount })
     }
   } catch (e) {
-    console.error(`[CameraPool] Failed to load RG ${rgIndex}:`, e)
-    internal.cameraLoadedRowGroups.delete(rgIndex)
+    if (scene === internal.normalizedScene && !scene.disposed) {
+      console.error(`[CameraPool] Failed to load batch ${rgIndex}:`, e)
+    }
   }
 }
 
@@ -2516,25 +2377,22 @@ async function loadAndCacheCameraRowGroup(
 async function prefetchAllCameraRowGroups(
   set: (partial: Partial<SceneState>) => void,
 ) {
+  const scene = internal.normalizedScene
+  if (!scene) return
   const promises: Promise<void>[] = []
-  for (let rg = 0; rg < internal.cameraNumBatches; rg++) {
-    if (internal.cameraLoadedRowGroups.has(rg)) continue
+  for (let rg = 0; rg < scene.cameraBatchCount; rg++) {
+    if (scene.loadedCameraBatches().has(rg)) continue
     promises.push(
       loadAndCacheCameraRowGroup(rg, set).catch(() => {}),
     )
   }
   await Promise.all(promises)
+  if (scene !== internal.normalizedScene) return
 
-  // Compute total cached JPEG sizes
-  let totalJpegBytes = 0
-  for (const camMap of internal.cameraImageCache.values()) {
-    for (const jpeg of camMap.values()) {
-      totalJpegBytes += jpeg.byteLength
-    }
-  }
+  const snapshot = scene.snapshotPerformance()
   memLog.snap('prefetch:camera-complete', {
-    dataSize: totalJpegBytes,
-    note: `${internal.cameraImageCache.size} frames × cameras cached`,
+    dataSize: snapshot.cache.cameraBytes,
+    note: `${snapshot.cache.cameraFrames} camera frames retained`,
   })
 
   // Print full summary when everything is done
@@ -2557,10 +2415,12 @@ async function prefetchAllRowGroups(
   set: (partial: Partial<SceneState>) => void,
   _get: () => SceneState,
 ) {
+  const scene = internal.normalizedScene
+  if (!scene) return
   const promises: Promise<void>[] = []
 
-  for (let rg = 0; rg < internal.numBatches; rg++) {
-    if (internal.loadedRowGroups.has(rg)) continue
+  for (let rg = 0; rg < scene.pointBatchCount; rg++) {
+    if (scene.loadedPointBatches().has(rg)) continue
 
     promises.push(
       loadAndCacheRowGroup(rg, set).catch(() => {
@@ -2570,17 +2430,12 @@ async function prefetchAllRowGroups(
   }
 
   await Promise.all(promises)
+  if (scene !== internal.normalizedScene) return
 
-  // Compute total cached sizes
-  let totalLidarBytes = 0
-  for (const frame of internal.frameCache.values()) {
-    for (const cloud of frame.sensorClouds.values()) {
-      totalLidarBytes += cloud.positions.buffer.byteLength
-    }
-  }
+  const snapshot = scene.snapshotPerformance()
   memLog.snap('prefetch:lidar-complete', {
-    dataSize: totalLidarBytes,
-    note: `${internal.frameCache.size} frames fully cached`,
+    dataSize: snapshot.cache.pointBytes,
+    note: `${snapshot.cache.pointFrames} point frames retained`,
   })
 }
 
@@ -2596,14 +2451,14 @@ async function prefetchAllRowGroups(
  * @param set - Zustand set function
  * @param get - Zustand get function
  * @param logLabel - Label prefix for memLog (e.g. 'waymo', 'nuscenes', 'av2')
- * @param mainThreadFallback - Optional: called when workerPool isn't ready (Waymo-only)
  */
 async function runPostWorkerPipeline(
   set: (partial: Partial<SceneState>) => void,
   get: () => SceneState,
   logLabel: string,
-  mainThreadFallback?: () => Promise<void>,
 ): Promise<void> {
+  const scene = internal.normalizedScene
+  if (!scene) throw new Error('Normalized scene is not bound.')
   // Determine target frame from Share URL (if any)
   const initSearch = getInitialSearch()
   const viewParams = initSearch ? parseViewParams(initSearch) : {}
@@ -2620,21 +2475,13 @@ async function runPostWorkerPipeline(
       ? Math.min(viewParams.frame, internal.timestamps.length - 1)
       : 0
 
-  /** Which batch of `numBatches` holds a frame (lidar and camera split differently). */
-  const batchIndexOf = (frame: number, numBatches: number): number => {
-    if (numBatches <= 0) return 0
-    const perBatch = Math.ceil(internal.timestamps.length / numBatches)
-    if (perBatch <= 0) return 0
-    return Math.min(Math.floor(frame / perBatch), numBatches - 1)
-  }
-
-  const targetBatch = batchIndexOf(targetFrame, internal.numBatches)
-  const camTargetBatch = batchIndexOf(targetFrame, internal.cameraNumBatches)
+  const targetBatch = batchIndexForFrame(targetFrame, scene.pointBatchCount)
+  const camTargetBatch = batchIndexForFrame(targetFrame, scene.cameraBatchCount)
 
   // Past a few batches, prioritising the range is the same as prioritising
   // everything — so a wide range keeps the ordinary behaviour.
   const RANGE_BATCH_CAP = 3
-  const rangeLastBatch = linkRange ? batchIndexOf(linkRange.f1, internal.numBatches) : targetBatch
+  const rangeLastBatch = linkRange ? batchIndexForFrame(linkRange.f1, scene.pointBatchCount) : targetBatch
   const rangeIsNarrow = linkRange != null && rangeLastBatch - targetBatch + 1 <= RANGE_BATCH_CAP
 
   set({ loadStep: 'first-frame' as LoadStep })
@@ -2643,7 +2490,7 @@ async function runPostWorkerPipeline(
   /** Queued right after the critical path — ordering only, never awaited. */
   const queueAfterFirstPaint: (() => void)[] = []
 
-  if (internal.workerPool?.isReady()) {
+  if (scene.pointBatchCount > 0) {
     if (linkRange) {
       // Critical path is the range's own first batch. Batch 0 is dead weight
       // for a link that points elsewhere, so it drops to the background —
@@ -2652,13 +2499,13 @@ async function runPostWorkerPipeline(
       const rest: number[] = []
       if (rangeIsNarrow) {
         for (let b = targetBatch + 1; b <= rangeLastBatch; b++) rest.push(b)
-      } else if (targetBatch + 1 < internal.numBatches) {
+      } else if (targetBatch + 1 < scene.pointBatchCount) {
         rest.push(targetBatch + 1)
       }
       rest.push(0)
       queueAfterFirstPaint.push(() => {
         for (const b of rest) {
-          if (b >= 0 && b < internal.numBatches && !internal.loadedRowGroups.has(b)) {
+          if (b >= 0 && b < scene.pointBatchCount && !scene.loadedPointBatches().has(b)) {
             void loadAndCacheRowGroup(b, set, { priority: true }).catch(() => {})
           }
         }
@@ -2667,29 +2514,27 @@ async function runPostWorkerPipeline(
       const batchesToLoad = new Set([0, targetBatch])
       // Also load neighbor batch for smoother playback from target
       if (targetBatch > 0) batchesToLoad.add(targetBatch - 1)
-      if (targetBatch + 1 < internal.numBatches) batchesToLoad.add(targetBatch + 1)
+      if (targetBatch + 1 < scene.pointBatchCount) batchesToLoad.add(targetBatch + 1)
       for (const b of batchesToLoad) {
         firstFramePromises.push(loadAndCacheRowGroup(b, set))
       }
     }
-  } else if (mainThreadFallback) {
-    firstFramePromises.push(mainThreadFallback())
   }
 
-  if (internal.cameraPool?.isReady()) {
+  if (scene.cameraBatchCount > 0) {
     if (linkRange) {
       firstFramePromises.push(loadAndCacheCameraRowGroup(camTargetBatch, set, { priority: true }))
       const camRest: number[] = []
-      const camLast = batchIndexOf(linkRange.f1, internal.cameraNumBatches)
+      const camLast = batchIndexForFrame(linkRange.f1, scene.cameraBatchCount)
       if (rangeIsNarrow) {
         for (let b = camTargetBatch + 1; b <= camLast; b++) camRest.push(b)
-      } else if (camTargetBatch + 1 < internal.cameraNumBatches) {
+      } else if (camTargetBatch + 1 < scene.cameraBatchCount) {
         camRest.push(camTargetBatch + 1)
       }
       camRest.push(0)
       queueAfterFirstPaint.push(() => {
         for (const b of camRest) {
-          if (b >= 0 && b < internal.cameraNumBatches) {
+          if (b >= 0 && b < scene.cameraBatchCount) {
             void loadAndCacheCameraRowGroup(b, set, { priority: true }).catch(() => {})
           }
         }
@@ -2697,7 +2542,7 @@ async function runPostWorkerPipeline(
     } else {
       const camBatchesToLoad = new Set([0, camTargetBatch])
       if (camTargetBatch > 0) camBatchesToLoad.add(camTargetBatch - 1)
-      if (camTargetBatch + 1 < internal.cameraNumBatches) camBatchesToLoad.add(camTargetBatch + 1)
+      if (camTargetBatch + 1 < scene.cameraBatchCount) camBatchesToLoad.add(camTargetBatch + 1)
       for (const b of camBatchesToLoad) {
         firstFramePromises.push(loadAndCacheCameraRowGroup(b, set))
       }
@@ -2705,6 +2550,7 @@ async function runPostWorkerPipeline(
   }
 
   await Promise.all(firstFramePromises)
+  if (scene !== internal.normalizedScene || scene.disposed) return
   const rgMs = performance.now() - rgT0
   memLog.snap(`${logLabel}:first-batches-loaded`, {
     note: `${rgMs.toFixed(0)}ms, target frame ${targetFrame}`,
@@ -2716,27 +2562,26 @@ async function runPostWorkerPipeline(
   for (const queue of queueAfterFirstPaint) queue()
 
   // 2. Show target frame (or frame 0 as fallback)
-  const displayFrame = internal.frameCache.has(targetFrame) ? targetFrame : 0
+  const displayFrame = scene.hasPointFrame(targetFrame) ? targetFrame : 0
+  noteFrameRequest(scene.sceneGeneration, displayFrame)
   // If neither is cached yet (a failed target batch), let the frame land as
   // soon as it arrives rather than showing nothing.
-  if (!internal.frameCache.has(displayFrame)) internal.pendingSeekFrame = targetFrame
-  const firstFrame = internal.frameCache.get(displayFrame)
-  if (firstFrame) {
-    const camData = internal.cameraImageCache.get(displayFrame)
+  if (!scene.hasPointFrame(displayFrame)) internal.pendingSeekFrame = targetFrame
+  if (scene.hasPointFrame(displayFrame)) {
+    const firstFrame = await loadRendererFrame(scene, displayFrame)
+    if (scene !== internal.normalizedScene || scene.disposed) return
     set({
       currentFrameIndex: displayFrame,
-      currentFrame: {
-        ...firstFrame,
-        cameraImages: camData ? new Map(camData) : new Map(),
-      },
+      currentFrame: firstFrame,
       lastFrameLoadMs: rgMs,
       lastConvertMs: internal.lastConvertMs,
     })
   }
 
   set({ status: 'ready', loadProgress: 1 })
+  markPerformanceEvent('dataset-ready', { dataset: logLabel, sceneGeneration: scene.sceneGeneration })
   memLog.snap(`${logLabel}:first-frame-rendered`, {
-    note: `${internal.frameCache.size} frames cached`,
+    note: `${scene.cachedPointFrames().length} frames cached`,
   })
 
   // Auto-play unless opened via Share URL (has view params)
@@ -2746,11 +2591,11 @@ async function runPostWorkerPipeline(
   }
 
   // 3. Prefetch remaining batches in background
-  if (internal.workerPool?.isReady() && !internal.prefetchStarted) {
+  if (scene.pointBatchCount > 0 && !internal.prefetchStarted) {
     internal.prefetchStarted = true
     prefetchAllRowGroups(set, get)
   }
-  if (internal.cameraPool?.isReady() && !internal.cameraPrefetchStarted) {
+  if (scene.cameraBatchCount > 0 && !internal.cameraPrefetchStarted) {
     internal.cameraPrefetchStarted = true
     prefetchAllCameraRowGroups(set)
   }

@@ -402,6 +402,8 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
           {/* Invisible range input — matches inset track area */}
           <input
+            aria-label="Frame timeline"
+            data-testid="frame-timeline"
             type="range"
             min={0}
             max={maxFrame}

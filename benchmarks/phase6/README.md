@@ -1,0 +1,78 @@
+# Phase 6 CDP benchmark
+
+This directory defines the reproducible browser gate for Spec 012. Raw result
+JSON is intentionally kept out of git because each file contains a bounded CDP
+trace and request URLs. Store approved baseline/candidate artifacts in the
+release evidence system with their checksums; do not publish private dataset
+URLs.
+
+Run the production build on the same machine and Chrome build for both commits:
+
+```bash
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173
+npm run benchmark:phase6 -- \
+  --dataset nuscenes \
+  --url 'http://127.0.0.1:4173/?dataset=nuscenes&data=https%3A%2F%2Fdata.egolens.org%2Fnuscenes%2F&scene=scene-0103' \
+  --switch-scenarios /absolute/path/to/scenarios.json \
+  --output traces/phase6-nuscenes.json \
+  --warmups 1 --runs 5 --seeks 100 --scene-switches 20 --playback-loops 2 --fps 2
+```
+
+For the normative cross-dataset lifecycle soak, provide a local JSON file with
+licensed, pinned sources (do not commit this file):
+
+```json
+[
+  { "dataset": "nuscenes", "data": "https://host/nuscenes/", "scene": "scene-0103" },
+  { "dataset": "argoverse2", "data": "https://host/av2/log/", "scene": "log-id" },
+  { "dataset": "waymo", "data": "https://host/waymo/", "scene": "segment-id" }
+]
+```
+
+Pass it as `--switch-scenarios /absolute/path/to/scenarios.json`. The runner
+then alternates those sources through the ordinary application load command in
+one page/runtime. Without this option, Shift+Arrow exercises only the initial
+dataset's segment-switch path and is not sufficient for the Spec 012
+cross-dataset gate.
+
+Use an explicitly licensed URL for Waymo and a pinned log URL for Argoverse 2.
+The runner:
+
+- attaches CDP to the page and every worker target;
+- records individual `Runtime.getHeapUsage` fields and target identities;
+- records DOM counters, performance metrics, Network/Range events, cache flags,
+  encoded bytes, a bounded trace, and worker creation/destruction;
+- samples the read-only `__EGOLENS_PERF__.snapshot()` at coordinated lifecycle
+  checkpoints;
+- performs two playback loops, 100 non-sequential timeline seeks, repeated
+  camera/colormap/world/annotation/model toggles, 20 scene switches (including
+  cross-dataset switches when configured), explicit disposal, and a natural
+  settle window;
+- keeps the warm-up separate from the five measured runs.
+
+`usedSize` may be summed across page/worker targets only under the formula
+written into each result. It is not total browser, process, or GPU memory.
+Exact GPU bytes are not reported; renderer resource counts are the portable
+gate. Run baseline and candidate from clean worktrees, compare distributions,
+and apply every budget in Spec 012 before advancing the spec status.
+
+The benchmark instrumentation (probe, `benchmarkHold`, and runner) must be
+identical on baseline and candidate revisions. If the baseline predates it,
+apply the instrumentation-only commit to a temporary baseline worktree; do not
+compare an uninstrumented build with an instrumented one.
+
+Apply the normative budgets mechanically after capturing both artifacts:
+
+```bash
+npm run benchmark:phase6:compare -- \
+  --baseline traces/phase6-nuscenes-baseline.json \
+  --candidate traces/phase6-nuscenes-candidate.json \
+  --output traces/phase6-nuscenes-gate.json
+```
+
+Repeat capture and comparison independently for Waymo, nuScenes, and AV2. A
+non-zero comparison exit blocks removal/status advancement for that dataset.
+The comparator also rejects dirty builds, mismatched browser/hardware/scenarios,
+fewer than one warm-up plus five measured runs, or a workload missing the
+100-seek/20-cross-dataset-switch/two-playback-loop minimum.

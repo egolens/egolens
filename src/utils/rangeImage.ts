@@ -49,7 +49,7 @@ export interface PointCloud {
   /** Per-point semantic segmentation labels (uint8, 0–31). nuScenes lidarseg only. */
   segLabels?: Uint8Array
   /** Per-point panoptic labels (uint16, encoded as category_id*1000 + instance_id). nuScenes panoptic only. */
-  panopticLabels?: Uint16Array
+  panopticLabels?: Uint16Array | Uint32Array
   /** Per-point camera projection: [camName, pixelX, pixelY] × pointCount (Int16). Waymo only. */
   cameraProjection?: Int16Array
   /** Per-point camera RGB colors: [R, G, B] × pointCount (Uint8, 0–255). Computed from cameraProjection + camera images. */

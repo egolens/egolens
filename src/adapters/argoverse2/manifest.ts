@@ -5,7 +5,7 @@
 import { argoverse2CompiledRecipe } from '../recipes/bundled'
 
 export const argoverse2Recipe = argoverse2CompiledRecipe.recipe
-export const argoverse2Manifest = argoverse2CompiledRecipe.compatibilityManifest
+export const argoverse2Manifest = argoverse2CompiledRecipe.rendererManifest
 
 const cameraSensors = argoverse2Recipe.scene.sensors.filter(
   (sensor) => sensor.modality === 'camera',

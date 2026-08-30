@@ -41,6 +41,7 @@ export interface NuScenesRecipeSceneInputV1 {
 export interface BoundNuScenesRecipeSceneV1 {
   readonly scene: NormalizedSceneV1
   readonly diagnostics: readonly AdapterDiagnostic[]
+  readonly metadata: MetadataBundle
 }
 
 interface FrameSensorFile {
@@ -83,9 +84,6 @@ function capabilityDiagnostic(capability: NormalizedCapabilityV1): AdapterDiagno
  * versioned operators.
  */
 export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): BoundNuScenesRecipeSceneV1 {
-  if (input.compiledRecipe.normalizedManifest.id !== 'nuscenes') {
-    throw new Error(`Expected the nuScenes compiled recipe, got ${input.compiledRecipe.normalizedManifest.id}.`)
-  }
   const bundle = input.metadataBundle ?? loadNuScenesSceneMetadata(input.database, input.sceneToken)
   if (bundle.timestamps.length === 0) throw new Error('TIMELINE_BINDING_EMPTY: nuScenes scene has no frames.')
   const recipe = input.compiledRecipe.recipe
@@ -357,5 +355,5 @@ export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): Bo
       box2dToBox3d.clear()
     },
   }
-  return { scene, diagnostics }
+  return { scene, diagnostics, metadata: bundle }
 }

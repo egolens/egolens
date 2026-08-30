@@ -1,6 +1,6 @@
 # Spec 012 — Teachable Lens Phase 6 performance and lifecycle gate
 
-**Status**: planned · **Date**: 2026-08-29
+**Status**: in-progress (runtime/lifecycle cutover and CDP harness implemented; three-dataset baseline/candidate evidence pending) · **Date**: 2026-08-29
 
 **Relationship to Spec 006**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 6. Phase 6 may

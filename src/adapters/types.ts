@@ -8,31 +8,20 @@ export interface DatasetDetectionEvidence {
 /**
  * The stable strategy boundary used by detection and scene-load orchestration.
  *
- * Phase 1 deliberately keeps legacy execution behind a prepared legacy plan.
- * Recipe-backed strategies return a compiled plan through this same method;
- * later migration phases replace the legacy plans one dataset at a time.
+ * Every registered dataset is recipe-backed. Bundled and learned recipes use
+ * this same strategy surface and the same prepared plan shape.
  */
 export interface DatasetAdapter<TPrepared extends PreparedDatasetAdapter = PreparedDatasetAdapter> {
   readonly id: string
-  readonly kind: 'legacy' | 'recipe'
+  readonly kind: 'recipe'
   readonly manifest: DatasetManifest
   matches(evidence: DatasetDetectionEvidence): boolean
   prepare(): TPrepared
 }
 
-export interface PreparedLegacyDatasetAdapter {
-  readonly kind: 'legacy'
-  readonly adapterId: string
-  readonly manifest: DatasetManifest
-}
-
-export interface PreparedRecipeDatasetAdapter {
+export interface PreparedDatasetAdapter {
   readonly kind: 'recipe'
   readonly adapterId: string
   readonly manifest: DatasetManifest
   readonly compiledRecipe: unknown
 }
-
-export type PreparedDatasetAdapter =
-  | PreparedLegacyDatasetAdapter
-  | PreparedRecipeDatasetAdapter

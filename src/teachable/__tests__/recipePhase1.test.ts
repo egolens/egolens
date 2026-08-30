@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LegacyDatasetAdapter } from '../../adapters/legacy'
 import type { DatasetAdapter } from '../../adapters/types'
-import { waymoManifest } from '../../adapters/waymo/manifest'
 import { OperatorRegistry, type CoreOperatorDescriptor } from '../operators/registry'
 import { canonicalizeJson, canonicalizeRecipeSemantics } from '../recipe/canonicalize'
 import { compileRecipeV1 } from '../recipe/compiler'
@@ -120,13 +118,12 @@ describe('compiler and strategy boundary', () => {
     expect(compiled.pipelines.get('timeline')?.nodes.map((node) => node.id)).toEqual(['makeTimeline'])
   })
 
-  it('instantiates recipe and legacy implementations through DatasetAdapter', () => {
+  it('instantiates every implementation through the recipe-only DatasetAdapter boundary', () => {
     const strategies: DatasetAdapter[] = [
-      new LegacyDatasetAdapter(waymoManifest),
       new RecipeBackedDatasetAdapter(recipe(), registry()),
     ]
-    expect(strategies.map((strategy) => strategy.prepare().kind)).toEqual(['legacy', 'recipe'])
-    expect(strategies[1].matches({ entryNames: ['frames.json'] })).toBe(true)
+    expect(strategies.map((strategy) => strategy.prepare().kind)).toEqual(['recipe'])
+    expect(strategies[0].matches({ entryNames: ['frames.json'] })).toBe(true)
   })
 
   it('fails before binding when a required operator is absent', () => {
@@ -168,7 +165,7 @@ describe('Phase 2 contract decisions', () => {
 
   it('projects inventory and raw source bindings only at the legacy manifest edge', () => {
     const compiled = compileRecipeV1(recipe(), registry())
-    expect(compiled.compatibilityManifest).toMatchObject({
+    expect(compiled.rendererManifest).toMatchObject({
       id: 'minimal-fixture',
       knownComponents: ['frames.json'],
       requiredComponents: ['frames.json'],
@@ -210,7 +207,7 @@ describe('Phase 2 contract decisions', () => {
       { id: 'camera-labels', role: 'camera-semantics', classes: [{ id: 'sky', rendererId: 0, label: 'Sky', color: '#0080ff' }], palette: [[0, 0.5, 1]] },
     ]
 
-    const manifest = compileRecipeV1(candidate, registry()).compatibilityManifest
+    const manifest = compileRecipeV1(candidate, registry()).rendererManifest
     expect(manifest.pointStride).toBe(4)
     expect(manifest.colormapModes).toEqual(['distance', 'intensity', 'segment', 'camera'])
     expect(manifest.intensityRange).toEqual([0, 255])

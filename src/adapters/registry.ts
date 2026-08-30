@@ -4,12 +4,11 @@
  * Maintains a list of known dataset manifests and provides:
  * - `detectDataset()`: inspects directory entry names to identify the dataset
  * - `getAdapter()` / `setAdapter()`: active strategy
- * - `getManifest()` / `setManifest()`: compatibility accessors during migration
+ * - `getManifest()`: renderer-facing projection of the active recipe manifest
  * - `getAllKnownComponents()`: union of all manifests' knownComponents (for folder scanning)
  */
 
 import type { DatasetManifest } from '../types/dataset'
-import { LegacyDatasetAdapter } from './legacy'
 import type { DatasetAdapter } from './types'
 import { RecipeBackedDatasetAdapter } from '../teachable/runtime/RecipeBackedDatasetAdapter'
 import { bundledPhase2OperatorRegistry } from '../teachable/operators/bundledPhase2'
@@ -66,7 +65,11 @@ export function getManifest(): DatasetManifest {
 
 /** Switch the active manifest (called during dataset load). */
 export function setManifest(m: DatasetManifest): void {
-  activeAdapter = getAdapterById(m.id) ?? new LegacyDatasetAdapter(m)
+  const adapter = getAdapterById(m.id)
+  if (!adapter) {
+    throw new Error(`Dataset manifest ${m.id} is not backed by a registered recipe adapter.`)
+  }
+  activeAdapter = adapter
 }
 
 // ---------------------------------------------------------------------------

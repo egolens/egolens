@@ -1,4 +1,4 @@
-import type { DatasetManifest, MetadataBundle } from '../../types/dataset'
+import type { DatasetManifest } from '../../types/dataset'
 import type { PointCloud } from '../../utils/rangeImage'
 import type { ParquetRow } from '../../utils/merge'
 import type { EgoLensAdapterRecipeV1, RecipeSourceFieldRoleV1 } from '../recipe/types'
@@ -7,23 +7,16 @@ import type {
   NormalizedBox3dV1,
   NormalizedFrameV1,
   NormalizedManifestV1,
-  NormalizedSceneV1,
 } from './normalizedScene'
 
-export interface LegacyFrameBridgeV1 {
+/** Renderer-facing frame shape while the R3F components migrate independently. */
+export interface RendererFrameV1 {
   readonly timestamp: bigint
   readonly sensorClouds: Map<number, PointCloud>
   readonly boxes: ParquetRow[]
   readonly cameraBoxes: ParquetRow[]
   readonly cameraImages: Map<number, ArrayBuffer>
   readonly vehiclePose: number[] | null
-}
-
-export interface LegacySceneBridgeV1 {
-  readonly manifest: DatasetManifest
-  readonly metadata: MetadataBundle
-  loadFrame(index: number): Promise<LegacyFrameBridgeV1>
-  dispose(): void
 }
 
 export interface DatasetManifestProjectionV1 {
@@ -52,7 +45,7 @@ const LEGACY_COLUMN_ROLES: Readonly<Record<RecipeSourceFieldRoleV1, keyof Datase
   egoPose: 'vehiclePose',
 }
 
-/** Raw field names remain in source bindings and are projected only at the legacy edge. */
+/** Raw field names remain in source bindings and are projected only at the renderer edge. */
 export function recipeManifestProjection(recipe: EgoLensAdapterRecipeV1): DatasetManifestProjectionV1 {
   const rootEntries = recipe.match.inventory.rootEntries
   const columnMap = { ...EMPTY_PROJECTION.columnMap }
@@ -173,7 +166,7 @@ function bridgeBox2d(box: NormalizedBox2dV1, cameraIds: ReadonlyMap<string, numb
   }
 }
 
-export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: NormalizedManifestV1): LegacyFrameBridgeV1 {
+export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: NormalizedManifestV1): RendererFrameV1 {
   const sensorIds = new Map(manifest.sensors.map((sensor) => [sensor.id, sensor.rendererId]))
   const classIds = taxonomyRendererIds(manifest)
   const sensorClouds = new Map<number, PointCloud>()
@@ -184,7 +177,7 @@ export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: Normal
       positions: cloud.values,
       pointCount: cloud.pointCount,
       segLabels: cloud.semanticLabels instanceof Uint8Array ? cloud.semanticLabels : undefined,
-      panopticLabels: cloud.panopticLabels instanceof Uint16Array ? cloud.panopticLabels : undefined,
+      panopticLabels: cloud.panopticLabels,
       cameraProjection: cloud.cameraProjection,
       cameraRgb: cloud.cameraRgb,
       validIndices: cloud.sourceIndices,
@@ -201,59 +194,5 @@ export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: Normal
       return rendererId === undefined ? [] : [[rendererId, camera.encodedBytes] as const]
     })),
     vehiclePose: frame.worldFromEgo ? Array.from(frame.worldFromEgo) : null,
-  }
-}
-
-/**
- * Temporary bridge used while renderers still consume MetadataBundle/FrameData.
- * It is intentionally one-way so legacy field names cannot leak into recipes.
- */
-export function bridgeNormalizedScene(scene: NormalizedSceneV1): LegacySceneBridgeV1 {
-  const timestamps = [...scene.index.timestampsMicros]
-  const timestampToFrame = new Map(timestamps.map((timestamp, index) => [timestamp, index]))
-  const poseByFrameIndex = new Map<number, number[]>()
-  const objectTrajectories = new Map([...scene.relations.trajectories].map(([objectId, points]) => [
-    objectId,
-    points.map((point) => ({
-      frameIndex: point.frameIndex,
-      x: point.position[0],
-      y: point.position[1],
-      z: point.position[2],
-      type: taxonomyRendererIds(scene.manifest).get(point.classId) ?? 0,
-    })),
-  ]))
-  const assocCamToLaser = new Map(scene.relations.box2dToBox3d)
-  const assocLaserToCams = new Map<string, Set<string>>()
-  for (const [cameraId, lidarId] of assocCamToLaser) {
-    const ids = assocLaserToCams.get(lidarId) ?? new Set<string>()
-    ids.add(cameraId)
-    assocLaserToCams.set(lidarId, ids)
-  }
-
-  return {
-    manifest: normalizedManifestToDatasetManifest(scene.manifest),
-    metadata: {
-      timestamps,
-      timestampToFrame,
-      vehiclePoseByFrame: new Map(),
-      worldOriginInverse: null,
-      poseByFrameIndex,
-      lidarCalibrations: new Map(),
-      cameraCalibrations: [],
-      lidarBoxByFrame: new Map(),
-      cameraBoxByFrame: new Map(),
-      objectTrajectories,
-      assocCamToLaser,
-      assocLaserToCams,
-      hasBoxData: scene.manifest.capabilities.has('boxes3d'),
-      segmentMeta: null,
-      hasSegmentation: scene.manifest.capabilities.has('lidarSegmentation'),
-      hasKeypoints: scene.manifest.capabilities.has('keypoints3d') || scene.manifest.capabilities.has('keypoints2d'),
-      hasCameraSegmentation: scene.manifest.capabilities.has('cameraSegmentation'),
-    },
-    loadFrame: async (index) => bridgeNormalizedFrame(await scene.loadFrame(index, {
-      capabilities: scene.manifest.capabilities,
-    }), scene.manifest),
-    dispose: () => scene.dispose(),
   }
 }
