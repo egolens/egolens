@@ -26,8 +26,8 @@
         "frameIndices": [0, 29, 79, 129, 197],
         "completeTimeline": false,
         "perceptualReferenceIds": [
-          "front-camera-segmentation-frame-129",
           "front-camera-frame-29",
+          "front-camera-segmentation-frame-129",
           "viewport-frame-0",
           "viewport-lidar-segmentation-frame-79"
         ]
