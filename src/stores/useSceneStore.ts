@@ -92,7 +92,9 @@ import { setCameraSegByFrameRef } from '../components/CameraPanel/CameraSegOverl
 import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
 import { bindNuScenesRecipeSceneV1 } from '../teachable/runtime/NuScenesRecipeScene'
 import type { NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
-import { nuScenesCompiledRecipe } from '../adapters/recipes/bundled'
+import { argoverse2CompiledRecipe, nuScenesCompiledRecipe } from '../adapters/recipes/bundled'
+import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
+import { bindAV2RecipeSceneV1 } from '../teachable/runtime/AV2RecipeScene'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -2219,13 +2221,27 @@ async function loadAV2Scene(
 
     // 1. Load metadata → MetadataBundle
     const bundle = loadAV2LogMetadata(internal.av2Db)
+    const binding = bindAV2RecipeSceneV1({
+      compiledRecipe: argoverse2CompiledRecipe,
+      database: internal.av2Db,
+      files: internal.av2SampleFiles,
+      metadataBundle: bundle,
+    })
+    internal.normalizedScene?.dispose()
+    internal.normalizedScene = binding.scene
+    for (const diagnostic of binding.diagnostics) {
+      console.info(`[AV2 recipe] ${diagnostic.code}: ${diagnostic.hint}`)
+    }
     set({ loadProgress: 0.2 })
 
     // 2. Extract frame batch info BEFORE applying bundle
     const { lidarBatches, cameraBatches } = buildAV2FrameBatches(bundle)
 
     // 3. Apply metadata bundle to internal state
-    applyMetadataBundle(bundle, set, get)
+    applyMetadataBundle({
+      ...bundle,
+      hasBoxData: binding.scene.manifest.capabilities.has('boxes3d'),
+    }, set, get)
     set({ loadProgress: 0.3 })
     memLog.snap('av2:metadata-applied', {
       note: `${bundle.timestamps.length} frames, ${lidarBatches.length} lidar batches, ${cameraBatches.length} camera batches`,
@@ -2323,6 +2339,7 @@ async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
   const { numBatches } = await pool.init({
     frameBatches: batches,
     fileEntries,
+    readerParams: argoverse2CompiledRecipe.recipe.sources.lidarFrames.params as unknown as FeatherColumnsParamsV1,
   })
 
   internal.workerPool = pool

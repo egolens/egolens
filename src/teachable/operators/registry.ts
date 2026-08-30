@@ -45,6 +45,7 @@ function registryKey(name: string, majorVersion: number): string {
 export class OperatorRegistry {
   readonly #operators = new Map<string, RecipeOperatorDescriptor>()
   readonly #paramsValidators = new Map<string, ValidateFunction>()
+  readonly #inputValidators = new Map<string, ValidateFunction>()
   readonly #contractCompiler = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true })
 
   constructor(operators: readonly RecipeOperatorDescriptor[] = []) {
@@ -61,10 +62,11 @@ export class OperatorRegistry {
     const key = registryKey(operator.name, operator.majorVersion)
     if (this.#operators.has(key)) throw new Error(`Operator already registered: ${key}`)
     const paramsValidator = this.#contractCompiler.compile(operator.paramsContract)
-    this.#contractCompiler.compile(operator.inputContract)
+    const inputValidator = this.#contractCompiler.compile(operator.inputContract)
     this.#contractCompiler.compile(operator.outputContract)
     this.#operators.set(key, Object.freeze(operator))
     this.#paramsValidators.set(key, paramsValidator)
+    this.#inputValidators.set(key, inputValidator)
   }
 
   resolve(name: string, dependency: OperatorDependencyV1): RecipeOperatorDescriptor | null {
@@ -90,6 +92,13 @@ export class OperatorRegistry {
     const validator = this.#paramsValidators.get(registryKey(name, dependency.major))
     if (!validator || !validator(params)) return validator?.errors ?? []
     return operator.validateParams?.(params) ?? []
+  }
+
+  validateInputs(name: string, dependency: OperatorDependencyV1, inputs: unknown): readonly ErrorObject[] {
+    if (!this.resolve(name, dependency)) return []
+    const validator = this.#inputValidators.get(registryKey(name, dependency.major))
+    if (!validator || validator(inputs)) return []
+    return validator.errors ?? []
   }
 
   list(): readonly RecipeOperatorDescriptor[] {

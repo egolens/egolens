@@ -175,6 +175,9 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
         diagnostics.push(diagnostic('OPERATOR_REQUIREMENT_MISSING', `Node operator "${node.op}@${node.version}" is not declared with the same major version.`, `/pipelines/${pipelineId}/nodes/${node.id}/op`))
       } else {
         usedOperators.add(node.op)
+        for (const error of registry.validateInputs(node.op, dependency, node.inputs ?? {})) {
+          diagnostics.push(diagnostic('OPERATOR_INPUTS_INVALID', error.message ?? `Inputs for operator "${node.op}" are invalid.`, `/pipelines/${pipelineId}/nodes/${node.id}/inputs${error.instancePath}`))
+        }
         for (const error of registry.validateParams(node.op, dependency, node.params ?? {})) {
           diagnostics.push(diagnostic('OPERATOR_PARAMS_INVALID', error.message ?? `Parameters for operator "${node.op}" are invalid.`, `/pipelines/${pipelineId}/nodes/${node.id}/params${error.instancePath}`))
         }
@@ -205,6 +208,12 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
     if (selectorRoot === '{versionRoot}') {
       if (versionRootCandidates.size === 0) diagnostics.push(diagnostic('VERSION_ROOT_SELECTOR_UNDECLARED', `Source "${sourceId}" uses {versionRoot} without match.versionRoot.`, `/sources/${sourceId}/files`))
     } else if (!rootPaths.has(selectorRoot)) diagnostics.push(diagnostic('SOURCE_ROOT_UNDECLARED', `Source "${sourceId}" selects undeclared inventory root "${selectorRoot}".`, `/sources/${sourceId}/files`))
+    const parameterColumns = Array.isArray(source.params?.columns)
+      ? source.params.columns.map((column) => typeof column === 'object' && column !== null && 'name' in column ? String(column.name) : '')
+      : null
+    if (source.columns && parameterColumns && source.columns.join('\0') !== parameterColumns.join('\0')) {
+      diagnostics.push(diagnostic('SOURCE_COLUMNS_CONTRACT_MISMATCH', `Source "${sourceId}" columns do not match its reader parameter contract.`, `/sources/${sourceId}/columns`))
+    }
     for (const [role, field] of Object.entries(source.bindings ?? {})) {
       const previous = boundFields.get(role)
       if (previous && previous !== field) diagnostics.push(diagnostic('SOURCE_BINDING_AMBIGUOUS', `Source role "${role}" is bound to both "${previous}" and "${field}".`, `/sources/${sourceId}/bindings/${role}`))

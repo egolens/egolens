@@ -23,13 +23,15 @@
 
 import type { MetadataBundle, TrajectoryPoint } from '../../types/dataset'
 import type { LidarCalibration } from '../../utils/rangeImage'
-import { readFeatherFile, readFeatherColumns } from '../../utils/feather'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import { multiplyRowMajor4x4, invertRowMajor4x4 } from '../../utils/matrix'
+import { readFeatherColumnsV1, type FeatherColumnsParamsV1 } from '../../teachable/operators/featherColumns'
+import { alignNearestTimestampV1 } from '../../teachable/operators/temporal'
 import {
   AV2_CATEGORY_TO_BOX_TYPE,
   AV2_SENSOR_NAME_TO_ID,
   AV2_RING_CAMERA_NAMES,
+  argoverse2Recipe,
   argoverse2Manifest,
 } from './manifest'
 
@@ -68,7 +70,7 @@ export interface AV2LogDatabase {
   /** Ego poses keyed by timestamp_ns → quaternion + translation */
   posesByTimestamp: Map<bigint, { qw: number; qx: number; qy: number; qz: number; tx: number; ty: number; tz: number }>
   /** Camera intrinsics per sensor name */
-  intrinsicsBySensor: Map<string, { fx: number; fy: number; cx: number; cy: number; width: number; height: number }>
+  intrinsicsBySensor: Map<string, { fx: number; fy: number; cx: number; cy: number; k1: number; k2: number; k3: number; width: number; height: number }>
   /** Sensor extrinsics (egovehicle_SE3_sensor) per sensor name → 4x4 row-major */
   extrinsicsBySensor: Map<string, number[]>
 }
@@ -97,6 +99,9 @@ export function discoverAV2FramesFromManifest(
   // manifest.frames are already sorted by generation script
 
   const cameraFilesByFrame = new Map<number, { cameraId: number; filename: string }[]>()
+  const maxDeltaNs = BigInt(
+    argoverse2Recipe.pipelines.cameraImages.nodes[0].params?.maxDeltaNs as number,
+  )
   for (let fi = 0; fi < manifest.frames.length; fi++) {
     const frame = manifest.frames[fi]
     const images: { cameraId: number; filename: string }[] = []
@@ -106,6 +111,11 @@ export function discoverAV2FramesFromManifest(
       if (camId === undefined) continue
       const camTs = frame.cameras[camName]
       if (!camTs) continue
+      const cameraTimestamp = BigInt(camTs)
+      const delta = cameraTimestamp >= lidarTimestamps[fi]
+        ? cameraTimestamp - lidarTimestamps[fi]
+        : lidarTimestamps[fi] - cameraTimestamp
+      if (delta > maxDeltaNs) continue
       images.push({
         cameraId: camId,
         filename: `sensors/cameras/${camName}/${camTs}.jpg`,
@@ -136,38 +146,43 @@ export async function buildAV2LogDatabase(
   manifest?: AV2Manifest,
 ): Promise<AV2LogDatabase> {
   console.time('[AV2] buildDatabase')
+  const sourceParams = (sourceId: string): FeatherColumnsParamsV1 =>
+    argoverse2Recipe.sources[sourceId].params as unknown as FeatherColumnsParamsV1
   // 1. Read calibration files (small — row objects OK)
   const extrinsicsFile = logFiles.get('calibration/egovehicle_SE3_sensor.feather')
   const intrinsicsFile = logFiles.get('calibration/intrinsics.feather')
 
   const extrinsicsBySensor = new Map<string, number[]>()
   if (extrinsicsFile) {
-    const rows = await readFeatherFile(extrinsicsFile)
-    for (const row of rows) {
-      const sensorName = row['sensor_name'] as string
-      const qw = row['qw'] as number
-      const qx = row['qx'] as number
-      const qy = row['qy'] as number
-      const qz = row['qz'] as number
-      const tx = row['tx_m'] as number
-      const ty = row['ty_m'] as number
-      const tz = row['tz_m'] as number
+    const { columns, numRows } = await readFeatherColumnsV1(extrinsicsFile, sourceParams('extrinsics'))
+    for (let index = 0; index < numRows; index += 1) {
+      const sensorName = String(columns.sensor_name[index])
+      const qw = Number(columns.qw[index])
+      const qx = Number(columns.qx[index])
+      const qy = Number(columns.qy[index])
+      const qz = Number(columns.qz[index])
+      const tx = Number(columns.tx_m[index])
+      const ty = Number(columns.ty_m[index])
+      const tz = Number(columns.tz_m[index])
       extrinsicsBySensor.set(sensorName, quaternionToMatrix4x4([qw, qx, qy, qz], [tx, ty, tz]))
     }
   }
 
-  const intrinsicsBySensor = new Map<string, { fx: number; fy: number; cx: number; cy: number; width: number; height: number }>()
+  const intrinsicsBySensor = new Map<string, { fx: number; fy: number; cx: number; cy: number; k1: number; k2: number; k3: number; width: number; height: number }>()
   if (intrinsicsFile) {
-    const rows = await readFeatherFile(intrinsicsFile)
-    for (const row of rows) {
-      const sensorName = row['sensor_name'] as string
+    const { columns, numRows } = await readFeatherColumnsV1(intrinsicsFile, sourceParams('intrinsics'))
+    for (let index = 0; index < numRows; index += 1) {
+      const sensorName = String(columns.sensor_name[index])
       intrinsicsBySensor.set(sensorName, {
-        fx: row['fx_px'] as number,
-        fy: row['fy_px'] as number,
-        cx: row['cx_px'] as number,
-        cy: row['cy_px'] as number,
-        width: row['width_px'] as number,
-        height: row['height_px'] as number,
+        fx: Number(columns.fx_px[index]),
+        fy: Number(columns.fy_px[index]),
+        cx: Number(columns.cx_px[index]),
+        cy: Number(columns.cy_px[index]),
+        k1: Number(columns.k1[index]),
+        k2: Number(columns.k2[index]),
+        k3: Number(columns.k3[index]),
+        width: Number(columns.width_px[index]),
+        height: Number(columns.height_px[index]),
       })
     }
   }
@@ -177,7 +192,7 @@ export async function buildAV2LogDatabase(
   const posesByTimestamp = new Map<bigint, { qw: number; qx: number; qy: number; qz: number; tx: number; ty: number; tz: number }>()
   if (posesFile) {
     console.time('[AV2] poses')
-    const { columns: pc, numRows: pn } = await readFeatherColumns(posesFile)
+    const { columns: pc, numRows: pn } = await readFeatherColumnsV1(posesFile, sourceParams('poses'))
     const tsArr = pc['timestamp_ns'] ?? []
     const qwArr = pc['qw'] ?? []
     const qxArr = pc['qx'] ?? []
@@ -202,7 +217,7 @@ export async function buildAV2LogDatabase(
   const annotationsByTimestamp = new Map<bigint, Record<string, unknown>[]>()
   if (annotationsFile) {
     console.time('[AV2] annotations')
-    const { columns: ac, numRows: an } = await readFeatherColumns(annotationsFile)
+    const { columns: ac, numRows: an } = await readFeatherColumnsV1(annotationsFile, sourceParams('annotations'))
     const atsArr = ac['timestamp_ns'] ?? []
     const catArr = ac['category'] ?? []
     const trackArr = ac['track_uuid'] ?? []
@@ -216,7 +231,6 @@ export async function buildAV2LogDatabase(
     const alArr = ac['length_m'] ?? []
     const awArr = ac['width_m'] ?? []
     const ahArr = ac['height_m'] ?? []
-    const aniArr = ac['num_interior_pts'] ?? []
     for (let i = 0; i < an; i++) {
       const ts = BigInt(atsArr[i] as number | bigint)
       let list = annotationsByTimestamp.get(ts)
@@ -231,7 +245,6 @@ export async function buildAV2LogDatabase(
         qw: aqwArr[i], qx: aqxArr[i], qy: aqyArr[i], qz: aqzArr[i],
         tx_m: atxArr[i], ty_m: atyArr[i], tz_m: atzArr[i],
         length_m: alArr[i], width_m: awArr[i], height_m: ahArr[i],
-        num_interior_pts: aniArr[i],
       })
     }
     console.timeEnd('[AV2] annotations')
@@ -290,7 +303,11 @@ export async function buildAV2LogDatabase(
         const camTimestamps = cameraTimestampsByCam.get(camName)
         if (!camTimestamps || camTimestamps.length === 0) continue
 
-        const closestTs = findClosestTimestamp(camTimestamps, lidarTs)
+        const maxDeltaNs = BigInt(
+          argoverse2Recipe.pipelines.cameraImages.nodes[0].params?.maxDeltaNs as number,
+        )
+        const closestTs = alignNearestTimestampV1(camTimestamps, lidarTs, maxDeltaNs)
+        if (closestTs === null) continue
         const filename = cameraFilenameByCamAndTs.get(`${camName}:${closestTs}`)
         if (filename) {
           images.push({ cameraId: camId, filename })
@@ -528,26 +545,4 @@ export function loadAV2LogMetadata(db: AV2LogDatabase): MetadataBundle {
     hasBoxData: lidarBoxByFrame.size > 0,
     segmentMeta: sceneMeta,
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Binary search for closest timestamp in a sorted array. */
-function findClosestTimestamp(sorted: bigint[], target: bigint): bigint {
-  let lo = 0
-  let hi = sorted.length - 1
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (sorted[mid] < target) lo = mid + 1
-    else hi = mid
-  }
-  // Check neighbors
-  if (lo > 0) {
-    const diffLo = target - sorted[lo - 1]
-    const diffHi = sorted[lo] - target
-    if (diffLo < diffHi) return sorted[lo - 1]
-  }
-  return sorted[lo]
 }

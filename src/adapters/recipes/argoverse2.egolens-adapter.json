@@ -97,7 +97,18 @@
         "y",
         "z",
         "intensity"
-      ]
+      ],
+      "params": {
+        "columns": [
+          { "name": "x", "type": "float16" },
+          { "name": "y", "type": "float16" },
+          { "name": "z", "type": "float16" },
+          { "name": "intensity", "type": "uint8" }
+        ],
+        "maxInputBytes": 16777216,
+        "maxRows": 250000,
+        "maxOutputBytes": 33554432
+      }
     },
     "cameraFrames": {
       "reader": "image.encoded_bytes",
@@ -113,12 +124,46 @@
       "reader": "feather.columns",
       "files": {
         "exact": "calibration/egovehicle_SE3_sensor.feather"
+      },
+      "columns": ["sensor_name", "qw", "qx", "qy", "qz", "tx_m", "ty_m", "tz_m"],
+      "params": {
+        "columns": [
+          { "name": "sensor_name", "type": "utf8" },
+          { "name": "qw", "type": "float64" },
+          { "name": "qx", "type": "float64" },
+          { "name": "qy", "type": "float64" },
+          { "name": "qz", "type": "float64" },
+          { "name": "tx_m", "type": "float64" },
+          { "name": "ty_m", "type": "float64" },
+          { "name": "tz_m", "type": "float64" }
+        ],
+        "maxInputBytes": 1048576,
+        "maxRows": 128,
+        "maxOutputBytes": 1048576
       }
     },
     "intrinsics": {
       "reader": "feather.columns",
       "files": {
         "exact": "calibration/intrinsics.feather"
+      },
+      "columns": ["sensor_name", "fx_px", "fy_px", "cx_px", "cy_px", "k1", "k2", "k3", "height_px", "width_px"],
+      "params": {
+        "columns": [
+          { "name": "sensor_name", "type": "utf8" },
+          { "name": "fx_px", "type": "float64" },
+          { "name": "fy_px", "type": "float64" },
+          { "name": "cx_px", "type": "float64" },
+          { "name": "cy_px", "type": "float64" },
+          { "name": "k1", "type": "float64" },
+          { "name": "k2", "type": "float64" },
+          { "name": "k3", "type": "float64" },
+          { "name": "height_px", "type": "uint16" },
+          { "name": "width_px", "type": "uint16" }
+        ],
+        "maxInputBytes": 1048576,
+        "maxRows": 128,
+        "maxOutputBytes": 1048576
       }
     },
     "annotations": {
@@ -140,7 +185,27 @@
         "length_m",
         "width_m",
         "height_m"
-      ]
+      ],
+      "params": {
+        "columns": [
+          { "name": "timestamp_ns", "type": "int64" },
+          { "name": "category", "type": "utf8" },
+          { "name": "track_uuid", "type": "utf8" },
+          { "name": "qw", "type": "float64" },
+          { "name": "qx", "type": "float64" },
+          { "name": "qy", "type": "float64" },
+          { "name": "qz", "type": "float64" },
+          { "name": "tx_m", "type": "float64" },
+          { "name": "ty_m", "type": "float64" },
+          { "name": "tz_m", "type": "float64" },
+          { "name": "length_m", "type": "float64" },
+          { "name": "width_m", "type": "float64" },
+          { "name": "height_m", "type": "float64" }
+        ],
+        "maxInputBytes": 33554432,
+        "maxRows": 1000000,
+        "maxOutputBytes": 268435456
+      }
     },
     "poses": {
       "reader": "feather.columns",
@@ -156,7 +221,22 @@
         "tx_m",
         "ty_m",
         "tz_m"
-      ]
+      ],
+      "params": {
+        "columns": [
+          { "name": "timestamp_ns", "type": "int64" },
+          { "name": "qw", "type": "float64" },
+          { "name": "qx", "type": "float64" },
+          { "name": "qy", "type": "float64" },
+          { "name": "qz", "type": "float64" },
+          { "name": "tx_m", "type": "float64" },
+          { "name": "ty_m", "type": "float64" },
+          { "name": "tz_m", "type": "float64" }
+        ],
+        "maxInputBytes": 33554432,
+        "maxRows": 1000000,
+        "maxOutputBytes": 268435456
+      }
     }
   },
   "scene": {
@@ -685,7 +765,8 @@
           },
           "params": {
             "timestampField": "timestamp_ns",
-            "mode": "nearest"
+            "mode": "nearest",
+            "maxDeltaNs": 1000000
           }
         }
       ],
@@ -725,7 +806,8 @@
             "extrinsics": "extrinsics.rows"
           },
           "params": {
-            "timestampFrom": "numeric-path"
+            "timestampFrom": "numeric-path",
+            "maxDeltaNs": 50000000
           }
         }
       ],
@@ -791,7 +873,7 @@
           "op": "records.select",
           "version": 1,
           "inputs": {
-            "poses": "poses.rows"
+            "rows": "poses.rows"
           },
           "params": {
             "fields": [
