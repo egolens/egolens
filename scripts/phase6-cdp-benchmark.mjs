@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import os from 'node:os'
 import path from 'node:path'
@@ -49,6 +50,31 @@ const heapSnapshotOutput = options['heap-snapshot']
 if (heapSnapshotOutput && warmupCount + runCount !== 1) {
   throw new Error('--heap-snapshot is diagnostic-only and requires exactly one total run')
 }
+const conformanceConfig = options['conformance-config']
+  ? JSON.parse(await readFile(path.resolve(String(options['conformance-config'])), 'utf8'))
+  : null
+const conformanceOutput = options['conformance-output']
+  ? path.resolve(String(options['conformance-output']))
+  : null
+const perceptualOutputDirectory = options['perceptual-output-dir']
+  ? path.resolve(String(options['perceptual-output-dir']))
+  : null
+if (Boolean(conformanceConfig) !== Boolean(conformanceOutput)) {
+  throw new Error('--conformance-config and --conformance-output must be provided together')
+}
+if (conformanceConfig && (warmupCount !== 0 || runCount !== 1)) {
+  throw new Error('conformance capture requires --warmups 0 --runs 1')
+}
+if (conformanceConfig && (seekCount !== 0 || sceneSwitchCount !== 0 || playbackLoops !== 0)) {
+  throw new Error('conformance capture requires --seeks 0 --scene-switches 0 --playback-loops 0')
+}
+if (conformanceConfig && (!conformanceConfig.datasetId || !conformanceConfig.caseId
+  || !/^sha256-[0-9a-f]{64}$/u.test(conformanceConfig.sourceFingerprint)
+  || !Array.isArray(conformanceConfig.frameIndices) || conformanceConfig.frameIndices.length === 0
+  || !Array.isArray(conformanceConfig.requiredCapabilities)
+  || !Array.isArray(conformanceConfig.perceptualCaptures))) {
+  throw new Error('Invalid conformance capture configuration')
+}
 const viewport = String(options.viewport ?? '1440x900').split('x').map(Number)
 const switchScenarios = options['switch-scenarios']
   ? JSON.parse(await readFile(path.resolve(String(options['switch-scenarios'])), 'utf8'))
@@ -65,6 +91,7 @@ function withPerf(urlString) {
   url.searchParams.set('perf', '1')
   url.searchParams.set('benchmarkHold', '1')
   url.searchParams.set('speed', '4')
+  if (conformanceConfig) url.searchParams.set('oracleCapture', '1')
   return url.href
 }
 
@@ -188,6 +215,80 @@ async function exerciseFeatureToggles(client, pageSession) {
     }
     return true;
   })()`)
+}
+
+async function captureConformanceArtifact(client, pageSession) {
+  const descriptor = await evaluate(
+    client,
+    pageSession,
+    'globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor() ?? null',
+  )
+  const expectedCapabilities = [...conformanceConfig.requiredCapabilities].sort()
+  if (!descriptor || descriptor.datasetId !== conformanceConfig.datasetId
+    || JSON.stringify(descriptor.capabilities) !== JSON.stringify(expectedCapabilities)
+    || Math.max(...conformanceConfig.frameIndices) >= descriptor.frameCount) {
+    throw new Error(`Conformance descriptor does not match the reviewed target: ${JSON.stringify(descriptor)}`)
+  }
+
+  if (perceptualOutputDirectory) await mkdir(perceptualOutputDirectory, { recursive: true })
+  const references = []
+  for (const capture of conformanceConfig.perceptualCaptures) {
+    if (!capture?.id || !Number.isSafeInteger(capture.frameIndex) || !capture.selector) {
+      throw new Error('Each perceptual capture requires id, frameIndex, and selector')
+    }
+    await evaluate(client, pageSession, `globalThis.__EGOLENS_ORACLE_CAPTURE__.setPresentation(${JSON.stringify(capture.presentation ?? {})}); true`)
+    const actualFrame = await evaluate(client, pageSession, `globalThis.__EGOLENS_ORACLE_CAPTURE__.seekFrame(${capture.frameIndex})`)
+    if (actualFrame !== capture.frameIndex) throw new Error(`Failed to present conformance frame ${capture.frameIndex}`)
+    await waitFor(client, pageSession, `[...document.images].every((image) => image.complete)`)
+    await delay(settleMs)
+    const clip = await evaluate(client, pageSession, `(() => {
+      const element = document.querySelector(${JSON.stringify(capture.selector)});
+      if (!(element instanceof HTMLElement)) return null;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.left, y: rect.top, width: rect.width, height: rect.height, scale: 1 };
+    })()`)
+    if (!clip || clip.width <= 0 || clip.height <= 0) {
+      throw new Error(`Perceptual capture selector is missing or empty: ${capture.selector}`)
+    }
+    const screenshot = await client.send('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: false,
+      clip,
+    }, pageSession, timeoutMs)
+    const bytes = Buffer.from(screenshot.data, 'base64')
+    const reference = {
+      id: capture.id,
+      sha256: `sha256-${createHash('sha256').update(bytes).digest('hex')}`,
+      width: Math.round(clip.width),
+      height: Math.round(clip.height),
+    }
+    references.push(reference)
+    if (perceptualOutputDirectory) {
+      await writeFile(path.join(perceptualOutputDirectory, `${capture.id}.png`), bytes, { flag: 'wx' })
+    }
+  }
+
+  const capturedAt = new Date().toISOString()
+  const artifact = await evaluate(client, pageSession, `globalThis.__EGOLENS_ORACLE_CAPTURE__.capture(${JSON.stringify({
+    datasetId: conformanceConfig.datasetId,
+    caseId: conformanceConfig.caseId,
+    sourceFingerprint: conformanceConfig.sourceFingerprint,
+    capturedAt,
+    frameIndices: conformanceConfig.frameIndices,
+    requiredCapabilities: conformanceConfig.requiredCapabilities,
+    sampleValuesPerBuffer: conformanceConfig.sampleValuesPerBuffer ?? 64,
+    perceptualReferences: references,
+  })})`)
+  if (!artifact?.artifactHash) throw new Error('Conformance capture returned no artifact')
+  await mkdir(path.dirname(conformanceOutput), { recursive: true })
+  await writeFile(conformanceOutput, `${JSON.stringify(artifact)}\n`, { flag: 'wx' })
+  return {
+    target: artifact.target,
+    coverage: artifact.coverage,
+    artifactHash: artifact.artifactHash,
+    generatorCommit: artifact.provenance?.generatorCommit ?? null,
+  }
 }
 
 function quantile(values, q) {
@@ -365,9 +466,17 @@ async function runScenario(client, browserVersion, runIndex) {
     try { dom = await client.send('Memory.getDOMCounters', {}, pageSession) } catch { /* unavailable on worker-only targets */ }
     const performanceMetrics = await client.send('Performance.getMetrics', {}, pageSession)
     let app = null
+    let oracleCapture = null
     try {
       app = await evaluate(client, pageSession, 'globalThis.__EGOLENS_PERF__?.snapshot() ?? null')
     } catch { /* The document may be between navigations. */ }
+    try {
+      oracleCapture = await evaluate(
+        client,
+        pageSession,
+        'globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor() ?? null',
+      )
+    } catch { /* The optional trusted capture hook is absent in normal runs. */ }
     let documentShape = null
     try {
       documentShape = await evaluate(client, pageSession, `({
@@ -389,6 +498,7 @@ async function runScenario(client, browserVersion, runIndex) {
       dom,
       performanceMetrics: performanceMetrics.metrics,
       app,
+      oracleCapture,
       documentShape,
       liveWorkerTargets: [...workers.values()].map(({ sessionId: _sessionId, ...worker }) => worker),
     }
@@ -413,6 +523,9 @@ async function runScenario(client, browserVersion, runIndex) {
   await waitFor(client, pageSession, `Boolean(globalThis.__EGOLENS_PERF__?.snapshot().marks.some((mark) => mark.name.startsWith('egolens:first-usable-frame:')))`)
   await delay(settleMs)
   snapshots.afterWarmup = await capture('after-warmup-settle')
+  const conformance = conformanceConfig
+    ? await captureConformanceArtifact(client, pageSession)
+    : null
 
   if (playbackLoops > 0) {
     await evaluate(client, pageSession, `(async () => {
@@ -505,6 +618,7 @@ async function runScenario(client, browserVersion, runIndex) {
     network: [...network.values()],
     trace,
     heapSnapshot,
+    conformance,
     traceCollection: {
       eventsSeen: traceEventsSeen,
       retainedEvents: trace.length,

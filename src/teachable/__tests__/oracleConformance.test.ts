@@ -25,6 +25,9 @@ const PERCEPTUAL: PerceptualReferenceV1 = {
   height: 180,
 }
 
+const PRODUCER_COMMIT = 'a42f658e27fce118789d3648e2612f5d25b99488'
+const SOURCE_FINGERPRINT = `sha256-${'c'.repeat(64)}`
+
 function makeScene(value = 1, dispose = vi.fn()): NormalizedSceneV1 {
   const frame: NormalizedFrameV1 = {
     index: 0,
@@ -87,6 +90,12 @@ async function capture(
     {
       datasetId: 'waymo',
       caseId: 'fixture-case',
+      provenance: {
+        generatorCommit: PRODUCER_COMMIT,
+        runtimeId: 'legacy-test-build',
+        sourceFingerprint: SOURCE_FINGERPRINT,
+        capturedAt: '2026-08-30T00:00:00.000Z',
+      },
       requiredCapabilities: options.requiredCapabilities ?? ['timeline', 'pointClouds'],
       frameIndices: [0],
       sampleValuesPerBuffer: 3,
@@ -97,9 +106,9 @@ async function capture(
 
 async function bundle(artifact: SceneConformanceArtifactV1) {
   return createOracleBundleV1(artifact, {
-    generatorCommit: 'a42f658e27fce118789d3648e2612f5d25b99488',
+    generatorCommit: PRODUCER_COMMIT,
     legacyRuntimeId: 'legacy-test-build',
-    sourceFingerprint: await sha256CanonicalJsonV1({ source: 'fixture' }),
+    sourceFingerprint: SOURCE_FINGERPRINT,
     generatedAt: '2026-08-30T00:00:00.000Z',
   })
 }
@@ -130,6 +139,7 @@ describe('hidden oracle conformance artifacts', () => {
     })
 
     expect(receipt.passed).toBe(true)
+    expect(receipt.candidateGeneratorCommit).toBe(PRODUCER_COMMIT)
     expect(receipt.checks).toHaveLength(6)
     expect(await verifyOracleJudgeReceiptHashV1(receipt)).toBe(true)
     expect(JSON.stringify(receipt)).not.toContain('samples')
@@ -169,5 +179,27 @@ describe('hidden oracle conformance artifacts', () => {
     expect(receipt.passed).toBe(false)
     expect(receipt.checks.find((check) => check.name === 'integrity')).toMatchObject({ passed: false })
     expect(receipt.checks.find((check) => check.name === 'coverage')).toMatchObject({ passed: false })
+  })
+
+  it('rejects a candidate captured from a different source case', async () => {
+    const oracle = await bundle(await capture())
+    const candidate = await capture()
+    const changed = {
+      ...candidate,
+      provenance: {
+        ...candidate.provenance,
+        sourceFingerprint: `sha256-${'d'.repeat(64)}`,
+      },
+    }
+    const rehashed = {
+      ...changed,
+      artifactHash: await sha256CanonicalJsonV1(JSON.parse(JSON.stringify((({ artifactHash: _, ...value }) => value)(changed)))),
+    }
+    const receipt = await judgeSceneConformanceV1(oracle, rehashed, {
+      judgeVersion: 'test-v1',
+      judgedAt: '2026-08-30T01:00:00.000Z',
+    })
+
+    expect(receipt.checks.find((check) => check.name === 'target')).toMatchObject({ passed: false })
   })
 })

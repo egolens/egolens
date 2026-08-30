@@ -20,6 +20,7 @@ export interface PerceptualReferenceV1 {
 export interface SceneConformanceArtifactV1 {
   readonly kind: 'egolens-scene-conformance'
   readonly schemaVersion: 1
+  readonly provenance: SceneConformanceProvenanceV1
   readonly target: {
     readonly datasetId: string
     readonly caseId: string
@@ -35,6 +36,16 @@ export interface SceneConformanceArtifactV1 {
   readonly perceptual: readonly PerceptualReferenceV1[]
   readonly summaryHash: string
   readonly artifactHash: string
+}
+
+export interface SceneConformanceProvenanceV1 {
+  /** Exact source revision that produced this artifact. */
+  readonly generatorCommit: string
+  /** Immutable identifier for the producer/candidate runtime build. */
+  readonly runtimeId: string
+  /** Anonymized identity of the licensed source case. */
+  readonly sourceFingerprint: string
+  readonly capturedAt: string
 }
 
 export interface OracleBundleV1 {
@@ -53,6 +64,7 @@ export interface OracleBundleV1 {
 export interface ConformanceCaptureOptionsV1 {
   readonly datasetId: string
   readonly caseId: string
+  readonly provenance: SceneConformanceProvenanceV1
   readonly frameIndices?: readonly number[]
   readonly requiredCapabilities?: readonly NormalizedCapabilityV1[]
   readonly sampleValuesPerBuffer?: number
@@ -252,6 +264,9 @@ function artifactPayload(artifact: Omit<SceneConformanceArtifactV1, 'artifactHas
 
 export async function verifySceneConformanceArtifactV1(artifact: SceneConformanceArtifactV1): Promise<boolean> {
   if (artifact.kind !== 'egolens-scene-conformance' || artifact.schemaVersion !== 1) return false
+  if (!artifact.provenance?.generatorCommit || !artifact.provenance.runtimeId
+    || !/^sha256-[0-9a-f]{64}$/u.test(artifact.provenance.sourceFingerprint)
+    || !Number.isFinite(Date.parse(artifact.provenance.capturedAt))) return false
   const { artifactHash: _artifactHash, ...payload } = artifact
   const summaryHash = await sha256CanonicalJsonV1({
     structural: artifact.structural,
@@ -272,6 +287,11 @@ export async function captureSceneConformanceArtifactV1(
   options: ConformanceCaptureOptionsV1,
 ): Promise<SceneConformanceArtifactV1> {
   if (!options.datasetId || !options.caseId) throw new Error('Conformance target requires datasetId and caseId.')
+  if (!options.provenance?.generatorCommit || !options.provenance.runtimeId
+    || !/^sha256-[0-9a-f]{64}$/u.test(options.provenance.sourceFingerprint)
+    || !Number.isFinite(Date.parse(options.provenance.capturedAt))) {
+    throw new Error('Conformance capture provenance is incomplete or invalid.')
+  }
   const scene = await createScene()
   try {
     const frameCount = scene.index.timestampsMicros.length
@@ -369,6 +389,7 @@ export async function captureSceneConformanceArtifactV1(
     const withoutHash = {
       kind: 'egolens-scene-conformance' as const,
       schemaVersion: 1 as const,
+      provenance: { ...options.provenance },
       target: { datasetId: options.datasetId, caseId: options.caseId },
       coverage,
       structural,
@@ -394,6 +415,11 @@ export async function createOracleBundleV1(
     || !/^sha256-[0-9a-f]{64}$/u.test(provenance.sourceFingerprint)
     || !Number.isFinite(Date.parse(provenance.generatedAt))) {
     throw new Error('Oracle bundle provenance is incomplete or invalid.')
+  }
+  if (artifact.provenance.generatorCommit !== provenance.generatorCommit
+    || artifact.provenance.runtimeId !== provenance.legacyRuntimeId
+    || artifact.provenance.sourceFingerprint !== provenance.sourceFingerprint) {
+    throw new Error('Oracle artifact provenance does not match its bundle provenance.')
   }
   const payload = {
     kind: 'egolens-hidden-oracle' as const,

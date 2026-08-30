@@ -2,13 +2,26 @@ import { defineConfig, type Connect, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { createReadStream, statSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+
+function sourceCommit(): string {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: __dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
 
 /**
  * Vite plugin to serve waymo_data/ files with Range Request support.
  * hyparquet reads Parquet via asyncBufferFromUrl which uses Range headers
  * to fetch only the needed byte ranges (footer, row groups).
  */
-function installWaymoDataMiddleware(middlewares: Connect.Server): void {
+function installLocalEvidenceDataMiddleware(middlewares: Connect.Server): void {
   // Segment discovery: list available segments from vehicle_pose folder
   middlewares.use((req, res, next) => {
     if (req.url !== '/api/segments') return next()
@@ -29,52 +42,80 @@ function installWaymoDataMiddleware(middlewares: Connect.Server): void {
     }
   })
 
-  // Serve waymo_data/ files with Range Request support
+  // Serve the three approved local evidence roots with Range Request support.
+  // These middlewares exist only in Vite dev/preview and are never emitted in
+  // the browser bundle.
   middlewares.use((req, res, next) => {
-    if (!req.url?.startsWith('/waymo_data/')) return next()
-
-    const filePath = path.resolve(__dirname, req.url.slice(1))
+    if (!req.url) return next()
+    const pathname = new URL(req.url, 'http://127.0.0.1').pathname
+    const localRoots = [
+      {
+        prefix: '/waymo_data/',
+        root: path.resolve(__dirname, process.env.VITE_WAYMO_DATA_PATH || './waymo_data'),
+      },
+      { prefix: '/v1.0-mini/', root: path.resolve(__dirname, './v1.0-mini') },
+      { prefix: '/argo/', root: path.resolve(__dirname, './argo') },
+    ]
+    const match = localRoots.find(({ prefix }) => pathname.startsWith(prefix))
+    if (!match) return next()
+    const relative = decodeURIComponent(pathname.slice(match.prefix.length))
+    const filePath = path.resolve(match.root, relative)
+    if (filePath !== match.root && !filePath.startsWith(`${match.root}${path.sep}`)) return next()
     let stat
     try {
       stat = statSync(filePath)
     } catch {
       return next()
     }
+    if (!stat.isFile()) return next()
+
+    const contentType = filePath.endsWith('.json') ? 'application/json'
+      : filePath.endsWith('.jpg') || filePath.endsWith('.jpeg') ? 'image/jpeg'
+        : filePath.endsWith('.png') ? 'image/png'
+          : 'application/octet-stream'
 
     const range = req.headers.range
     if (range) {
       const parts = range.replace('bytes=', '').split('-')
       const start = parseInt(parts[0], 10)
       const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)
+        || start < 0 || end < start || end >= stat.size) {
+        res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
+        res.end()
+        return
+      }
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${stat.size}`,
         'Content-Length': end - start + 1,
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
       })
-      createReadStream(filePath, { start, end }).pipe(res)
+      if (req.method === 'HEAD') res.end()
+      else createReadStream(filePath, { start, end }).pipe(res)
     } else {
       res.writeHead(200, {
         'Content-Length': stat.size,
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
       })
-      createReadStream(filePath).pipe(res)
+      if (req.method === 'HEAD') res.end()
+      else createReadStream(filePath).pipe(res)
     }
   })
 }
 
-function serveWaymoData(): Plugin {
+function serveLocalEvidenceData(): Plugin {
   return {
-    name: 'serve-waymo-data',
+    name: 'serve-local-evidence-data',
     configureServer(server) {
-      installWaymoDataMiddleware(server.middlewares)
+      installLocalEvidenceDataMiddleware(server.middlewares)
     },
     configurePreviewServer(server) {
       // Normative Phase 6 measurements use a production build. Serving the
       // same pinned local Waymo files in preview avoids invalid dev/HMR DOM
       // baselines while preserving the Range-request behavior hyparquet uses.
-      installWaymoDataMiddleware(server.middlewares)
+      installLocalEvidenceDataMiddleware(server.middlewares)
     },
   }
 }
@@ -142,7 +183,10 @@ export default defineConfig(() => ({
   // Served from the apex custom domain (public/CNAME), so assets live at the root.
   // GitHub Pages 301s egolens.github.io/egolens/* → egolens.org/*, keeping old links alive.
   base: '/',
-  plugins: [react(), releaseR3fRetainedRoots(), serveWaymoData()],
+  define: {
+    __EGOLENS_GIT_COMMIT__: JSON.stringify(sourceCommit()),
+  },
+  plugins: [react(), releaseR3fRetainedRoots(), serveLocalEvidenceData()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

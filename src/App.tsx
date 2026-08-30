@@ -1,5 +1,17 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useSceneStore, getThumbnailResolver, getSegmentSplits } from './stores/useSceneStore'
+import {
+  useSceneStore,
+  createActiveConformanceScene,
+  getActiveConformanceDescriptor,
+  getThumbnailResolver,
+  getSegmentSplits,
+  type BoxMode,
+  type ColormapMode,
+} from './stores/useSceneStore'
+import type {
+  ConformanceCaptureOptionsV1,
+  SceneConformanceArtifactV1,
+} from './teachable/conformance/oracleArtifacts'
 import LidarViewer, { type ViewerChrome } from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
@@ -167,6 +179,91 @@ function useBenchmarkLoadCommand() {
   }, [])
 }
 
+interface BrowserConformanceCaptureV1 {
+  readonly schemaVersion: 1
+  readonly buildCommit: string
+  descriptor(): ReturnType<typeof getActiveConformanceDescriptor>
+  capture(options: Omit<ConformanceCaptureOptionsV1, 'provenance'> & {
+    readonly sourceFingerprint: string
+    readonly capturedAt?: string
+  }): Promise<SceneConformanceArtifactV1>
+  seekFrame(index: number): Promise<number>
+  setPresentation(options: {
+    readonly colormapMode?: ColormapMode
+    readonly boxMode?: BoxMode
+    readonly cameraSegmentation?: boolean
+    readonly activeCamera?: number | null
+  }): void
+}
+
+declare global {
+  interface Window {
+    __EGOLENS_ORACLE_CAPTURE__?: BrowserConformanceCaptureV1
+  }
+}
+
+/** Installed only for an explicit local/trusted capture run. */
+function useOracleCaptureCommand() {
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('oracleCapture') !== '1') return
+    const api: BrowserConformanceCaptureV1 = Object.freeze({
+      schemaVersion: 1,
+      buildCommit: __EGOLENS_GIT_COMMIT__,
+      descriptor: () => getActiveConformanceDescriptor(),
+      async capture(options: Omit<ConformanceCaptureOptionsV1, 'provenance'> & {
+        readonly sourceFingerprint: string
+        readonly capturedAt?: string
+      }) {
+        if (!/^[0-9a-f]{40}$/u.test(__EGOLENS_GIT_COMMIT__)) {
+          throw new Error('Conformance capture requires an exact Git build commit.')
+        }
+        const { sourceFingerprint, capturedAt, ...captureOptions } = options
+        const { captureSceneConformanceArtifactV1 } = await import('./teachable/conformance/oracleArtifacts')
+        return captureSceneConformanceArtifactV1(
+          createActiveConformanceScene,
+          {
+            ...captureOptions,
+            provenance: {
+              generatorCommit: __EGOLENS_GIT_COMMIT__,
+              runtimeId: `egolens-recipe-${__EGOLENS_GIT_COMMIT__}`,
+              sourceFingerprint,
+              capturedAt: capturedAt ?? new Date().toISOString(),
+            },
+          },
+        )
+      },
+      async seekFrame(index: number) {
+        const store = useSceneStore.getState()
+        store.actions.pause()
+        await store.actions.seekFrame(index)
+        return useSceneStore.getState().currentFrameIndex
+      },
+      setPresentation(options: {
+        readonly colormapMode?: ColormapMode
+        readonly boxMode?: BoxMode
+        readonly cameraSegmentation?: boolean
+        readonly activeCamera?: number | null
+      }) {
+        const store = useSceneStore.getState()
+        if (options.colormapMode) store.actions.setColormapMode(options.colormapMode)
+        if (options.boxMode) store.actions.setBoxMode(options.boxMode)
+        if (options.cameraSegmentation !== undefined
+          && options.cameraSegmentation !== store.showCameraSeg) store.actions.toggleCameraSeg()
+        if (options.activeCamera !== undefined) store.actions.setActiveCam(options.activeCamera)
+      },
+    })
+    Object.defineProperty(window, '__EGOLENS_ORACLE_CAPTURE__', {
+      configurable: true,
+      enumerable: false,
+      writable: false,
+      value: api,
+    })
+    return () => {
+      delete window.__EGOLENS_ORACLE_CAPTURE__
+    }
+  }, [])
+}
+
 // ---------------------------------------------------------------------------
 // URL view restore: apply shared view state params once data is ready
 // ---------------------------------------------------------------------------
@@ -302,6 +399,7 @@ function App() {
   useSegmentDiscovery()
   useUrlAutoLoad()
   useBenchmarkLoadCommand()
+  useOracleCaptureCommand()
   useUrlViewRestore()
   useEmbedInitialState(embedParams)
 
@@ -1818,9 +1916,15 @@ function SensorView({ embedControls = 'full' }: { embedControls?: ViewerChrome }
   const hideCameraStrip = !showCameraStrip
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div
+      data-egolens-capture-region="viewer"
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+    >
       {/* LiDAR 3D View — main area */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div
+        data-egolens-capture-region="viewport"
+        style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+      >
         <div style={{ position: 'absolute', inset: 0 }}>
           {status === 'ready' ? (
             <>

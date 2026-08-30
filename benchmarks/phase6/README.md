@@ -69,6 +69,28 @@ captures the page heap after the forced-GC diagnostic point. Heap snapshots can
 contain source URLs and application data, are not normative gate inputs, and
 must remain outside version control.
 
+The same runner can capture one candidate conformance artifact plus its PNG
+references for Spec 013. The config contains reviewed case identity, source
+fingerprint, capabilities, frames, presentation settings, and stable capture
+selectors, so it must remain outside Git with the licensed evidence:
+
+```bash
+npm run benchmark:phase6 -- \
+  --dataset nuscenes \
+  --url 'http://127.0.0.1:4173/?dataset=nuscenes&data=http%3A%2F%2F127.0.0.1%3A4173%2F&scene=scene-0103' \
+  --conformance-config /protected/nuscenes-conformance-config.json \
+  --conformance-output /transfer/nuscenes.candidate.json \
+  --perceptual-output-dir /transfer/nuscenes-png \
+  --output /transfer/nuscenes-capture-run.json \
+  --warmups 0 --runs 1 --seeks 0 --scene-switches 0 --playback-loops 0
+```
+
+Conformance mode automatically enables the explicit `oracleCapture=1` command
+surface, requires a production build with an exact injected Git commit, creates
+a fresh scene for structural/numeric capture, and disposes it in `finally`.
+Output files use exclusive creation so a rerun cannot silently replace reviewed
+evidence.
+
 `usedSize` may be summed across page/worker targets only under the formula
 written into each result. It is not total browser, process, or GPU memory.
 Exact GPU bytes are not reported; renderer resource counts are the portable

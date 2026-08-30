@@ -1,6 +1,6 @@
 # Spec 013 — Teachable Lens hidden-oracle retention
 
-**Status**: in-progress · **Date**: 2026-08-30
+**Status**: in-progress (reviewed cases and protected GitHub judge provisioned; real bundles/receipts pending) · **Date**: 2026-08-30
 
 **Relationship to earlier specs**: this is the normative addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phases 6 and 9 and
@@ -92,6 +92,14 @@ numeric, and perceptual parity. Its public output is a signed
 - mismatch JSON pointers without expected oracle values;
 - judge version, timestamp, receipt hash, signing key ID, and signature.
 
+The candidate artifact must also carry its exact generator commit, immutable
+runtime ID, anonymized source fingerprint, and capture timestamp. The judge
+compares the source fingerprint without publishing it and places the candidate
+commit/runtime identity in the signed receipt. The deletion gate must require
+that candidate commit to equal the exact PR HEAD. An artifact hash alone is not
+sufficient: without this binding, an older passing artifact could be replayed
+after the candidate code changes.
+
 Detailed oracle-side diagnostics remain a trusted human artifact. The
 authoring loop cannot query the judge repeatedly as an oracle-extraction API.
 
@@ -115,6 +123,8 @@ Repository code provides:
 - deterministic canonicalization and SHA-256 integrity;
 - a judge implementation that reports paths but not expected values;
 - an Ed25519-signed receipt CLI and a three-dataset receipt gate;
+- exact candidate-commit and anonymized source-case binding from artifact to
+  signed receipt to PR gate;
 - a reviewed requirement manifest that pins every target case's public coverage
   declaration so an underspecified oracle cannot pass the deletion gate;
 - tests for deterministic capture, drift detection, tamper rejection,
@@ -124,6 +134,15 @@ Repository code provides:
 The repository intentionally does not contain real hidden oracle bundles or a
 private signing key. Provisioning the protected storage, producer inputs, and
 judge key is release evidence work, not browser runtime functionality.
+
+For the initial promotion, the protected GitHub Environment is
+`phase6-oracle-judge`. It requires `happyhj` approval, disallows administrator
+bypass, and accepts deployments only from `codex/spec-006-phase-6` or `main`.
+Because the repository is public, hidden bundles and candidates are compressed
+into a bounded, integrity-checked Environment-secret envelope. Only public
+signed receipts and the gate report may be retained as ordinary Actions
+artifacts. The secret-bearing job executes only an Environment-pinned immutable
+judge-tool commit; it must not check out, install, or execute the candidate PR.
 
 ## Phase 6 gate additions
 
@@ -141,6 +160,8 @@ judge key is release evidence work, not browser runtime functionality.
 - [ ] The receipt gate verifies all three datasets with the configured public
       key and exact reviewed target coverage before the Phase 6 deletion PR
       becomes mergeable.
+- [ ] Every receipt binds the candidate artifact to the exact Phase 6 PR HEAD;
+      a stale candidate artifact fails before judging.
 - [ ] Spec 012 performance/lifecycle evidence passes independently; oracle
       parity and runtime performance never substitute for one another.
 

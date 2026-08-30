@@ -43,6 +43,9 @@ function artifactPayload(artifact) {
 
 export function verifyArtifact(artifact) {
   if (!artifact || artifact.kind !== 'egolens-scene-conformance' || artifact.schemaVersion !== 1) return false
+  if (!artifact.provenance?.generatorCommit || !artifact.provenance.runtimeId
+    || !/^sha256-[0-9a-f]{64}$/u.test(artifact.provenance.sourceFingerprint)
+    || !Number.isFinite(Date.parse(artifact.provenance.capturedAt))) return false
   const summaryHash = sha256Canonical({
     structural: artifact.structural,
     numeric: artifact.numeric,
@@ -55,7 +58,11 @@ export function verifyArtifact(artifact) {
 export function verifyBundle(bundle) {
   if (!bundle || bundle.kind !== 'egolens-hidden-oracle' || bundle.schemaVersion !== 1) return false
   const { bundleHash: _bundleHash, ...payload } = bundle
-  return verifyArtifact(bundle.artifact) && sha256Canonical(payload) === bundle.bundleHash
+  return verifyArtifact(bundle.artifact)
+    && bundle.artifact.provenance.generatorCommit === bundle.provenance?.generatorCommit
+    && bundle.artifact.provenance.runtimeId === bundle.provenance?.legacyRuntimeId
+    && bundle.artifact.provenance.sourceFingerprint === bundle.provenance?.sourceFingerprint
+    && sha256Canonical(payload) === bundle.bundleHash
 }
 
 function escapePointer(value) {
@@ -96,6 +103,7 @@ function mismatchPaths(expected, actual, prefix, limit = 32) {
 export function judgeBundle(oracle, candidate, { judgeVersion, judgedAt = new Date().toISOString() }) {
   if (!judgeVersion) throw new Error('judgeVersion is required')
   const targetMatches = canonicalize(oracle.artifact.target) === canonicalize(candidate.target)
+    && oracle.provenance.sourceFingerprint === candidate.provenance?.sourceFingerprint
   const coveragePaths = mismatchPaths(oracle.artifact.coverage, candidate.coverage, '/coverage')
   const structuralPaths = mismatchPaths(oracle.artifact.structural, candidate.structural, '/structural')
   const numericPaths = mismatchPaths(oracle.artifact.numeric, candidate.numeric, '/numeric')
@@ -118,6 +126,8 @@ export function judgeBundle(oracle, candidate, { judgeVersion, judgedAt = new Da
     oracleLegacyRuntimeId: oracle.provenance.legacyRuntimeId,
     oracleCoverage: oracle.artifact.coverage,
     candidateArtifactHash: candidate.artifactHash,
+    candidateGeneratorCommit: candidate.provenance?.generatorCommit,
+    candidateRuntimeId: candidate.provenance?.runtimeId,
     judgeVersion,
     judgedAt,
     checks,

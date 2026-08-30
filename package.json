@@ -14,7 +14,8 @@
     "benchmark:phase6": "node scripts/phase6-cdp-benchmark.mjs",
     "benchmark:phase6:compare": "node scripts/phase6-compare-benchmarks.mjs",
     "oracle:judge": "node scripts/phase6-oracle-judge.mjs",
-    "oracle:gate": "node scripts/phase6-oracle-receipt-gate.mjs"
+    "oracle:gate": "node scripts/phase6-oracle-receipt-gate.mjs",
+    "oracle:stage": "node scripts/phase6-stage-oracle-evidence.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

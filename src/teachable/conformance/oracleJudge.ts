@@ -33,6 +33,8 @@ export interface OracleJudgeReceiptV1 {
   /** Public capture declaration, not an oracle observation. */
   readonly oracleCoverage: SceneConformanceArtifactV1['coverage']
   readonly candidateArtifactHash: string
+  readonly candidateGeneratorCommit: string
+  readonly candidateRuntimeId: string
   readonly judgeVersion: string
   readonly judgedAt: string
   readonly checks: readonly OracleJudgeCheckV1[]
@@ -107,6 +109,7 @@ export async function judgeSceneConformanceV1(
     verifySceneConformanceArtifactV1(candidate),
   ])
   const targetMatches = canonicalizeJson(json(oracle.artifact.target)) === canonicalizeJson(json(candidate.target))
+    && oracle.provenance.sourceFingerprint === candidate.provenance.sourceFingerprint
   const coveragePaths = mismatchPaths(json(oracle.artifact.coverage), json(candidate.coverage), '/coverage')
   const structuralPaths = mismatchPaths(oracle.artifact.structural, candidate.structural, '/structural')
   const numericPaths = mismatchPaths(oracle.artifact.numeric, candidate.numeric, '/numeric')
@@ -133,6 +136,8 @@ export async function judgeSceneConformanceV1(
       perceptualReferenceIds: [...oracle.artifact.coverage.perceptualReferenceIds],
     },
     candidateArtifactHash: candidate.artifactHash,
+    candidateGeneratorCommit: candidate.provenance.generatorCommit,
+    candidateRuntimeId: candidate.provenance.runtimeId,
     judgeVersion: options.judgeVersion,
     judgedAt: options.judgedAt ?? new Date().toISOString(),
     checks,

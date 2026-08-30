@@ -23,6 +23,19 @@ interactively. The root-level `oracle-bundles/`, `oracle-candidates/`, and
 they are **not** a security boundary and must not be mounted into the author
 workspace.
 
+The initial reviewed cases are checked in at
+`benchmarks/oracle/phase6-requirements.json`. They intentionally use public,
+anonymized case IDs. The approved local inputs resolve to:
+
+| Dataset | Frames | Reviewed frame indices | Why selected |
+|---|---:|---|---|
+| Waymo | 198 | 0, 29, 79, 129, 197 | all available point/camera/box/trajectory capabilities; the middle frames include LiDAR and camera segmentation evidence |
+| nuScenes | 40 | 0, 19, 39 | `scene-0103`, including LiDAR, radar, cameras, boxes, trajectories, and segmentation |
+| Argoverse 2 | 157 | 0, 78, 156 | the approved local annotated urban log, including seven cameras and first/middle/last coverage |
+
+Raw segment/token/log IDs stay in the protected capture configuration and are
+represented in artifacts only by a shared SHA-256 source fingerprint.
+
 ## 1. Pin and record the legacy producer
 
 For the initial Phase 6 promotion, use pre-cutover commit
@@ -43,6 +56,14 @@ frame indices, and perceptual references. Use a SHA-256 of an anonymized case
 identity for `sourceFingerprint`; never include local paths, URLs, credentials,
 or raw licensed data in provenance.
 
+The production preview exposes `?oracleCapture=1` only as an explicit trusted
+capture command surface. It constructs a fresh recipe scene from the active
+source binding, records the exact build commit compiled by Vite, and disposes
+that scene in a `finally` block. `scripts/phase6-cdp-benchmark.mjs` accepts
+`--conformance-config`, `--conformance-output`, and
+`--perceptual-output-dir` for a one-run capture. The config and PNGs contain
+private case evidence and remain outside Git.
+
 ## 2. Capture the candidate
 
 Run the held-out recipe through the same public `NormalizedSceneV1` contract
@@ -54,6 +75,9 @@ transfer storage.
 Before transfer, `verifySceneConformanceArtifactV1` must return true. A
 candidate artifact contains its own observations; it contains no hidden oracle
 values.
+
+The candidate provenance commit must equal the exact PR HEAD; both the judge
+and final gate enforce this independently.
 
 ## 3. Judge once and sign
 
@@ -75,6 +99,7 @@ npm run oracle:judge -- \
   --private-key /protected/judge-private.pem \
   --key-id phase6-2026-08 \
   --judge-version spec013-v1 \
+  --expected-candidate-commit <exact-pr-head-sha> \
   --output /receipts/waymo.json
 ```
 
@@ -85,6 +110,36 @@ JSON-pointer mismatch locations, never expected values.
 
 Repeat the protected producer, candidate, and judge jobs for `waymo`,
 `nuscenes`, and `argoverse2`.
+
+The repository is public, so never upload a hidden bundle as an ordinary
+Actions artifact. After all six inputs exist, stage one validated compressed
+envelope into the protected GitHub Environment:
+
+```bash
+npm run oracle:stage -- \
+  --environment phase6-oracle-judge \
+  --requirements benchmarks/oracle/phase6-requirements.json \
+  --expected-producer-commit a42f658e27fce118789d3648e2612f5d25b99488 \
+  --expected-candidate-commit <exact-pr-head-sha> \
+  --waymo-oracle /protected/waymo.oracle.json \
+  --waymo-candidate /transfer/waymo.candidate.json \
+  --nuscenes-oracle /protected/nuscenes.oracle.json \
+  --nuscenes-candidate /transfer/nuscenes.candidate.json \
+  --argoverse2-oracle /protected/argoverse2.oracle.json \
+  --argoverse2-candidate /transfer/argoverse2.candidate.json
+```
+
+The staging command validates integrity, provenance, source identity, and exact
+reviewed coverage before uploading 40KB chunks. It logs only sizes, chunk
+count, and the compressed-envelope hash. The Environment also holds the judge
+private key; the public key is
+`benchmarks/oracle/keys/phase6-2026-08-public.pem`.
+
+Set `PHASE6_ORACLE_JUDGE_TOOL_COMMIT` in that Environment to the reviewed,
+immutable commit containing the judge, gate, requirements, and public key.
+The secret-bearing job fetches only this commit; it never checks out, installs,
+or executes the PR candidate. The candidate enters the judge solely as the
+integrity-checked artifact whose provenance commit must equal the PR HEAD.
 
 ## 4. Enforce the deletion gate
 
@@ -123,6 +178,7 @@ npm run oracle:gate -- \
   --public-key /config/judge-public.pem \
   --key-id phase6-2026-08 \
   --expected-generator-commit a42f658e27fce118789d3648e2612f5d25b99488 \
+  --expected-candidate-commit <exact-pr-head-sha> \
   --output /evidence/phase6-oracle-gate.json
 ```
 
@@ -131,6 +187,13 @@ target, target coverage exactly matching the reviewed declaration, all three
 datasets represented, all six checks present and passing, valid Ed25519
 signatures, and the expected producer commit. Keep the Phase 6 PR in draft
 until this command and the independent Spec 012 performance gate both pass.
+
+After staging, add the `phase6-oracle-evidence` label to PR #20 (or remove and
+re-add it for a new HEAD). The workflow accepts only this same-repository Phase
+6 branch, waits for the `happyhj` Environment approval, reconstructs the inputs
+on an ephemeral GitHub-hosted runner, and uploads only signed receipts and the
+public gate report. A later code push triggers the workflow again and the stale
+candidate commit fails closed.
 
 After the evidence is retained according to the release policy, the executable
 legacy loader is no longer needed by Phase 9. Adapter Amnesia uses the public

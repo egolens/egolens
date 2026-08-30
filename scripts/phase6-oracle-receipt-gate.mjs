@@ -11,10 +11,12 @@ const receiptPaths = values('receipt')
 const publicKeyPath = value('public-key')
 const keyId = value('key-id')
 const expectedCommit = value('expected-generator-commit')
+const expectedCandidateCommit = value('expected-candidate-commit')
 const requirementsPath = value('requirements')
 const outputPath = value('output')
-if (receiptPaths.length === 0 || !publicKeyPath || !keyId || !expectedCommit || !requirementsPath) {
-  throw new Error('Usage: --receipt <json> (repeat) --requirements <json> --public-key <pem> --key-id <id> --expected-generator-commit <sha> [--output <json>]')
+if (receiptPaths.length === 0 || !publicKeyPath || !keyId || !expectedCommit
+  || !expectedCandidateCommit || !requirementsPath) {
+  throw new Error('Usage: --receipt <json> (repeat) --requirements <json> --public-key <pem> --key-id <id> --expected-generator-commit <sha> --expected-candidate-commit <sha> [--output <json>]')
 }
 
 const [publicKey, requirements] = await Promise.all([
@@ -51,6 +53,7 @@ const checks = receipts.map(({ path: receiptPath, receipt }) => {
     passed: verifySignedReceipt(receipt, publicKey, keyId)
       && receipt.passed === true
       && receipt.oracleGeneratorCommit === expectedCommit
+      && receipt.candidateGeneratorCommit === expectedCandidateCommit
       && requirement !== undefined
       && receipt.oracleCoverage !== undefined
       && canonicalize(receipt.oracleCoverage) === canonicalize(requirement.coverage)
@@ -59,6 +62,7 @@ const checks = receipts.map(({ path: receiptPath, receipt }) => {
       && requiredChecks.every((name) => checkNames.has(name)),
     receiptHash: receipt.receiptHash ?? null,
     oracleGeneratorCommit: receipt.oracleGeneratorCommit ?? null,
+    candidateGeneratorCommit: receipt.candidateGeneratorCommit ?? null,
   }
 })
 const receiptTargetKeys = checks.map((check) => targetKey(check))
@@ -69,6 +73,7 @@ const report = {
     && receiptTargetKeys.every((key) => requirementByTarget.has(key))
     && checks.every((check) => check.passed),
   expectedGeneratorCommit: expectedCommit,
+  expectedCandidateCommit,
   signingKeyId: keyId,
   requirements: path.resolve(requirementsPath),
   checks,

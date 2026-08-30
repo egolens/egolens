@@ -92,7 +92,7 @@ import {
 } from '../teachable/runtime/ManagedNormalizedScene'
 import { bridgeNormalizedFrame } from '../teachable/runtime/compatibilityBridge'
 import { markPerformanceEvent, noteFrameRequest } from '../teachable/runtime/performanceProbe'
-import type { NormalizedCapabilityV1 } from '../teachable/runtime/normalizedScene'
+import type { NormalizedCapabilityV1, NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -396,6 +396,8 @@ const internal = {
   nuScenesVersionRoot: null as string | null,
   /** Phase 6 authoritative scene: sole owner of workers and transferred frame/image buffers. */
   normalizedScene: null as ManagedNormalizedSceneV1 | null,
+  /** One-shot recipe scene factory used only by the isolated conformance capture hook. */
+  conformanceSceneFactory: null as (() => Promise<NormalizedSceneV1>) | null,
   /**
    * Seek requested before its frame was cached (cold load). loadFrame drops
    * cache misses so it never fights the prefetch queue, which would silently
@@ -418,6 +420,7 @@ const internal = {
 function resetInternal() {
   internal.normalizedScene?.dispose()
   internal.normalizedScene = null
+  internal.conformanceSceneFactory = null
   internal.parquetFiles.clear()
   internal.timestamps = []
   internal.pendingSeekFrame = null
@@ -1511,6 +1514,13 @@ async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => 
     parquetFiles: internal.parquetFiles,
   })
   const bundle = binding.metadata
+  const conformanceFiles = new Map(internal.parquetFiles)
+  internal.conformanceSceneFactory = async () => (await bindRecipeSceneV1({
+    sourceFamily: 'parquet-components',
+    compiledRecipe: waymoCompiledRecipe,
+    parquetFiles: conformanceFiles,
+    metadataBundle: bundle,
+  })).scene
   internal.normalizedScene?.dispose()
   internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
     workerTimestamps: bundle.timestamps,
@@ -1857,6 +1867,16 @@ async function loadTokenTableScene(
       files: internal.nuScenesSampleFiles,
     })
     const bundle = binding.metadata
+    const conformanceDatabase = internal.nuScenesDb
+    const conformanceFiles = new Map(internal.nuScenesSampleFiles)
+    internal.conformanceSceneFactory = async () => (await bindRecipeSceneV1({
+      sourceFamily: 'token-tables',
+      compiledRecipe: nuScenesCompiledRecipe,
+      database: conformanceDatabase,
+      sceneToken: scene.token,
+      files: conformanceFiles,
+      metadataBundle: bundle,
+    })).scene
     internal.normalizedScene?.dispose()
     internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
       workerTimestamps: bundle.timestamps,
@@ -2114,6 +2134,15 @@ async function loadFeatherLogScene(
       files: internal.av2SampleFiles,
     })
     const bundle = binding.metadata
+    const conformanceDatabase = internal.av2Db
+    const conformanceFiles = new Map(internal.av2SampleFiles)
+    internal.conformanceSceneFactory = async () => (await bindRecipeSceneV1({
+      sourceFamily: 'feather-log',
+      compiledRecipe: argoverse2CompiledRecipe,
+      database: conformanceDatabase,
+      files: conformanceFiles,
+      metadataBundle: bundle,
+    })).scene
     internal.normalizedScene?.dispose()
     internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
       workerTimestamps: bundle.timestamps,
@@ -2604,6 +2633,26 @@ async function runPostWorkerPipeline(
 // ---------------------------------------------------------------------------
 // Public accessor for internal trajectory data (not reactive — static after load)
 // ---------------------------------------------------------------------------
+
+export function getActiveConformanceDescriptor(): {
+  readonly datasetId: string
+  readonly frameCount: number
+  readonly capabilities: readonly NormalizedCapabilityV1[]
+} | null {
+  const scene = internal.normalizedScene
+  if (!scene || scene.disposed || !internal.conformanceSceneFactory) return null
+  return {
+    datasetId: scene.manifest.id,
+    frameCount: scene.index.timestampsMicros.length,
+    capabilities: [...scene.manifest.capabilities].sort(),
+  }
+}
+
+export async function createActiveConformanceScene(): Promise<NormalizedSceneV1> {
+  const factory = internal.conformanceSceneFactory
+  if (!factory) throw new Error('No active conformance scene is available.')
+  return factory()
+}
 
 export function getObjectTrajectories() {
   return internal.objectTrajectories

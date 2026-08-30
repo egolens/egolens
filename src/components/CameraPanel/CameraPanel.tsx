@@ -114,7 +114,7 @@ export default function CameraPanel() {
     const rowHeight = STRIP_HEIGHT_MOBILE
 
     return (
-      <div style={{
+      <div data-egolens-capture-region="camera-strip" style={{
         height: twoRows ? rowHeight * 2 + 4 : rowHeight + 6,
         flexShrink: 0,
         display: 'flex',
@@ -149,7 +149,7 @@ export default function CameraPanel() {
   }
 
   return (
-    <div style={{
+    <div data-egolens-capture-region="camera-strip" style={{
       height: STRIP_HEIGHT,
       flexShrink: 0,
       display: 'flex',
@@ -265,6 +265,8 @@ function CameraView({ cameraName, label, imageBuffer, boxes, boxMode, showLidarO
 
   return (
     <div
+      data-egolens-camera-id={cameraName}
+      data-egolens-camera-label={label}
       style={{
         flex,
         position: 'relative',
