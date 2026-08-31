@@ -349,15 +349,25 @@ describe('useSceneStore', () => {
   })
 
   describe('frame cache', () => {
-    it('second visit is sub-millisecond', async () => {
+    it('second visit reuses cached renderer buffers without another load', async () => {
       // Ensure frame 5 is loaded (may already be cached)
       await actions().seekFrame(5)
+      const firstVisit = state().currentFrame
+      expect(firstVisit).not.toBeNull()
+      expect(state().cachedFrames).toContain(5)
+      const firstPointBuffers = new Map(
+        [...firstVisit!.sensorClouds].map(([sensorId, cloud]) => [sensorId, cloud.positions]),
+      )
       // Move away
       await actions().seekFrame(10)
-      // Return — should be cached
-      const t0 = performance.now()
+      // Return — cache behavior is deterministic; wall-clock scheduling is not.
       await actions().seekFrame(5)
-      expect(performance.now() - t0).toBeLessThan(1)
+      expect(state().currentFrameIndex).toBe(5)
+      expect(state().lastFrameLoadMs).toBe(0)
+      expect(state().currentFrame?.boxes).toBe(firstVisit?.boxes)
+      for (const [sensorId, cloud] of state().currentFrame!.sensorClouds) {
+        expect(cloud.positions).toBe(firstPointBuffers.get(sensorId))
+      }
     }, 30000)
   })
 
