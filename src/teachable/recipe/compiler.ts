@@ -153,7 +153,10 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
   const resolvedOperators = new Map<string, RecipeOperatorDescriptor>()
   for (const [name, dependency] of Object.entries(recipe.engine.requiredOperators)) {
     const operator = registry.resolve(name, dependency)
-    if (!operator) diagnostics.push(diagnostic('OPERATOR_MISSING', `Required operator ${name}@${dependency.major} (${dependency.provider}) is unavailable or incompatible.`, `/engine/requiredOperators/${name}`))
+    const identity = dependency.provider === 'extension'
+      ? `${dependency.package.id}@${dependency.package.version} (${dependency.package.integrity})`
+      : dependency.provider
+    if (!operator) diagnostics.push(diagnostic('OPERATOR_MISSING', `Required operator ${name}@${dependency.major} from ${identity} is unavailable or incompatible.`, `/engine/requiredOperators/${name}`))
     else resolvedOperators.set(`${name}@${dependency.major}`, operator)
   }
 

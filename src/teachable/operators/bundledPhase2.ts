@@ -1,5 +1,7 @@
 import type { CoreOperatorDescriptor, OperatorJsonSchema } from './registry'
 import { OperatorRegistry } from './registry'
+import { DedicatedWorkerExtensionExecutor } from '../extensions/ExtensionOperatorExecutor'
+import { registerBuiltInExtensionPackagesV1 } from '../extensions/registeredPackages'
 import { assertValidInterleavedRecordsParamsV1 } from './binaryReaders'
 import { assertValidFeatherColumnsParamsV1 } from './featherColumns'
 import { assertValidParquetColumnsParamsV1 } from './parquetColumns'
@@ -419,4 +421,7 @@ export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescripto
 
 export const bundledPhase2OperatorRegistry = new OperatorRegistry(
   BUNDLED_PHASE2_OPERATOR_DESCRIPTORS,
+  { extensionExecutor: new DedicatedWorkerExtensionExecutor() },
 )
+
+registerBuiltInExtensionPackagesV1(bundledPhase2OperatorRegistry)

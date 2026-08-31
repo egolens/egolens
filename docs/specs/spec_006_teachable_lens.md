@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: in-progress (Phases 2–6 shipped; next planned work is Phase 7) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phases 2–7 shipped; next planned work is Phase 8) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 
@@ -553,6 +553,13 @@ interface EgoLensOperatorPackageManifest {
     paramsContract: Schema
     outputContract: Schema
     execution: 'worker'
+    resources: {
+      timeoutMs: number
+      maxInputBytes: number
+      maxOutputBytes: number
+      maxAllocationBytes: number
+      maxTransferables: number
+    }
   }>
 }
 ```
@@ -1393,6 +1400,16 @@ must not become dataset-branded replacements for the migrated core graph.
 the normal operator contract; the same recipe fails before file access with a
 structured `OPERATOR_MISSING` diagnostic when that package is absent or its
 integrity differs.
+
+**Shipped:** build-time package manifests now register into the shared operator
+registry, while implementation modules are statically owned by a separate
+dedicated-Worker bundle. Exact provider/version/integrity identity participates
+in resolution and `operatorSetFingerprint`; each invocation receives a fresh
+Worker with cancellation, timeout, input, tracked-allocation, output, and
+transferable limits enforced on both sides of the message boundary. Contract
+fixtures prove that importing an extension-dependent recipe cannot register or
+evaluate its source and that absent or integrity-mismatched packages stop at
+compile time with `OPERATOR_MISSING` before any execution or file binding.
 
 #### Phase 8 — Add Teachable Lens authoring
 
