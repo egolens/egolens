@@ -1,21 +1,39 @@
 import { invertRowMajor4x4, multiplyRowMajor4x4 } from '../../utils/matrix'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
+import type { ParquetRow } from '../../utils/merge'
+import { openParquetFile } from '../../utils/parquet'
+import type { LidarCalibration } from '../../utils/rangeImage'
 import type {
   GraphBinaryCollectionV1,
   GraphBinaryPointCloudPlanV1,
   GraphBoxesV1,
   GraphCameraPlanV1,
+  GraphCameraSegmentationV1,
   GraphDecodedBinaryV1,
   GraphEncodedCollectionV1,
   GraphPointCloudPlanV1,
+  GraphParquetCameraPlanV1,
+  GraphParquetCollectionV1,
   GraphPoseTimelineV1,
+  GraphRangeImagePointCloudPlanV1,
+  GraphRangeImageSegmentationPlanV1,
   GraphRecordsV1,
   GraphSegmentIndexV1,
   GraphSegmentationPlanV1,
   GraphTableCollectionV1,
   GraphTimelineV1,
+  GraphBoxes2dV1,
+  GraphBoxRelationsV1,
+  GraphKeypointsV1,
 } from '../runtime/GraphValues'
-import type { NormalizedBox3dV1, NormalizedCameraCalibrationV1, NormalizedTrackPointV1 } from '../runtime/normalizedScene'
+import type {
+  NormalizedBox2dV1,
+  NormalizedBox3dV1,
+  NormalizedCameraCalibrationV1,
+  NormalizedKeypointSetV1,
+  NormalizedSegmentationV1,
+  NormalizedTrackPointV1,
+} from '../runtime/normalizedScene'
 import {
   decodeInterleavedRecordsV1,
   decodeNpzUint16V1,
@@ -26,6 +44,7 @@ import {
 } from './binaryReaders'
 import { decodeFeatherColumnsV1, interleaveFeatherNumericColumnsV1 } from './featherColumns'
 import { decodeJsonRecordsV1 } from './jsonRecords'
+import { readParquetColumnsV1 } from './parquetColumns'
 import type { CoreOperatorImplementationV1 } from './registry'
 import { headingFromQuaternionWxyzV1 } from './sceneGeometry'
 
@@ -68,6 +87,44 @@ function isRecords(value: unknown): value is GraphRecordsV1 {
 
 function isBinary(value: unknown): value is GraphBinaryCollectionV1 {
   return typeof value === 'object' && value !== null && (value as { kind?: string }).kind === 'binary-collection'
+}
+
+function isParquet(value: unknown): value is GraphParquetCollectionV1 {
+  return typeof value === 'object' && value !== null && (value as { kind?: string }).kind === 'parquet-collection'
+}
+
+function list(value: unknown, label: string): number[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'number' || !Number.isFinite(entry))) {
+    throw new Error(`GRAPH_ARRAY_INVALID: ${label}`)
+  }
+  return value
+}
+
+function binaryBuffer(value: unknown): ArrayBuffer | null {
+  if (value instanceof ArrayBuffer) return value.slice(0)
+  if (value instanceof Uint8Array) {
+    const copy = new Uint8Array(value.byteLength)
+    copy.set(value)
+    return copy.buffer
+  }
+  return null
+}
+
+function valueBytes(value: unknown): number {
+  if (value === null || value === undefined) return 0
+  if (typeof value === 'string') return new TextEncoder().encode(value).byteLength
+  if (typeof value === 'number' || typeof value === 'bigint') return 8
+  if (typeof value === 'boolean') return 1
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value.byteLength
+  if (Array.isArray(value)) return value.reduce((sum, entry) => sum + valueBytes(entry), 0)
+  return 0
+}
+
+function rowsBytes(rows: readonly ParquetRow[]): number {
+  return rows.reduce(
+    (sum, row) => sum + Object.values(row).reduce<number>((rowSum, value) => rowSum + valueBytes(value), 0),
+    0,
+  )
 }
 
 function linkedSignal(lifecycle: AbortSignal, request?: AbortSignal): AbortSignal {
@@ -138,9 +195,145 @@ async function tableRows(collection: GraphTableCollectionV1): Promise<Readonly<R
   return rows
 }
 
+export async function loadGraphParquetFileV1(
+  collection: GraphParquetCollectionV1,
+  path: string,
+  requestSignal?: AbortSignal,
+) {
+  let pending = collection.fileCache.get(path)
+  if (!pending) {
+    pending = (async () => {
+      const source = await collection.context.asyncBuffer(path, requestSignal)
+      return await openParquetFile(path, source, { cache: false })
+    })()
+    collection.fileCache.set(path, pending)
+    void pending.catch(() => collection.fileCache.delete(path))
+  }
+  return await pending
+}
+
+export async function loadGraphParquetRowsV1(
+  collection: GraphParquetCollectionV1,
+  requestSignal?: AbortSignal,
+): Promise<readonly ParquetRow[]> {
+  const rows: ParquetRow[] = []
+  for (const file of collection.files) {
+    let pending = collection.cache.get(file.path)
+    if (!pending) {
+      pending = (async () => {
+        const parquet = await loadGraphParquetFileV1(collection, file.path, requestSignal)
+        const decoded = await readParquetColumnsV1(parquet, collection.params, { signal: requestSignal })
+        collection.retainedReleases.set(`full:${file.path}`, collection.context.resources.allocate(rowsBytes(decoded)))
+        return decoded
+      })()
+      collection.cache.set(file.path, pending)
+      void pending.catch(() => collection.cache.delete(file.path))
+    }
+    rows.push(...await pending)
+  }
+  return rows
+}
+
+async function loadGraphParquetColumnV1(
+  collection: GraphParquetCollectionV1,
+  columnName: string,
+  requestSignal?: AbortSignal,
+): Promise<readonly ParquetRow[]> {
+  const column = collection.params.columns.find((entry) => entry.name === columnName)
+  if (!column) throw new Error(`GRAPH_PARQUET_COLUMN_UNDECLARED: ${columnName}`)
+  const rows: ParquetRow[] = []
+  for (const file of collection.files) {
+    const cacheKey = `${file.path}\u0000${columnName}`
+    let pending = collection.projectionCache.get(cacheKey)
+    if (!pending) {
+      pending = (async () => {
+        const parquet = await loadGraphParquetFileV1(collection, file.path, requestSignal)
+        const decoded = await readParquetColumnsV1(parquet, {
+          ...collection.params,
+          columns: [column],
+          maxOutputBytes: Math.min(collection.params.maxOutputBytes, Math.max(8, collection.params.maxRows * 8)),
+        }, { signal: requestSignal })
+        collection.retainedReleases.set(`projection:${cacheKey}`, collection.context.resources.allocate(rowsBytes(decoded)))
+        return decoded
+      })()
+      collection.projectionCache.set(cacheKey, pending)
+      void pending.catch(() => collection.projectionCache.delete(cacheKey))
+    }
+    rows.push(...await pending)
+  }
+  return rows
+}
+
+export async function loadGraphParquetFrameRowsV1(
+  collection: GraphParquetCollectionV1,
+  timestampField: string,
+  timestamp: bigint,
+  requestSignal?: AbortSignal,
+): Promise<readonly ParquetRow[]> {
+  const signal = linkedSignal(collection.context.signal, requestSignal)
+  if (signal.aborted) throw new DOMException('Operator execution was aborted.', 'AbortError')
+  const rows: ParquetRow[] = []
+  for (const file of collection.files) {
+    const frameCacheKey = `${file.path}\u0000${timestampField}\u0000${timestamp}`
+    let frameRows = collection.frameRowsCache.get(frameCacheKey)
+    if (frameRows) {
+      rows.push(...await frameRows)
+      if (signal.aborted) throw new DOMException('Operator execution was aborted.', 'AbortError')
+      continue
+    }
+    const parquet = await loadGraphParquetFileV1(collection, file.path, requestSignal)
+    const cacheKey = `${file.path}\u0000${timestampField}`
+    let index = collection.frameIndexCache.get(cacheKey)
+    if (!index) {
+      index = (async () => {
+        const timestampColumn = collection.params.columns.find((entry) => entry.name === timestampField)
+        if (!timestampColumn || (timestampColumn.type !== 'bigint' && timestampColumn.type !== 'integer')) {
+          throw new Error(`GRAPH_PARQUET_TIMESTAMP_COLUMN_INVALID: ${timestampField}`)
+        }
+        const timestampRows = await readParquetColumnsV1(parquet, {
+          columns: [timestampColumn],
+          maxInputBytes: collection.params.maxInputBytes,
+          maxRows: collection.params.maxRows,
+          maxOutputBytes: Math.max(8, collection.params.maxRows * 8),
+        }, { signal: requestSignal })
+        const byTimestamp = new Map<bigint, { rowStart: number; rowEnd: number }>()
+        let previousTimestamp: bigint | undefined
+        timestampRows.forEach((row, rowIndex) => {
+          const value = integerTimestamp(row[timestampField], timestampField)
+          const existing = byTimestamp.get(value)
+          if (existing) {
+            if (previousTimestamp !== value) throw new Error(`GRAPH_PARQUET_TIMESTAMP_NONCONTIGUOUS: ${timestampField}`)
+            existing.rowEnd = rowIndex + 1
+          }
+          else byTimestamp.set(value, { rowStart: rowIndex, rowEnd: rowIndex + 1 })
+          previousTimestamp = value
+        })
+        collection.retainedReleases.set(`index:${cacheKey}`, collection.context.resources.allocate(timestampRows.length * 24))
+        return byTimestamp
+      })()
+      collection.frameIndexCache.set(cacheKey, index)
+      void index.catch(() => collection.frameIndexCache.delete(cacheKey))
+    }
+    const range = (await index).get(timestamp)
+    if (range) {
+      frameRows = (async () => {
+        const decoded = await readParquetColumnsV1(parquet, collection.params, { ...range, signal: requestSignal })
+        collection.retainedReleases.set(`frame:${frameCacheKey}`, collection.context.resources.allocate(rowsBytes(decoded)))
+        return decoded
+      })()
+      collection.frameRowsCache.set(frameCacheKey, frameRows)
+      void frameRows.catch(() => collection.frameRowsCache.delete(frameCacheKey))
+      rows.push(...await frameRows)
+    }
+    if (signal.aborted) throw new DOMException('Operator execution was aborted.', 'AbortError')
+  }
+  return rows
+}
+
 async function materialize(value: unknown): Promise<readonly Readonly<Record<string, unknown>>[]> {
   if (isRecords(value)) return value.rows
   if (isTable(value)) return await tableRows(value)
+  if (isParquet(value)) return await loadGraphParquetRowsV1(value)
   throw new Error('GRAPH_RECORDS_INPUT_INVALID')
 }
 
@@ -162,6 +355,17 @@ const featherColumns: CoreOperatorImplementationV1 = (inputs, params, context) =
     rows: {
       kind: 'table-collection', files: inputs.files, params, context, cache: new Map(), retainedReleases: new Map(),
     } as unknown as GraphTableCollectionV1,
+  }
+}
+
+const parquetColumns: CoreOperatorImplementationV1 = (inputs, params, context) => {
+  if (!Array.isArray(inputs.files)) throw new Error('GRAPH_READER_FILES_INVALID')
+  return {
+    rows: {
+      kind: 'parquet-collection', files: inputs.files, params, context,
+      fileCache: new Map(), cache: new Map(), projectionCache: new Map(), frameIndexCache: new Map(),
+      frameRowsCache: new Map(), retainedReleases: new Map(),
+    } as unknown as GraphParquetCollectionV1,
   }
 }
 
@@ -207,11 +411,12 @@ const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
   let frames: GraphTimelineV1['frames']
   if (isTable(candidate)) {
     frames = candidate.files.map((file) => ({ timestamp: numericPath(file.path), path: file.path }))
-  } else if (isRecords(candidate)) {
+  } else if (isRecords(candidate) || isParquet(candidate)) {
+    const records = isRecords(candidate) ? candidate.rows : await loadGraphParquetRowsV1(candidate)
     const field = String(params.timestampField ?? '')
     const keyField = typeof params.keyField === 'string' ? params.keyField : null
     const groupField = typeof params.groupField === 'string' ? params.groupField : null
-    frames = candidate.rows.map((row) => ({
+    frames = records.map((row) => ({
       timestamp: integerTimestamp(row[field], field),
       key: keyField ? String(row[keyField]) : undefined,
       group: groupField ? String(row[groupField]) : undefined,
@@ -233,6 +438,72 @@ const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
   }
   if (frames.length === 0) throw new Error('TIMELINE_BINDING_EMPTY')
   return { frames: { kind: 'timeline', unit, frames } satisfies GraphTimelineV1 }
+}
+
+const relativePoses: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const rows = await materialize(inputs.rows)
+  const timestampField = String(params.timestampField)
+  const matrixField = String(params.matrixField)
+  const absolute = new Map<bigint, number[]>()
+  for (const row of rows) {
+    const matrix = list(row[matrixField], matrixField)
+    if (matrix.length !== 16) throw new Error(`GRAPH_MATRIX_INVALID: ${matrixField}`)
+    absolute.set(integerTimestamp(row[timestampField], timestampField), matrix)
+  }
+  const timestamps = [...absolute.keys()].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+  const first = timestamps.length > 0 ? absolute.get(timestamps[0]) : undefined
+  const originInverse = first ? invertRowMajor4x4(first) : null
+  const worldFromEgoByTimestamp = new Map<bigint, Float64Array>()
+  if (originInverse) {
+    for (const timestamp of timestamps) {
+      worldFromEgoByTimestamp.set(
+        timestamp,
+        new Float64Array(multiplyRowMajor4x4(originInverse, absolute.get(timestamp)!)),
+      )
+    }
+  }
+  return {
+    poses: {
+      kind: 'pose-timeline',
+      worldOriginInverse: originInverse ? new Float64Array(originInverse) : null,
+      worldFromEgoByTimestamp,
+    } satisfies GraphPoseTimelineV1,
+  }
+}
+
+const rangeImageToCartesian: CoreOperatorImplementationV1 = async (inputs, params) => {
+  if (!isParquet(inputs.rangeImages) || !isParquet(inputs.calibration)) {
+    throw new Error('GRAPH_RANGE_IMAGE_INPUT_INVALID')
+  }
+  const sensorField = String(params.sensorField)
+  const extrinsicField = String(params.extrinsicField)
+  const inclinationValuesField = String(params.inclinationValuesField)
+  const inclinationMinField = String(params.inclinationMinField)
+  const inclinationMaxField = String(params.inclinationMaxField)
+  const calibrations = new Map<number, LidarCalibration>()
+  for (const row of await loadGraphParquetRowsV1(inputs.calibration)) {
+    const laserName = finite(row[sensorField], sensorField)
+    const extrinsic = list(row[extrinsicField], extrinsicField)
+    if (extrinsic.length !== 16) throw new Error(`GRAPH_MATRIX_INVALID: ${extrinsicField}`)
+    const rawInclinations = row[inclinationValuesField]
+    calibrations.set(laserName, {
+      laserName,
+      extrinsic,
+      beamInclinationValues: Array.isArray(rawInclinations) && rawInclinations.length > 0
+        ? list(rawInclinations, inclinationValuesField)
+        : null,
+      beamInclinationMin: Number(row[inclinationMinField] ?? 0),
+      beamInclinationMax: Number(row[inclinationMaxField] ?? 0),
+    })
+  }
+  return {
+    pointClouds: {
+      kind: 'range-image-point-cloud-plan', rows: inputs.rangeImages, calibrations,
+      timestampField: String(params.timestampField), sensorField,
+      shapeField: String(params.shapeField), valuesField: String(params.valuesField),
+      frameId: String(params.outputFrame),
+    } satisfies GraphRangeImagePointCloudPlanV1,
+  }
 }
 
 function poseTimelineFromTokenRelations(
@@ -417,6 +688,42 @@ function selectSegments(inputs: Readonly<Record<string, unknown>>, params: Reado
 
 const recordsSelect: CoreOperatorImplementationV1 = async (inputs, params) => {
   if (params.mode === 'segments') return { segments: selectSegments(inputs, params) }
+  if (params.mode === 'segment-stats') {
+    const rows = await materialize(inputs.rows)
+    if (rows.length === 0) return { segments: { kind: 'segment-index', segments: [] } satisfies GraphSegmentIndexV1 }
+    const idField = String(params.idField)
+    const typesField = String(params.objectTypesField)
+    const countsField = String(params.objectCountsField)
+    const perType = new Map<number, number[]>()
+    for (const row of rows) {
+      const types = list(row[typesField] ?? [], typesField)
+      const counts = list(row[countsField] ?? [], countsField)
+      types.forEach((type, index) => {
+        const values = perType.get(type) ?? []
+        values.push(counts[index] ?? 0)
+        perType.set(type, values)
+      })
+    }
+    const objectCounts: Record<number, number> = {}
+    for (const [type, values] of perType) {
+      objectCounts[type] = Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+    }
+    const first = rows[0]
+    const id = String(first[idField])
+    return {
+      segments: {
+        kind: 'segment-index',
+        segments: [{
+          groupId: id, id, label: id, objectCounts,
+          metadata: {
+            location: String(first[String(params.locationField)] ?? 'Unknown'),
+            timeOfDay: String(first[String(params.timeOfDayField)] ?? 'Unknown'),
+            weather: String(first[String(params.weatherField)] ?? 'Unknown'),
+          },
+        }],
+      } satisfies GraphSegmentIndexV1,
+    }
+  }
   const fields = Array.isArray(params.fields) ? params.fields.map(String) : []
   if (isTable(inputs.rows) && typeof params.frameId === 'string') {
     return { pointClouds: { kind: 'point-cloud-plan', tables: inputs.rows, fields, frameId: params.frameId } satisfies GraphPointCloudPlanV1 }
@@ -504,7 +811,55 @@ function relationalCameraPlan(
   return { kind: 'camera-plan', encoded, calibrations, maxDelta: 0n, bindings }
 }
 
+async function parquetCameraPlan(
+  rows: GraphParquetCollectionV1,
+  calibrationRows: GraphParquetCollectionV1,
+  params: Readonly<Record<string, unknown>>,
+): Promise<GraphParquetCameraPlanV1> {
+  const sensorField = String(params.sensorField)
+  const extrinsicField = String(params.extrinsicField)
+  const widthField = String(params.widthField)
+  const heightField = String(params.heightField)
+  const intrinsicFields = fieldList(params, 'intrinsicFields', [])
+  if (intrinsicFields.length !== 4) throw new Error('GRAPH_CAMERA_INTRINSICS_INVALID')
+  const distortionFields = fieldList(params, 'distortionFields', [])
+  const opticalToSensor = list(params.opticalToSensor, 'opticalToSensor')
+  if (opticalToSensor.length !== 16) throw new Error('GRAPH_MATRIX_INVALID: opticalToSensor')
+  const calibrations = new Map<string, NormalizedCameraCalibrationV1>()
+  for (const row of await loadGraphParquetRowsV1(calibrationRows)) {
+    const sensorId = String(row[sensorField])
+    const rawExtrinsic = list(row[extrinsicField], extrinsicField)
+    if (rawExtrinsic.length !== 16) throw new Error(`GRAPH_MATRIX_INVALID: ${extrinsicField}`)
+    const width = finite(row[widthField], widthField)
+    const height = finite(row[heightField], heightField)
+    const distortion = distortionFields.map((field) => Number(row[field] ?? 0))
+    calibrations.set(sensorId, {
+      sensorId,
+      frameId: `${sensorId}${String(params.frameIdSuffix)}`,
+      width,
+      height,
+      intrinsics: [
+        finite(row[intrinsicFields[0]], intrinsicFields[0]),
+        finite(row[intrinsicFields[1]], intrinsicFields[1]),
+        finite(row[intrinsicFields[2]] ?? width / 2, intrinsicFields[2]),
+        finite(row[intrinsicFields[3]] ?? height / 2, intrinsicFields[3]),
+      ],
+      distortionModel: distortion.some((value) => value !== 0) ? 'brown-conrady' : 'none',
+      distortion,
+      egoFromCamera: new Float64Array(multiplyRowMajor4x4(rawExtrinsic, opticalToSensor)),
+    })
+  }
+  return {
+    kind: 'parquet-camera-plan', rows, calibrations,
+    timestampField: String(params.timestampField), sensorField,
+    imageField: String(params.imageField), mimeType: String(params.mimeType) as GraphParquetCameraPlanV1['mimeType'],
+  }
+}
+
 const bindCameraFrame: CoreOperatorImplementationV1 = async (inputs, params) => {
+  if (isParquet(inputs.rows) && isParquet(inputs.calibration)) {
+    return { images: await parquetCameraPlan(inputs.rows, inputs.calibration, params) }
+  }
   const encoded = inputs.bytes as GraphEncodedCollectionV1
   if (encoded?.kind !== 'encoded-collection') throw new Error('GRAPH_CAMERA_INPUT_INVALID')
   if (isRecords(inputs.sampleData)) return { images: relationalCameraPlan(encoded, inputs, params) }
@@ -585,23 +940,31 @@ function relationalBoxes(
 
 const normalizeBoxes3d: CoreOperatorImplementationV1 = async (inputs, params) => {
   if (isRecords(inputs.annotations)) return { boxes: relationalBoxes(inputs, params) }
-  if (!isTable(inputs.annotations)) throw new Error('GRAPH_BOX_INPUT_INVALID')
+  const candidate = inputs.rows ?? inputs.annotations
+  if (!isTable(candidate) && !isParquet(candidate)) throw new Error('GRAPH_BOX_INPUT_INVALID')
   const timestampField = String(params.timestampField ?? 'timestamp_ns')
   const classField = String(params.classField ?? 'category')
   const objectIdField = String(params.objectIdField ?? 'track_uuid')
   const quaternion = fieldList(params, 'quaternionFields', ['qw', 'qx', 'qy', 'qz'])
   const center = fieldList(params, 'centerFields', ['tx_m', 'ty_m', 'tz_m'])
   const dimensions = fieldList(params, 'dimensionFields', ['length_m', 'width_m', 'height_m'])
+  const classMap = typeof params.classMap === 'object' && params.classMap !== null
+    ? params.classMap as Readonly<Record<string, unknown>>
+    : {}
+  const headingField = typeof params.headingField === 'string' ? params.headingField : null
   const byTimestamp = new Map<bigint, NormalizedBox3dV1[]>()
-  for (const row of await tableRows(inputs.annotations)) {
+  for (const row of await materialize(candidate)) {
     const timestamp = integerTimestamp(row[timestampField], timestampField)
-    const orientation: [number, number, number, number] = [finite(row[quaternion[0]], quaternion[0]), finite(row[quaternion[1]], quaternion[1]), finite(row[quaternion[2]], quaternion[2]), finite(row[quaternion[3]], quaternion[3])]
+    const heading = headingField ? finite(row[headingField], headingField) : null
+    const orientation: [number, number, number, number] = heading === null
+      ? [finite(row[quaternion[0]], quaternion[0]), finite(row[quaternion[1]], quaternion[1]), finite(row[quaternion[2]], quaternion[2]), finite(row[quaternion[3]], quaternion[3])]
+      : [Math.cos(heading / 2), 0, 0, Math.sin(heading / 2)]
     const id = String(row[objectIdField])
     const box: NormalizedBox3dV1 = {
-      id, objectId: id, classId: String(row[classField]), frameId: String(params.frameId),
+      id, objectId: id, classId: String(classMap[String(row[classField])] ?? row[classField]), frameId: String(params.frameId),
       center: [finite(row[center[0]], center[0]), finite(row[center[1]], center[1]), finite(row[center[2]], center[2])],
       dimensions: [finite(row[dimensions[0]], dimensions[0]), finite(row[dimensions[1]], dimensions[1]), finite(row[dimensions[2]], dimensions[2])],
-      orientation, heading: headingFromQuaternionWxyzV1(orientation),
+      orientation, heading: heading ?? headingFromQuaternionWxyzV1(orientation),
     }
     const list = byTimestamp.get(timestamp) ?? []
     list.push(box)
@@ -610,11 +973,39 @@ const normalizeBoxes3d: CoreOperatorImplementationV1 = async (inputs, params) =>
   return { boxes: { kind: 'boxes3d', byTimestamp } satisfies GraphBoxesV1 }
 }
 
-const normalizeBoxes2d: CoreOperatorImplementationV1 = (inputs) => {
+const normalizeBoxes2d: CoreOperatorImplementationV1 = async (inputs, params) => {
   const boxes = inputs.boxes3d as GraphBoxesV1
   const cameras = inputs.cameraImages as GraphCameraPlanV1
-  if (boxes?.kind !== 'boxes3d' || cameras?.kind !== 'camera-plan') throw new Error('GRAPH_PROJECTED_BOX_INPUT_INVALID')
-  return { boxes: { kind: 'projected-boxes2d', boxes, cameras } }
+  if (boxes?.kind === 'boxes3d' && cameras?.kind === 'camera-plan') {
+    return { boxes: { kind: 'projected-boxes2d', boxes, cameras } }
+  }
+  const rows = await materialize(inputs.rows)
+  const timestampField = String(params.timestampField)
+  const sensorField = String(params.sensorField)
+  const objectIdField = String(params.objectIdField)
+  const classField = String(params.classField)
+  const centerFields = fieldList(params, 'centerFields', [])
+  const dimensionFields = fieldList(params, 'dimensionFields', [])
+  const classMap = typeof params.classMap === 'object' && params.classMap !== null
+    ? params.classMap as Readonly<Record<string, unknown>>
+    : {}
+  if (centerFields.length !== 2 || dimensionFields.length !== 2) throw new Error('GRAPH_BOX2D_FIELDS_INVALID')
+  const byTimestamp = new Map<bigint, NormalizedBox2dV1[]>()
+  for (const row of rows) {
+    const timestamp = integerTimestamp(row[timestampField], timestampField)
+    const objectId = String(row[objectIdField])
+    const box: NormalizedBox2dV1 = {
+      id: objectId, objectId,
+      classId: String(classMap[String(row[classField])] ?? row[classField]),
+      cameraId: String(row[sensorField]), presentation: 'rectangle',
+      center: [finite(row[centerFields[0]], centerFields[0]), finite(row[centerFields[1]], centerFields[1])],
+      dimensions: [finite(row[dimensionFields[0]], dimensionFields[0]), finite(row[dimensionFields[1]], dimensionFields[1])],
+    }
+    const entries = byTimestamp.get(timestamp) ?? []
+    entries.push(box)
+    byTimestamp.set(timestamp, entries)
+  }
+  return { boxes: { kind: 'boxes2d', byTimestamp } satisfies GraphBoxes2dV1 }
 }
 
 const deriveTrajectories: CoreOperatorImplementationV1 = (inputs) => {
@@ -623,7 +1014,9 @@ const deriveTrajectories: CoreOperatorImplementationV1 = (inputs) => {
   if (boxes.byFrameKey) return { trajectories: { kind: 'trajectory-plan', boxes } }
   const tracks = new Map<string, NormalizedTrackPointV1[]>()
   let frameIndex = 0
-  for (const frameBoxes of boxes.byTimestamp.values()) {
+  const timestamps = [...boxes.byTimestamp.keys()].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+  for (const timestamp of timestamps) {
+    const frameBoxes = boxes.byTimestamp.get(timestamp) ?? []
     for (const box of frameBoxes) {
       const points = tracks.get(box.objectId) ?? []
       points.push({ frameIndex, position: box.center, classId: box.classId })
@@ -634,8 +1027,112 @@ const deriveTrajectories: CoreOperatorImplementationV1 = (inputs) => {
   return { trajectories: { kind: 'trajectories', tracks } }
 }
 
-const attachLabels: CoreOperatorImplementationV1 = (inputs, params) => {
-  const pointClouds = inputs.pointClouds as GraphBinaryPointCloudPlanV1
+const compositeKeyJoin: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const boxes2d = inputs.boxes2d as GraphBoxes2dV1
+  const boxes3d = inputs.boxes3d as GraphBoxesV1
+  if (boxes2d?.kind !== 'boxes2d' || boxes3d?.kind !== 'boxes3d') {
+    throw new Error('GRAPH_COMPOSITE_JOIN_INPUT_INVALID')
+  }
+  const associations = await materialize(inputs.associations)
+  const cameraObjectField = String(params.cameraObjectField)
+  const lidarObjectField = String(params.lidarObjectField)
+  const cameraObjects = new Set([...boxes2d.byTimestamp.values()].flat().map((box) => box.objectId))
+  const lidarObjects = new Set([
+    ...[...boxes3d.byTimestamp.values()].flat().map((box) => box.objectId),
+    ...[...(boxes3d.byFrameKey?.values() ?? [])].flat().map((box) => box.objectId),
+  ])
+  const box2dToBox3d = new Map<string, string>()
+  for (const row of associations) {
+    const cameraId = row[cameraObjectField]
+    const lidarId = row[lidarObjectField]
+    if (cameraId === undefined || lidarId === undefined) continue
+    const cameraObjectId = String(cameraId)
+    const lidarObjectId = String(lidarId)
+    if (cameraObjects.has(cameraObjectId) && lidarObjects.has(lidarObjectId)) {
+      box2dToBox3d.set(cameraObjectId, lidarObjectId)
+    }
+  }
+  return { relations: { kind: 'box-relations', box2dToBox3d } satisfies GraphBoxRelationsV1 }
+}
+
+const normalizeKeypoints: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const rows = await materialize(inputs.rows)
+  const dimensions = Number(params.dimensions) as 2 | 3
+  const timestampField = String(params.timestampField)
+  const objectIdField = String(params.objectIdField)
+  const typeField = String(params.typeField)
+  const coordinateFields = fieldList(params, 'coordinateFields', [])
+  const labels = Array.isArray(params.labels) ? params.labels.map(String) : []
+  const sensorField = typeof params.sensorField === 'string' ? params.sensorField : null
+  const occludedField = typeof params.occludedField === 'string' ? params.occludedField : null
+  if (coordinateFields.length !== dimensions) throw new Error('GRAPH_KEYPOINT_FIELDS_INVALID')
+  const byTimestamp = new Map<bigint, NormalizedKeypointSetV1[]>()
+  const sourceRowsByTimestamp = new Map<bigint, ParquetRow[]>()
+  for (const [rowIndex, row] of rows.entries()) {
+    const timestamp = integerTimestamp(row[timestampField], timestampField)
+    const types = list(row[typeField], typeField)
+    const coordinates = coordinateFields.map((field) => list(row[field], field))
+    const occluded = occludedField && Array.isArray(row[occludedField]) ? row[occludedField] as boolean[] : []
+    const count = Math.min(types.length, ...coordinates.map((values) => values.length))
+    const cameraId = sensorField ? String(row[sensorField]) : undefined
+    const keypoints: NormalizedKeypointSetV1 = {
+      objectId: String(row[objectIdField] ?? `${cameraId ?? 'object'}-${rowIndex}`),
+      schemaId: String(params.schemaId), frameId: dimensions === 3 ? String(params.frameId) : `${cameraId}${String(params.frameIdSuffix)}`,
+      ...(cameraId ? { cameraId } : {}),
+      points: Array.from({ length: count }, (_, index) => ({
+        name: labels[types[index]] ?? `Keypoint ${types[index]}`,
+        position: dimensions === 3
+          ? [coordinates[0][index], coordinates[1][index], coordinates[2][index]] as [number, number, number]
+          : [coordinates[0][index], coordinates[1][index]] as [number, number],
+        visibility: dimensions === 2 ? (occluded[index] ? 'occluded' : 'visible') : 'unknown',
+      })),
+    }
+    const entries = byTimestamp.get(timestamp) ?? []
+    entries.push(keypoints)
+    byTimestamp.set(timestamp, entries)
+    const sourceRows = sourceRowsByTimestamp.get(timestamp) ?? []
+    sourceRows.push(row as ParquetRow)
+    sourceRowsByTimestamp.set(timestamp, sourceRows)
+  }
+  return { keypoints: { kind: 'keypoints', dimensions, byTimestamp, sourceRowsByTimestamp } satisfies GraphKeypointsV1 }
+}
+
+const decodeCameraMask: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const rows = await materialize(inputs.rows)
+  const timestampField = String(params.timestampField)
+  const sensorField = String(params.sensorField)
+  const labelField = String(params.labelField)
+  const divisorField = String(params.divisorField)
+  const byTimestamp = new Map<bigint, NormalizedSegmentationV1[]>()
+  for (const row of rows) {
+    const labels = binaryBuffer(row[labelField])
+    if (!labels) continue
+    const timestamp = integerTimestamp(row[timestampField], timestampField)
+    const entries = byTimestamp.get(timestamp) ?? []
+    entries.push({
+      sensorId: String(row[sensorField]), taxonomyId: String(params.taxonomy), labels,
+      divisor: Number(row[divisorField] ?? params.panopticDivisor ?? 1000), encoding: 'png-uint16',
+    })
+    byTimestamp.set(timestamp, entries)
+  }
+  return { segmentation: { kind: 'camera-segmentation', byTimestamp } satisfies GraphCameraSegmentationV1 }
+}
+
+const attachLabels: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const pointClouds = inputs.pointClouds as GraphBinaryPointCloudPlanV1 | GraphRangeImagePointCloudPlanV1
+  if (pointClouds?.kind === 'range-image-point-cloud-plan' && isParquet(inputs.labels)) {
+    const timestampField = String(params.timestampField)
+    const labelRows = await loadGraphParquetColumnV1(inputs.labels, timestampField)
+    return {
+      segmentation: {
+        kind: 'range-image-segmentation-plan', pointClouds, labels: inputs.labels,
+        timestampField, sensorField: String(params.sensorField),
+        shapeField: String(params.shapeField), valuesField: String(params.valuesField),
+        taxonomyId: String(params.taxonomy), panopticDivisor: Number(params.panopticDivisor ?? 1000),
+        availableTimestamps: new Set(labelRows.map((row) => integerTimestamp(row[timestampField], timestampField))),
+      } satisfies GraphRangeImageSegmentationPlanV1,
+    }
+  }
   if (pointClouds?.kind !== 'binary-point-cloud-plan') throw new Error('GRAPH_LABEL_POINT_INPUT_INVALID')
   const semantic = isBinary(inputs.labels) ? inputs.labels : undefined
   const panoptic = isBinary(inputs.panoptic) ? inputs.panoptic : undefined
@@ -668,17 +1165,23 @@ export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOpe
   'binary.interleaved_records': interleavedRecords,
   'binary.pcd_records': pcdRecords,
   'feather.columns': featherColumns,
+  'parquet.columns': parquetColumns,
   'image.encoded_bytes': encodedBytes,
   'json.records': jsonRecords,
   'timeline.sort': timelineSort,
+  'geometry.relative_poses': relativePoses,
+  'geometry.range_image_to_cartesian': rangeImageToCartesian,
   'relations.token_join': tokenJoin,
   'timeline.join': timelineJoin,
   'records.select': recordsSelect,
   'image.bind_camera_frame': bindCameraFrame,
   'geometry.normalize_boxes3d': normalizeBoxes3d,
   'geometry.normalize_boxes2d': normalizeBoxes2d,
+  'relations.composite_key_join': compositeKeyJoin,
   'tracks.derive_trajectories': deriveTrajectories,
   'labels.attach_by_point_index': attachLabels,
+  'labels.decode_camera_mask': decodeCameraMask,
+  'geometry.normalize_keypoints': normalizeKeypoints,
 }
 
 export { interleaveFeatherNumericColumnsV1, loadTable as loadGraphTableV1, numericPath as graphNumericPathV1 }

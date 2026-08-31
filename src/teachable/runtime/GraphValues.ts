@@ -1,14 +1,22 @@
 import type { FeatherColumnsParamsV1, DecodedFeatherColumnsV1 } from '../operators/featherColumns'
+import type { ParquetColumnsParamsV1 } from '../operators/parquetColumns'
 import type {
   DecodedNumericRecordsV1,
   InterleavedRecordsParamsV1,
   NpzUint16ParamsV1,
   PcdRecordsParamsV1,
 } from '../operators/binaryReaders'
+import type { ParquetRow } from '../../utils/merge'
+import type { LidarCalibration } from '../../utils/rangeImage'
+import type { WaymoParquetFile } from '../../utils/parquet'
+import type { AsyncBuffer } from 'hyparquet'
 import type { ByteSourceV1 } from '../source/ByteSource'
 import type {
+  NormalizedBox2dV1,
   NormalizedBox3dV1,
   NormalizedCameraCalibrationV1,
+  NormalizedKeypointSetV1,
+  NormalizedSegmentationV1,
   NormalizedTrackPointV1,
 } from './normalizedScene'
 
@@ -53,9 +61,12 @@ export class GraphResourceAccountV1 {
 
   allocate(bytes: number): () => void {
     if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error('GRAPH_ALLOCATION_INVALID')
-    this.#allocationBytes += bytes
+    const nextAllocationBytes = this.#allocationBytes + bytes
+    if (!Number.isSafeInteger(nextAllocationBytes) || nextAllocationBytes > this.#limits.maxAllocationBytes) {
+      throw new Error('GRAPH_ALLOCATION_BUDGET_EXCEEDED')
+    }
+    this.#allocationBytes = nextAllocationBytes
     this.#peakAllocationBytes = Math.max(this.#peakAllocationBytes, this.#allocationBytes)
-    if (this.#allocationBytes > this.#limits.maxAllocationBytes) throw new Error('GRAPH_ALLOCATION_BUDGET_EXCEEDED')
     let released = false
     return () => {
       if (released) return
@@ -80,6 +91,7 @@ export interface CoreOperatorExecutionContextV1 {
   readonly resources: GraphResourceAccountV1
   throwIfAborted(): void
   read(path: string, signal?: AbortSignal): Promise<ArrayBuffer>
+  asyncBuffer(path: string, signal?: AbortSignal): Promise<AsyncBuffer>
 }
 
 export interface GraphTableCollectionV1 {
@@ -88,6 +100,20 @@ export interface GraphTableCollectionV1 {
   readonly params: FeatherColumnsParamsV1
   readonly context: CoreOperatorExecutionContextV1
   readonly cache: Map<string, Promise<DecodedFeatherColumnsV1>>
+  readonly retainedReleases: Map<string, () => void>
+}
+
+/** Lazy Parquet projection over the transport-neutral ByteSource. */
+export interface GraphParquetCollectionV1 {
+  readonly kind: 'parquet-collection'
+  readonly files: readonly GraphSourceFileV1[]
+  readonly params: ParquetColumnsParamsV1
+  readonly context: CoreOperatorExecutionContextV1
+  readonly fileCache: Map<string, Promise<WaymoParquetFile>>
+  readonly cache: Map<string, Promise<readonly ParquetRow[]>>
+  readonly projectionCache: Map<string, Promise<readonly ParquetRow[]>>
+  readonly frameIndexCache: Map<string, Promise<ReadonlyMap<bigint, { readonly rowStart: number; readonly rowEnd: number }>>>
+  readonly frameRowsCache: Map<string, Promise<readonly ParquetRow[]>>
   readonly retainedReleases: Map<string, () => void>
 }
 
@@ -150,6 +176,17 @@ export interface GraphPointCloudPlanV1 {
   readonly frameId: string
 }
 
+export interface GraphRangeImagePointCloudPlanV1 {
+  readonly kind: 'range-image-point-cloud-plan'
+  readonly rows: GraphParquetCollectionV1
+  readonly calibrations: ReadonlyMap<number, LidarCalibration>
+  readonly timestampField: string
+  readonly sensorField: string
+  readonly shapeField: string
+  readonly valuesField: string
+  readonly frameId: string
+}
+
 export interface GraphBinaryPointCloudBindingV1 {
   readonly frameKey: string
   readonly recordKey: string
@@ -181,6 +218,16 @@ export interface GraphCameraPlanV1 {
   readonly bindings?: readonly GraphCameraBindingV1[]
 }
 
+export interface GraphParquetCameraPlanV1 {
+  readonly kind: 'parquet-camera-plan'
+  readonly rows: GraphParquetCollectionV1
+  readonly calibrations: ReadonlyMap<string, NormalizedCameraCalibrationV1>
+  readonly timestampField: string
+  readonly sensorField: string
+  readonly imageField: string
+  readonly mimeType: 'image/jpeg' | 'image/png' | 'image/webp'
+}
+
 export interface GraphBoxesV1 {
   readonly kind: 'boxes3d'
   readonly byTimestamp: ReadonlyMap<bigint, readonly NormalizedBox3dV1[]>
@@ -191,6 +238,16 @@ export interface GraphProjectedBoxesV1 {
   readonly kind: 'projected-boxes2d'
   readonly boxes: GraphBoxesV1
   readonly cameras: GraphCameraPlanV1
+}
+
+export interface GraphBoxes2dV1 {
+  readonly kind: 'boxes2d'
+  readonly byTimestamp: ReadonlyMap<bigint, readonly NormalizedBox2dV1[]>
+}
+
+export interface GraphBoxRelationsV1 {
+  readonly kind: 'box-relations'
+  readonly box2dToBox3d: ReadonlyMap<string, string>
 }
 
 export interface GraphTrajectoriesV1 {
@@ -214,11 +271,37 @@ export interface GraphSegmentationPlanV1 {
   readonly panopticDivisor: number
 }
 
+export interface GraphRangeImageSegmentationPlanV1 {
+  readonly kind: 'range-image-segmentation-plan'
+  readonly pointClouds: GraphRangeImagePointCloudPlanV1
+  readonly labels: GraphParquetCollectionV1
+  readonly timestampField: string
+  readonly sensorField: string
+  readonly shapeField: string
+  readonly valuesField: string
+  readonly taxonomyId: string
+  readonly panopticDivisor: number
+  readonly availableTimestamps: ReadonlySet<bigint>
+}
+
+export interface GraphCameraSegmentationV1 {
+  readonly kind: 'camera-segmentation'
+  readonly byTimestamp: ReadonlyMap<bigint, readonly NormalizedSegmentationV1[]>
+}
+
+export interface GraphKeypointsV1 {
+  readonly kind: 'keypoints'
+  readonly dimensions: 2 | 3
+  readonly byTimestamp: ReadonlyMap<bigint, readonly NormalizedKeypointSetV1[]>
+  readonly sourceRowsByTimestamp: ReadonlyMap<bigint, readonly ParquetRow[]>
+}
+
 export interface GraphSegmentDescriptorV1 {
   readonly groupId: string
   readonly id: string
   readonly label?: string
   readonly metadata?: Readonly<Record<string, string | number | boolean | null>>
+  readonly objectCounts?: Readonly<Record<number, number>>
 }
 
 export interface GraphSegmentIndexV1 {
@@ -233,18 +316,26 @@ export interface GraphRecordsV1 {
 
 export type GraphTypedValueV1 =
   | GraphTableCollectionV1
+  | GraphParquetCollectionV1
   | GraphJsonCollectionV1
   | GraphEncodedCollectionV1
   | GraphBinaryCollectionV1
   | GraphTimelineV1
   | GraphPoseTimelineV1
   | GraphPointCloudPlanV1
+  | GraphRangeImagePointCloudPlanV1
   | GraphBinaryPointCloudPlanV1
   | GraphCameraPlanV1
+  | GraphParquetCameraPlanV1
   | GraphBoxesV1
   | GraphProjectedBoxesV1
+  | GraphBoxes2dV1
+  | GraphBoxRelationsV1
   | GraphTrajectoriesV1
   | GraphTrajectoryPlanV1
   | GraphSegmentationPlanV1
+  | GraphRangeImageSegmentationPlanV1
+  | GraphCameraSegmentationV1
+  | GraphKeypointsV1
   | GraphSegmentIndexV1
   | GraphRecordsV1

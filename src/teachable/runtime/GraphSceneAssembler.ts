@@ -1,11 +1,12 @@
 import type { MetadataBundle, TrajectoryPoint } from '../../types/dataset'
 import { invertRowMajor4x4, multiplyRowMajor4x4 } from '../../utils/matrix'
-import type { LidarCalibration } from '../../utils/rangeImage'
+import { convertAllSensors, type LidarCalibration, type RangeImage } from '../../utils/rangeImage'
 import { transformInterleavedXyzV1 } from '../operators/binaryReaders'
 import { alignNearestTimestampV1 } from '../operators/temporal'
 import {
   interleaveFeatherNumericColumnsV1,
   loadGraphBinaryV1,
+  loadGraphParquetFrameRowsV1,
   loadGraphTableV1,
 } from '../operators/coreGraphOperators'
 import { projectBox3dPinholeV1 } from '../operators/sceneGeometry'
@@ -14,11 +15,19 @@ import type { CompiledRecipeV1 } from '../recipe/compiler'
 import type {
   GraphBinaryPointCloudBindingV1,
   GraphBinaryPointCloudPlanV1,
+  GraphBoxRelationsV1,
   GraphBoxesV1,
+  GraphBoxes2dV1,
   GraphCameraPlanV1,
+  GraphCameraSegmentationV1,
+  GraphKeypointsV1,
+  GraphParquetCameraPlanV1,
   GraphPointCloudPlanV1,
   GraphPoseTimelineV1,
   GraphProjectedBoxesV1,
+  GraphRangeImagePointCloudPlanV1,
+  GraphRangeImageSegmentationPlanV1,
+  GraphRecordsV1,
   GraphSegmentDescriptorV1,
   GraphSegmentIndexV1,
   GraphSegmentationPlanV1,
@@ -31,8 +40,10 @@ import type { GraphExecutionResultV1 } from './GraphKernel'
 import type {
   NormalizedBox2dV1,
   NormalizedBox3dV1,
+  NormalizedCameraCalibrationV1,
   NormalizedCapabilityV1,
   NormalizedFrameV1,
+  NormalizedKeypointSetV1,
   NormalizedPointCloudV1,
   NormalizedRelationsV1,
   NormalizedSceneV1,
@@ -51,8 +62,35 @@ function kind<T extends { readonly kind: string }>(value: unknown, expected: T['
   return typeof value === 'object' && value !== null && (value as { kind?: string }).kind === expected ? value as T : null
 }
 
-function sensorForId(recipe: CompiledRecipeV1, sensorId: string) {
-  return recipe.recipe.scene.sensors.find((sensor) => sensor.id === sensorId || sensor.image?.aliases?.includes(sensorId))
+function sensorForId(
+  recipe: CompiledRecipeV1,
+  sensorId: string,
+  modality?: CompiledRecipeV1['recipe']['scene']['sensors'][number]['modality'],
+) {
+  return recipe.recipe.scene.sensors.find((sensor) => (
+    (!modality || sensor.modality === modality) &&
+    sensor.id === sensorId
+    || ((!modality || sensor.modality === modality) && String(sensor.rendererId) === sensorId)
+    || ((!modality || sensor.modality === modality) && sensor.image?.aliases?.includes(sensorId))
+  ))
+}
+
+function numericList(value: unknown, label: string, length?: number): number[] {
+  if (!Array.isArray(value) || (length !== undefined && value.length !== length)
+    || value.some((entry) => typeof entry !== 'number' || !Number.isFinite(entry))) {
+    throw new Error(`GRAPH_ARRAY_INVALID: ${label}`)
+  }
+  return value
+}
+
+function binaryBuffer(value: unknown): ArrayBuffer | null {
+  if (value instanceof ArrayBuffer) return value.slice(0)
+  if (value instanceof Uint8Array) {
+    const copy = new Uint8Array(value.byteLength)
+    copy.set(value)
+    return copy.buffer
+  }
+  return null
 }
 
 function cameraSensorForPath(recipe: CompiledRecipeV1, path: string) {
@@ -174,6 +212,27 @@ async function loadBinaryPointCloud(
   }
 }
 
+function attachRangeImageLabels(
+  cloud: NormalizedPointCloudV1,
+  row: Readonly<Record<string, unknown>> | undefined,
+  plan: GraphRangeImageSegmentationPlanV1,
+): { readonly semanticLabels?: Uint8Array; readonly panopticLabels?: Uint16Array } {
+  if (!row || !cloud.sourceIndices) return {}
+  const shape = numericList(row[plan.shapeField], plan.shapeField)
+  const values = numericList(row[plan.valuesField], plan.valuesField)
+  const channels = shape.length >= 3 ? shape[2] : 1
+  const semanticLabels = new Uint8Array(cloud.pointCount)
+  const panopticLabels = new Uint16Array(cloud.pointCount)
+  for (let index = 0; index < cloud.pointCount; index += 1) {
+    const sourceIndex = cloud.sourceIndices[index]
+    const instance = Math.max(0, values[sourceIndex * channels] ?? 0)
+    const semantic = channels >= 2 ? values[sourceIndex * channels + 1] ?? 0 : instance
+    semanticLabels[index] = semantic
+    panopticLabels[index] = semantic * plan.panopticDivisor + instance
+  }
+  return { semanticLabels, panopticLabels }
+}
+
 export interface AssembledGraphSceneV1 {
   readonly scene: NormalizedSceneV1
   readonly diagnostics: readonly AdapterDiagnostic[]
@@ -189,6 +248,7 @@ export function assembleGraphSceneV1(input: {
   const timeline = kind<GraphTimelineV1>(input.graph.outputs.get('timeline'), 'timeline')
   if (!timeline) throw new Error('GRAPH_TIMELINE_OUTPUT_INVALID')
   const segmentIndex = kind<GraphSegmentIndexV1>(input.graph.outputs.get('segmentMetadata'), 'segment-index')
+  const segmentRecords = kind<GraphRecordsV1>(input.graph.outputs.get('segmentMetadata'), 'records')
   const selected = selectedTimeline(timeline, segmentIndex, input.sceneId)
   const frames = selected.frames
   const timestamps = frames.map((frame) => frame.timestamp)
@@ -197,14 +257,22 @@ export function assembleGraphSceneV1(input: {
   const poses = kind<GraphPoseTimelineV1>(input.graph.outputs.get('egoPoses'), 'pose-timeline')
   const tablePointPlan = kind<GraphPointCloudPlanV1>(input.graph.outputs.get('pointClouds'), 'point-cloud-plan')
   const binaryPointPlan = kind<GraphBinaryPointCloudPlanV1>(input.graph.outputs.get('pointClouds'), 'binary-point-cloud-plan')
+  const rangeImagePlan = kind<GraphRangeImagePointCloudPlanV1>(input.graph.outputs.get('pointClouds'), 'range-image-point-cloud-plan')
   const radarPlan = kind<GraphBinaryPointCloudPlanV1>(input.graph.outputs.get('radarPointClouds'), 'binary-point-cloud-plan')
   const cameraPlan = kind<GraphCameraPlanV1>(input.graph.outputs.get('cameraImages'), 'camera-plan')
+  const parquetCameraPlan = kind<GraphParquetCameraPlanV1>(input.graph.outputs.get('cameraImages'), 'parquet-camera-plan')
   const boxes = kind<GraphBoxesV1>(input.graph.outputs.get('boxes3d'), 'boxes3d')
   const projected = kind<GraphProjectedBoxesV1>(input.graph.outputs.get('boxes2d'), 'projected-boxes2d')
+  const directBoxes2d = kind<GraphBoxes2dV1>(input.graph.outputs.get('boxes2d'), 'boxes2d')
+  const boxRelations = kind<GraphBoxRelationsV1>(input.graph.outputs.get('boxAssociations'), 'box-relations')
   const trajectoriesValue = kind<GraphTrajectoriesV1>(input.graph.outputs.get('trajectories'), 'trajectories')
     ?? kind<GraphTrajectoryPlanV1>(input.graph.outputs.get('trajectories'), 'trajectory-plan')
   const trajectories = selectedTrajectories(trajectoriesValue, frames)
   const segmentation = kind<GraphSegmentationPlanV1>(input.graph.outputs.get('lidarSegmentation'), 'segmentation-plan')
+  const rangeSegmentation = kind<GraphRangeImageSegmentationPlanV1>(input.graph.outputs.get('lidarSegmentation'), 'range-image-segmentation-plan')
+  const cameraSegmentationPlan = kind<GraphCameraSegmentationV1>(input.graph.outputs.get('cameraSegmentation'), 'camera-segmentation')
+  const keypoints3dPlan = kind<GraphKeypointsV1>(input.graph.outputs.get('keypoints3d'), 'keypoints')
+  const keypoints2dPlan = kind<GraphKeypointsV1>(input.graph.outputs.get('keypoints2d'), 'keypoints')
   const taxonomy = input.compiledRecipe.recipe.scene.taxonomies.find((entry) => entry.role === 'objects')
   const classIds = new Set(taxonomy?.classes.map((entry) => entry.id) ?? [])
   const fallbackClassId = classIds.has('unknown') ? 'unknown' : taxonomy?.classes[0]?.id ?? 'unknown'
@@ -225,13 +293,13 @@ export function assembleGraphSceneV1(input: {
   }
 
   const pointSensorForBinding = (binding: GraphBinaryPointCloudBindingV1, modality: 'lidar' | 'radar') => {
-    const sensor = sensorForId(input.compiledRecipe, binding.sensorId)
+    const sensor = sensorForId(input.compiledRecipe, binding.sensorId, modality)
     return sensor?.modality === modality ? sensor : null
   }
   const selectedBoxes = frames.some((frame) => boxesForFrame(boxes, frame).length > 0)
   const selectedCameraBindings = cameraPlan?.bindings?.filter((binding) => (
     frameKeys.has(binding.frameKey)
-    && sensorForId(input.compiledRecipe, binding.sensorId)?.modality === 'camera'
+    && sensorForId(input.compiledRecipe, binding.sensorId, 'camera')
     && cameraPlan.calibrations.has(binding.sensorId)
   )) ?? []
   const selectedPointBindings = binaryPointPlan?.bindings.filter((binding) => (
@@ -249,17 +317,24 @@ export function assembleGraphSceneV1(input: {
   const hasSegmentation = selectedPointBindings.some((binding) => (
     segmentation?.semanticPathByRecordKey.has(binding.recordKey) || segmentation?.panopticPathByRecordKey.has(binding.recordKey)
   ))
+  const hasRangePoints = Boolean(rangeImagePlan?.rows.files.length && rangeImagePlan.calibrations.size)
+  const hasParquetCameraFiles = Boolean(parquetCameraPlan?.rows.files.length && parquetCameraPlan.calibrations.size)
+  const hasDirectBoxes2d = frames.some((frame) => (directBoxes2d?.byTimestamp.get(frame.timestamp)?.length ?? 0) > 0)
   const evidence: Partial<Record<NormalizedCapabilityV1, boolean>> = {
     timeline: timestamps.length > 0,
     egoPoses: worldFromEgoByTimestamp.size > 0,
-    pointClouds: Boolean(tablePointPlan?.tables.files.length || selectedPointBindings.length),
+    pointClouds: Boolean(tablePointPlan?.tables.files.length || selectedPointBindings.length || hasRangePoints),
     radarPointClouds: selectedRadarBindings.length > 0,
-    cameraImages: hasCameraFiles,
+    cameraImages: hasCameraFiles || hasParquetCameraFiles,
     boxes3d: selectedBoxes,
-    boxes2d: Boolean(projected && selectedBoxes && hasCameraFiles),
+    boxes2d: Boolean((projected && selectedBoxes && hasCameraFiles) || hasDirectBoxes2d),
+    boxAssociations: Boolean(boxRelations?.box2dToBox3d.size),
     trajectories: trajectories.size > 0,
-    lidarSegmentation: hasSegmentation,
-    segmentMetadata: Boolean(segmentIndex?.segments.length || input.graph.outputs.has('segmentMetadata')),
+    lidarSegmentation: hasSegmentation || Boolean(rangeSegmentation?.availableTimestamps.size && hasRangePoints),
+    cameraSegmentation: Boolean(cameraSegmentationPlan?.byTimestamp.size),
+    keypoints3d: Boolean(keypoints3dPlan?.dimensions === 3 && keypoints3dPlan.byTimestamp.size),
+    keypoints2d: Boolean(keypoints2dPlan?.dimensions === 2 && keypoints2dPlan.byTimestamp.size),
+    segmentMetadata: Boolean(segmentIndex?.segments.length || segmentRecords?.rows.length),
   }
   const capabilities = new Set<NormalizedCapabilityV1>()
   const diagnostics: AdapterDiagnostic[] = []
@@ -268,9 +343,12 @@ export function assembleGraphSceneV1(input: {
     else diagnostics.push(capabilityDiagnostic(capability))
   }
 
-  const cameraCalibrations = new Map([...(cameraPlan?.calibrations ?? [])].filter(([sensorId]) => (
-    input.compiledRecipe.recipe.scene.sensors.some((sensor) => sensor.modality === 'camera' && sensor.id === sensorId)
-  )))
+  const cameraCalibrations = new Map<string, NormalizedCameraCalibrationV1>()
+  for (const calibration of [...(cameraPlan?.calibrations.values() ?? []), ...(parquetCameraPlan?.calibrations.values() ?? [])]) {
+    const sensor = sensorForId(input.compiledRecipe, calibration.sensorId, 'camera')
+    if (sensor?.modality !== 'camera') continue
+    cameraCalibrations.set(sensor.id, { ...calibration, sensorId: sensor.id, frameId: sensor.frameId })
+  }
   const transformsByChild = new Map<string, NormalizedTransformV1>()
   const addPointTransforms = (plan: GraphBinaryPointCloudPlanV1 | null, modality: 'lidar' | 'radar') => {
     for (const binding of plan?.bindings ?? []) {
@@ -281,6 +359,14 @@ export function assembleGraphSceneV1(input: {
   }
   addPointTransforms(binaryPointPlan, 'lidar')
   addPointTransforms(radarPlan, 'radar')
+  for (const [rendererId, calibration] of rangeImagePlan?.calibrations ?? []) {
+    const sensor = sensorForId(input.compiledRecipe, String(rendererId), 'lidar')
+    if (!sensor || calibration.extrinsic.length !== 16) continue
+    transformsByChild.set(sensor.frameId, {
+      parentFrameId: 'ego', childFrameId: sensor.frameId,
+      parentFromChild: new Float64Array(calibration.extrinsic),
+    })
+  }
   if (tablePointPlan) {
     const sensor = input.compiledRecipe.recipe.scene.sensors.find((entry) => entry.modality === 'lidar')
     if (sensor) transformsByChild.set(sensor.frameId, {
@@ -291,7 +377,7 @@ export function assembleGraphSceneV1(input: {
   for (const calibration of cameraCalibrations.values()) {
     transformsByChild.set(calibration.frameId, { parentFrameId: 'ego', childFrameId: calibration.frameId, parentFromChild: calibration.egoFromCamera })
   }
-  const box2dToBox3d = new Map<string, string>()
+  const box2dToBox3d = new Map(boxRelations?.box2dToBox3d ?? [])
   const relations: NormalizedRelationsV1 = {
     staticTransforms: [...transformsByChild.values()], cameraCalibrations, trajectories, box2dToBox3d,
   }
@@ -353,6 +439,50 @@ export function assembleGraphSceneV1(input: {
           }
         }
       }
+      if ((requested.has('pointClouds') || requested.has('lidarSegmentation')) && rangeImagePlan) {
+        const rows = await loadGraphParquetFrameRowsV1(
+          rangeImagePlan.rows, rangeImagePlan.timestampField, timelineFrame.timestamp, request.signal,
+        )
+        const rangeImages = new Map<number, RangeImage>()
+        for (const row of rows) {
+          const rendererId = Number(row[rangeImagePlan.sensorField])
+          const sensor = sensorForId(input.compiledRecipe, String(rendererId), 'lidar')
+          if (sensor?.modality !== 'lidar' || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          rangeImages.set(rendererId, {
+            shape: numericList(row[rangeImagePlan.shapeField], rangeImagePlan.shapeField, 3) as [number, number, number],
+            values: numericList(row[rangeImagePlan.valuesField], rangeImagePlan.valuesField),
+          })
+        }
+        const labelRows = rangeSegmentation?.availableTimestamps.has(timelineFrame.timestamp)
+          ? await loadGraphParquetFrameRowsV1(
+            rangeSegmentation.labels, rangeSegmentation.timestampField, timelineFrame.timestamp, request.signal,
+          )
+          : []
+        const labelBySensor = new Map(labelRows.map((row) => [String(row[rangeSegmentation!.sensorField]), row]))
+        for (const [rendererId, cloud] of convertAllSensors(rangeImages, new Map(rangeImagePlan.calibrations)).perSensor) {
+          const sensor = sensorForId(input.compiledRecipe, String(rendererId), 'lidar')
+          if (sensor?.modality !== 'lidar') continue
+          const normalized: NormalizedPointCloudV1 = {
+            sensorId: sensor.id, frameId: rangeImagePlan.frameId,
+            values: cloud.positions, pointCount: cloud.pointCount, stride: 6,
+            attributes: ['x', 'y', 'z', 'intensity', 'range', 'elongation'], sourceIndices: cloud.validIndices,
+          }
+          const labels = rangeSegmentation
+            ? attachRangeImageLabels(normalized, labelBySensor.get(String(rendererId)), rangeSegmentation)
+            : {}
+          if (requested.has('pointClouds')) {
+            ;(frame.pointClouds as NormalizedPointCloudV1[]).push({ ...normalized, ...labels })
+          }
+          if (requested.has('lidarSegmentation') && labels.semanticLabels && rangeSegmentation) {
+            ;(frame.lidarSegmentation as NormalizedFrameV1['lidarSegmentation'][number][]).push({
+              sensorId: sensor.id, taxonomyId: rangeSegmentation.taxonomyId,
+              labels: labels.panopticLabels ?? labels.semanticLabels,
+              divisor: labels.panopticLabels ? rangeSegmentation.panopticDivisor : undefined,
+              encoding: 'point-index',
+            })
+          }
+        }
+      }
       if (requested.has('radarPointClouds') && radarPlan) {
         for (const binding of bindingsForFrame(radarPlan, timelineFrame)) {
           const sensor = pointSensorForBinding(binding, 'radar')
@@ -388,6 +518,23 @@ export function assembleGraphSceneV1(input: {
           }
         }
       }
+      if (requested.has('cameraImages') && parquetCameraPlan) {
+        const rows = await loadGraphParquetFrameRowsV1(
+          parquetCameraPlan.rows, parquetCameraPlan.timestampField, timelineFrame.timestamp, request.signal,
+        )
+        for (const row of rows) {
+          const sensor = sensorForId(input.compiledRecipe, String(row[parquetCameraPlan.sensorField]), 'camera')
+          if (sensor?.modality !== 'camera' || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          const calibration = cameraCalibrations.get(sensor.id)
+          const encodedBytes = binaryBuffer(row[parquetCameraPlan.imageField])
+          if (!calibration || !encodedBytes) continue
+          ;(frame.cameraImages as NormalizedFrameV1['cameraImages'][number][]).push({
+            sensorId: sensor.id, timestampMicros: timestampsMicros[index], encodedBytes,
+            mimeType: parquetCameraPlan.mimeType, width: calibration.width, height: calibration.height,
+            calibrationId: sensor.id,
+          })
+        }
+      }
       if (requested.has('boxes3d') || requested.has('boxes2d')) {
         ;(frame.boxes3d as NormalizedBox3dV1[]).push(...boxesForFrame(boxes, timelineFrame).map((box) => ({
           ...box, classId: classIds.has(box.classId) ? box.classId : fallbackClassId,
@@ -402,6 +549,34 @@ export function assembleGraphSceneV1(input: {
             ;(frame.boxes2d as NormalizedBox2dV1[]).push(box2d)
             box2dToBox3d.set(box2d.id, box.id)
           }
+        }
+      }
+      if (requested.has('boxes2d') && directBoxes2d) {
+        for (const box of directBoxes2d.byTimestamp.get(timelineFrame.timestamp) ?? []) {
+          const sensor = sensorForId(input.compiledRecipe, box.cameraId, 'camera')
+          if (sensor?.modality !== 'camera' || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          ;(frame.boxes2d as NormalizedBox2dV1[]).push({
+            ...box, cameraId: sensor.id, classId: classIds.has(box.classId) ? box.classId : fallbackClassId,
+          })
+        }
+      }
+      const appendKeypoints = (plan: GraphKeypointsV1 | null, target: NormalizedKeypointSetV1[]) => {
+        for (const keypoints of plan?.byTimestamp.get(timelineFrame.timestamp) ?? []) {
+          const sensor = keypoints.cameraId ? sensorForId(input.compiledRecipe, keypoints.cameraId, 'camera') : null
+          if (sensor && request.sensorIds && !request.sensorIds.has(sensor.id)) continue
+          target.push(sensor ? { ...keypoints, cameraId: sensor.id, frameId: sensor.frameId } : keypoints)
+        }
+      }
+      if (requested.has('keypoints3d')) appendKeypoints(keypoints3dPlan, frame.keypoints3d as NormalizedKeypointSetV1[])
+      if (requested.has('keypoints2d')) appendKeypoints(keypoints2dPlan, frame.keypoints2d as NormalizedKeypointSetV1[])
+      if (requested.has('cameraSegmentation') && cameraSegmentationPlan) {
+        for (const segmentationEntry of cameraSegmentationPlan.byTimestamp.get(timelineFrame.timestamp) ?? []) {
+          const sensor = sensorForId(input.compiledRecipe, segmentationEntry.sensorId, 'camera')
+          if (sensor?.modality !== 'camera' || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          ;(frame.cameraSegmentation as NormalizedFrameV1['cameraSegmentation'][number][]).push({
+            ...segmentationEntry, sensorId: sensor.id,
+            labels: segmentationEntry.labels instanceof ArrayBuffer ? segmentationEntry.labels.slice(0) : segmentationEntry.labels.slice(),
+          })
         }
       }
       if (request.signal?.aborted) throw new DOMException('Scene frame load was aborted.', 'AbortError')
@@ -443,13 +618,13 @@ export function assembleGraphSceneV1(input: {
     }
     if (cameraPlan?.bindings) {
       for (const binding of cameraPlan.bindings.filter((entry) => entry.frameKey === timelineFrame.key)) {
-        const sensor = sensorForId(input.compiledRecipe, binding.sensorId)
+        const sensor = sensorForId(input.compiledRecipe, binding.sensorId, 'camera')
         if (sensor) files.push({ modality: 'camera', channel: sensor.id, sensorId: sensor.rendererId, filename: binding.path })
       }
     } else {
       for (const [sensorId, entry] of cameraPaths) {
         const matched = cameraPlan ? alignNearestTimestampV1(entry.timestamps, timelineFrame.timestamp, cameraPlan.maxDelta) : null
-        const sensor = sensorForId(input.compiledRecipe, sensorId)
+        const sensor = sensorForId(input.compiledRecipe, sensorId, 'camera')
         if (matched !== null && sensor) files.push({ modality: 'camera', channel: sensor.id, sensorId: sensor.rendererId, filename: entry.byTimestamp.get(matched)! })
       }
     }
@@ -476,8 +651,15 @@ export function assembleGraphSceneV1(input: {
       beamInclinationValues: null, beamInclinationMin: 0, beamInclinationMax: 0,
     })
   }
+  for (const [rendererId, calibration] of rangeImagePlan?.calibrations ?? []) {
+    lidarCalibrations.set(rendererId, {
+      ...calibration,
+      extrinsic: [...calibration.extrinsic],
+      beamInclinationValues: calibration.beamInclinationValues ? [...calibration.beamInclinationValues] : null,
+    })
+  }
   const rendererCameraCalibrations = [...cameraCalibrations.values()].map((calibration) => {
-    const rendererId = sensorForId(input.compiledRecipe, calibration.sensorId)?.rendererId ?? 0
+    const rendererId = sensorForId(input.compiledRecipe, calibration.sensorId, 'camera')?.rendererId ?? 0
     return {
       'key.camera_name': rendererId,
       '[CameraCalibrationComponent].extrinsic.transform': [...calibration.egoFromCamera],
@@ -491,6 +673,7 @@ export function assembleGraphSceneV1(input: {
     }
   })
   const lidarBoxByFrame = new Map<bigint, Record<string, unknown>[]>()
+  const cameraBoxByFrame = new Map<bigint, Record<string, unknown>[]>()
   const objectTrajectories = new Map<string, TrajectoryPoint[]>()
   const objectCounts: Record<number, number> = {}
   const perTypeCounts = new Map<number, number[]>()
@@ -514,16 +697,71 @@ export function assembleGraphSceneV1(input: {
       perTypeCounts.set(type, counts)
     }
   })
+  frames.forEach((timelineFrame, index) => {
+    const frameBoxes = directBoxes2d?.byTimestamp.get(timelineFrame.timestamp) ?? []
+    if (frameBoxes.length === 0) return
+    cameraBoxByFrame.set(timestamps[index], frameBoxes.flatMap((box) => {
+      const sensor = sensorForId(input.compiledRecipe, box.cameraId, 'camera')
+      if (!sensor) return []
+      return [{
+        'key.camera_name': sensor.rendererId, 'key.camera_object_id': box.objectId,
+        '[CameraBoxComponent].type': classRendererIds.get(box.classId) ?? 0,
+        '[CameraBoxComponent].box.center.x': box.center[0], '[CameraBoxComponent].box.center.y': box.center[1],
+        '[CameraBoxComponent].box.size.x': box.dimensions[0], '[CameraBoxComponent].box.size.y': box.dimensions[1],
+      }]
+    }))
+  })
   for (const [type, counts] of perTypeCounts) objectCounts[type] = Math.round(counts.reduce((sum, count) => sum + count, 0) / counts.length)
+  Object.assign(objectCounts, selected.segment.objectCounts ?? {})
   for (const [objectId, points] of trajectories) objectTrajectories.set(objectId, points.map((point) => ({
     frameIndex: point.frameIndex, x: point.position[0], y: point.position[1], z: point.position[2], type: classRendererIds.get(point.classId) ?? 0,
   })))
   const segmentMetadata = selected.segment.metadata ?? {}
+  const assocCamToLaser = new Map(box2dToBox3d)
+  const assocLaserToCams = new Map<string, Set<string>>()
+  for (const [cameraId, lidarId] of assocCamToLaser) {
+    const entries = assocLaserToCams.get(lidarId) ?? new Set<string>()
+    entries.add(cameraId)
+    assocLaserToCams.set(lidarId, entries)
+  }
+  const keypointsByFrame = keypoints3dPlan
+    ? new Map([...keypoints3dPlan.sourceRowsByTimestamp].map(([timestamp, rows]) => [timestamp, [...rows]]))
+    : undefined
+  const cameraKeypointsByFrame = keypoints2dPlan
+    ? new Map([...keypoints2dPlan.sourceRowsByTimestamp].map(([timestamp, rows]) => [timestamp, [...rows]]))
+    : undefined
+  const cameraSeg = cameraSegmentationPlan ? new Map([...cameraSegmentationPlan.byTimestamp].map(([timestamp, entries]) => [
+    timestamp,
+    new Map(entries.flatMap((entry) => {
+      const sensor = sensorForId(input.compiledRecipe, entry.sensorId, 'camera')
+      const labels = entry.labels instanceof ArrayBuffer ? entry.labels : entry.labels.buffer.slice(
+        entry.labels.byteOffset,
+        entry.labels.byteOffset + entry.labels.byteLength,
+      ) as ArrayBuffer
+      return sensor && labels instanceof ArrayBuffer
+        ? [[sensor.rendererId, { panopticLabel: labels, divisor: entry.divisor ?? 1000 }] as const]
+        : []
+    })),
+  ] as const)) : undefined
+  const frameSet = (timestampsSet: ReadonlySet<bigint>) => new Set(
+    [...timestampsSet].flatMap((timestamp) => {
+      const frameIndex = timestampToFrame.get(timestamp)
+      return frameIndex === undefined ? [] : [frameIndex]
+    }),
+  )
   const metadata: MetadataBundle = {
     timestamps: [...timestamps], timestampToFrame, vehiclePoseByFrame,
     worldOriginInverse: worldOriginInverse ? [...worldOriginInverse] : null, poseByFrameIndex,
-    lidarCalibrations, cameraCalibrations: rendererCameraCalibrations, lidarBoxByFrame, cameraBoxByFrame: new Map(), objectTrajectories,
-    assocCamToLaser: new Map(), assocLaserToCams: new Map(), hasBoxData: lidarBoxByFrame.size > 0, hasSegmentation,
+    lidarCalibrations, cameraCalibrations: rendererCameraCalibrations, lidarBoxByFrame, cameraBoxByFrame, objectTrajectories,
+    assocCamToLaser, assocLaserToCams, hasBoxData: lidarBoxByFrame.size > 0,
+    hasSegmentation: capabilities.has('lidarSegmentation'),
+    hasKeypoints: capabilities.has('keypoints3d') || capabilities.has('keypoints2d'),
+    hasCameraSegmentation: capabilities.has('cameraSegmentation'),
+    segLabelFrames: rangeSegmentation ? frameSet(rangeSegmentation.availableTimestamps) : undefined,
+    keypointFrames: keypoints3dPlan ? frameSet(new Set(keypoints3dPlan.byTimestamp.keys())) : undefined,
+    cameraKeypointFrames: keypoints2dPlan ? frameSet(new Set(keypoints2dPlan.byTimestamp.keys())) : undefined,
+    cameraSegFrames: cameraSegmentationPlan ? frameSet(new Set(cameraSegmentationPlan.byTimestamp.keys())) : undefined,
+    keypointsByFrame, cameraKeypointsByFrame, cameraSeg,
     segmentMeta: {
       segmentId: selected.segment.id,
       timeOfDay: String(segmentMetadata.timeOfDay ?? ''), location: String(segmentMetadata.location ?? ''),

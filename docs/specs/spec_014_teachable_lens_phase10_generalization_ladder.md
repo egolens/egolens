@@ -1,9 +1,9 @@
 # Spec 014 — Teachable Lens Phase 10 original-data generalization ladder
 
 **Status**: in progress (transport/runtime preflight 10.P1, executable graph
-kernel/Argoverse 2 migration 10.P2, and nuScenes graph migration 10.P3
-implemented; Waymo graph migration, remote/share proofs, and four-dataset
-original-drop evidence pending) · **Date**: 2026-08-30
+kernel/Argoverse 2 migration 10.P2, nuScenes graph migration 10.P3, and Waymo
+graph migration/legacy removal 10.P4 implemented; remote/share proofs and
+four-dataset original-drop evidence pending) · **Date**: 2026-08-31
 
 **Relationship to earlier specs**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 10. It retains
@@ -123,6 +123,22 @@ Adapter Amnesia coverage remains green, as do Argoverse 2 and Waymo regressions.
 Waymo remains on its passing 10.P1 provider until 10.P4. No held-out rung source
 was opened by this checkpoint.
 
+**Implementation checkpoint — 10.P4:** the public graph surface now executes
+bounded Parquet projections, relative poses, range-image conversion, Parquet
+camera images/calibration, direct 2D/3D boxes and associations, trajectories,
+LiDAR/camera segmentation, 2D/3D keypoints, and segment stats. Waymo production,
+local import, browser authoring preview, and isolated conformance bind raw
+source inventory through the same graph kernel and generic scene assembler as
+nuScenes and Argoverse 2. Lazy row-range caches are lifecycle-accounted, label
+availability reads only the timestamp projection at startup, and cancellation
+and idempotent disposal release eager and lazy allocations. The prepared
+Parquet map, Waymo-specific recipe scene and metadata loader, runtime-profile
+dispatcher, and their fallback tests have been removed. The deliberately
+re-reviewed Waymo recipe hash, all three shipped numeric/capability surfaces,
+the full regression suite, production and author-only builds, and Adapter
+Amnesia/oracle receipt gates remain green. No held-out rung source was opened
+by this checkpoint.
+
 #### Normative preflight implementation phases
 
 The remaining preflight is implemented in the following order. These are
@@ -137,7 +153,7 @@ permit skipping an earlier exit gate.
 | **10.P1 — shared entry and local byte seam** | Introduce the common recipe-execution entry point, exact versioned reader/operator-profile selection, and transport-neutral bounded local `ByteSourceV1`; route production and isolated conformance binding through that entry. | **Complete.** No `sourceFamily` input remains, local bytes can cross the reader boundary without exposing `File`, and Waymo, nuScenes, and Argoverse 2 retain structural/numeric parity through the shared entry point. Provider-specific preparation and scene bodies are explicitly still transitional. |
 | **10.P2 — executable graph kernel and Argoverse 2 migration** | Add the executable core-operator ABI, typed graph values, deterministic topological evaluation, lifecycle/cancellation/resource accounting, and generic `NormalizedSceneV1` assembly. Move the Argoverse 2 recipe first because it exercises Feather, image, timeline join, calibration, boxes, and trajectories with the smallest shipped graph. Production, authoring preview, local import, and isolated conformance must use that graph path. | **Complete.** The finalized Argoverse 2 recipe executes from its declared sources and nodes without a prepared `AV2LogDatabase`, `AV2RecipeScene`, provider-specific scene body, or legacy fallback; its full Phase 9 capability/parity surface and applicable Spec 012 lifecycle/performance cases pass. Waymo and nuScenes parity remains unchanged. |
 | **10.P3 — nuScenes graph migration** | Extend the same public graph/value surface only as required by the already shipped nuScenes recipe, including JSON records, token relations, interleaved/PCD point records, NPZ labels, cameras, calibration, boxes, and trajectories. Use raw bound sources rather than a prepared token-table database. | **Complete.** The finalized nuScenes recipe executes end to end through the same graph runtime in production, authoring preview, local import, and isolated conformance, with no prepared `NuScenesDatabase`, `NuScenesRecipeScene`, provider-specific scene body, or legacy fallback. Full nuScenes Phase 9 parity and applicable Spec 012 gates pass; Argoverse 2 and Waymo do not regress. |
-| **10.P4 — Waymo graph migration and legacy removal** | Extend the same runtime for the shipped Parquet/range-image graph and its complete optional perception surface, then remove the remaining prepared Parquet/provider scene path and the timeline-only authoring-preview path. Delete obsolete runtime-profile routing once all three recipes execute by their graph. | The finalized Waymo recipe and both previously migrated recipes use one node-by-node executor and generic scene assembler across production, authoring preview, local import, and isolated conformance. No dataset name, `formatId`, bundled identity, filename, transport, prepared database/map, or dataset-specific scene class selects or supplies an alternate runtime. All three Phase 9 parity surfaces and applicable Spec 012 gates pass. This closes the local **One generic recipe executor** requirement below. |
+| **10.P4 — Waymo graph migration and legacy removal** | Extend the same runtime for the shipped Parquet/range-image graph and its complete optional perception surface, then remove the remaining prepared Parquet/provider scene path and the timeline-only authoring-preview path. Delete obsolete runtime-profile routing once all three recipes execute by their graph. | **Complete.** The finalized Waymo recipe and both previously migrated recipes use one node-by-node executor and generic scene assembler across production, authoring preview, local import, and isolated conformance. No dataset name, `formatId`, bundled identity, filename, transport, prepared database/map, or dataset-specific scene class selects or supplies an alternate runtime. All three Phase 9 parity surfaces and applicable Spec 012 gates pass. This closes the local **One generic recipe executor** requirement below. |
 | **10.P5 — source identity, catalog, and remote transport** | Implement canonical `sourceManifestHash`, the closed transport-only `SourceCatalogV1` schema and hash, catalog generation/validation, and `RemoteByteSourceV1` over the same reader contract. Add range/chunk verification, bounded full-object fallback, cancellation, retry, byte budgets, cache identity, URL/root confinement, redirect, CORS, credential, and tamper handling. | Byte-identical local and hosted fixtures produce the same `sourceManifestHash`; every shipped recipe binds through both transports without reader/operator changes. All specified transport-negative tests pass, and no remote failure can fall back to local, bundled, or dataset-specific discovery. |
 | **10.P6 — portable recipe and share round-trip** | Implement remote recipe fetch/import/cache by `recipeHash`, the closed `ShareDescriptorV1` schema, canonical descriptor/hash and inline/reference URL codecs, explicit presentation serialization, empty-profile restoration, and the existing local recipe-plus-recipient-source handoff. | Each shipped dataset opens its recipe-and-source share URL in an empty profile with no agent call or prior import and restores the selected scene, frame/window, capability-compatible sensor state, and presentation state. Ambiguous forms, unavailable dependencies, hash/schema/identity failures, and credential leakage fail as specified. |
 | **10.P7 — three-dataset baseline proof and freeze** | Run the complete local↔remote preflight matrix for Waymo, nuScenes, and Argoverse 2; finish the fresh-process evidence harness and public-safe schemas; run Phase 9 Adapter Amnesia, applicable Spec 012 performance/lifecycle cases for both transports, build-boundary scans, perceptual capture, and every required negative case. | One exact baseline commit has passing, retained evidence for every proof in this section and is frozen as the Phase 10 starting point. Only after this gate may content-blind held-out case manifests be frozen and rung 1 source inspection begin. |

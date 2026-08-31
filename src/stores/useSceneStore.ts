@@ -16,10 +16,6 @@
 import { create } from 'zustand'
 import type { ParquetRow } from '../utils/merge'
 import {
-  openParquetFile,
-  type WaymoParquetFile,
-} from '../utils/parquet'
-import {
   type LidarCalibration,
   type PointCloud,
 } from '../utils/rangeImage'
@@ -78,10 +74,8 @@ import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe }
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
-import {
-  bindRecipeSceneV1,
-  prepareParquetColumnsRuntimeV1,
-} from '../teachable/runtime/bindRecipeScene'
+import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
+import type { RecipeInventoryEntryV1 } from '../teachable/runtime/GraphKernel'
 import { decodeJsonRecordsV1 } from '../teachable/operators/jsonRecords'
 import type { GraphSegmentDescriptorV1 } from '../teachable/runtime/GraphValues'
 import { MappedByteSourceV1, type ByteSourceV1 } from '../teachable/source/ByteSource'
@@ -339,9 +333,9 @@ function activateAdapter(id: string): void {
 }
 
 const internal = {
-  parquetFiles: new Map<string, WaymoParquetFile>(),
   /** Transport-neutral bytes passed to the recipe executor. */
   recipeByteSource: null as ByteSourceV1 | null,
+  recipeInventoryEntries: [] as RecipeInventoryEntryV1[],
   timestamps: [] as bigint[],
   /** Reverse lookup: timestamp → frame index */
   timestampToFrame: new Map<bigint, number>(),
@@ -424,8 +418,8 @@ function resetInternal() {
   internal.normalizedScene?.dispose()
   internal.normalizedScene = null
   internal.conformanceSceneFactory = null
-  internal.parquetFiles.clear()
   internal.recipeByteSource = null
+  internal.recipeInventoryEntries = []
   internal.timestamps = []
   internal.pendingSeekFrame = null
   internal.cameraLoadedBatchesEver.clear()
@@ -730,11 +724,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   actions: {
     loadDataset: async (sources) => {
       resetInternal()
-      internal.recipeByteSource = new MappedByteSourceV1([...sources].map(([component, source]) => {
+      const recipeEntries = [...sources].map(([component, source]) => {
         const sourceName = typeof source === 'string'
           ? source.split(/[?#]/u, 1)[0].split('/').at(-1) || `${component}.parquet`
-          : source.name
+          : typeof source.name === 'string' && source.name.length > 0 ? source.name : `${component}.parquet`
         return [`${component}/${sourceName}`, source] as const
+      })
+      internal.recipeByteSource = new MappedByteSourceV1(recipeEntries)
+      internal.recipeInventoryEntries = recipeEntries.map(([path, source]) => ({
+        path,
+        size: typeof source === 'string' ? null : source.size,
       }))
       markPerformanceEvent('scene-load-start', { dataset: 'waymo' })
       set({
@@ -748,33 +747,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       })
 
       try {
-        const totalSteps = sources.size + 2
+        const totalSteps = 2
         let completed = 0
 
         memLog.snap('pipeline:start', { note: `${sources.size} components` })
 
-        // 1. Open all Parquet files (footer only — lightweight, main thread OK)
-        for (const [component, source] of sources) {
-          try {
-            const pf = await openParquetFile(component, source)
-            internal.parquetFiles.set(component, pf)
-          } catch {
-            // Optional components (e.g. segmentation) may not exist — skip silently
-            console.warn(`[store] Could not open ${component}, skipping`)
-          }
-          completed++
-          set({ loadProgress: completed / totalSteps })
-        }
-        memLog.snap('phase1:footers-opened', { note: `${sources.size} parquet footers` })
+        memLog.snap('phase1:source-inventoried', { note: `${sources.size} graph sources` })
 
-        // 2. Load startup data (small files: poses, calibrations, boxes)
+        // 1. Execute the recipe graph and load startup metadata.
         set({ loadStep: 'parsing' as LoadStep })
         await bindParquetComponentScene(set, get)
         completed++
         set({ loadProgress: completed / totalSteps })
         memLog.snap('phase2:startup-data-loaded', { note: 'poses, calibrations, boxes, associations' })
 
-        // 3. Init LiDAR + Camera workers in parallel
+        // 2. Init LiDAR + Camera workers in parallel
         set({ loadStep: 'workers' as LoadStep })
         await Promise.all([
           initDataWorker(sources, get, set),
@@ -786,7 +773,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           note: `${WORKER_CONCURRENCY} lidar + 2 camera workers`,
         })
 
-        // 4. Load first frames, display, and prefetch remaining
+        // 3. Load first frames, display, and prefetch remaining
         await runPostWorkerPipeline(set, get, 'waymo')
       } catch (e) {
         failLoad(set, e, 'loadDataset')
@@ -1531,16 +1518,15 @@ async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => 
   const binding = await bindRecipeSceneV1({
     compiledRecipe: waymoCompiledRecipe,
     source: internal.recipeByteSource,
-    preparation: prepareParquetColumnsRuntimeV1(internal.parquetFiles),
+    inventoryEntries: internal.recipeInventoryEntries,
   })
   const bundle = binding.metadata
-  const conformanceFiles = new Map(internal.parquetFiles)
   const conformanceSource = internal.recipeByteSource
+  const conformanceInventory = [...internal.recipeInventoryEntries]
   internal.conformanceSceneFactory = async (compiledRecipe = waymoCompiledRecipe) => (await bindRecipeSceneV1({
     compiledRecipe,
     source: conformanceSource,
-    preparation: prepareParquetColumnsRuntimeV1(conformanceFiles),
-    metadataBundle: bundle,
+    inventoryEntries: conformanceInventory,
   })).scene
   internal.normalizedScene?.dispose()
   internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
@@ -1649,9 +1635,7 @@ async function initDataWorker(
   // terminate workers that have not emitted their ready message yet.
   owner.attachPointPool(pool, 0)
   // Pass segmentation parquet URL if available (Phase A worker protocol)
-  const segSource = internal.parquetFiles.has('lidar_segmentation')
-    ? sources.get('lidar_segmentation')
-    : undefined
+  const segSource = sources.get('lidar_segmentation')
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
@@ -1675,7 +1659,7 @@ async function initCameraWorker(
 ) {
   const cameraSource = sources.get('camera_image')
   const owner = internal.normalizedScene
-  if (!cameraSource || !internal.parquetFiles.has('camera_image') || !owner) return
+  if (!cameraSource || !owner) return
 
   const start = async () => {
   const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
