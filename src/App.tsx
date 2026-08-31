@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from 'react'
 import {
   useSceneStore,
   createActiveConformanceScene,
@@ -33,6 +33,9 @@ import { initEmbedApi } from './utils/embedApi'
 import ErrorBoundary from './components/ErrorBoundary'
 import MemoryOverlay from './components/MemoryOverlay'
 import SearchableSelect, { type SelectItem } from './components/SearchableSelect'
+import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
+import { teachableAuthoringSession } from './teachable/authoring/browserSession'
+import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
 
 
 // ---------------------------------------------------------------------------
@@ -431,6 +434,18 @@ function App() {
   useOracleCaptureCommand()
   useUrlViewRestore()
   useEmbedInitialState(embedParams)
+  const authoringState = useSyncExternalStore(
+    teachableAuthoringSession.subscribe,
+    teachableAuthoringSession.getState,
+    teachableAuthoringSession.getState,
+  )
+
+  // Official Site tools are discovered only from the top-level document.
+  useEffect(() => {
+    void registerTeachableWebMcpToolsV1(teachableAuthoringSession).catch((error) => {
+      console.warn('[Teachable Lens] WebMCP registration was unavailable.', error)
+    })
+  }, [])
 
   // Initialize embed postMessage API when in embed mode
   useEffect(() => {
@@ -576,6 +591,7 @@ function App() {
 
   // Show drop zone when no data loaded (idle + no segments)
   const showDropZone = status === 'idle' && availableSegments.length === 0
+  const showTeachableLens = showDropZone && authoringState.phase !== 'idle' && authoringState.phase !== 'revoked'
   const isEmbed = embedParams.embed
   const showTimeline = !showDropZone && (!isEmbed || embedParams.controls !== 'none')
 
@@ -599,7 +615,9 @@ function App() {
       {/* Main Content */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {showDropZone && !isEmbed ? (
-          <DropZone onFilesLoaded={loadFromFiles} />
+          showTeachableLens
+            ? <TeachableLensPanel />
+            : <DropZone onFilesLoaded={loadFromFiles} />
         ) : (
           <SensorView embedControls={isEmbed ? embedParams.controls : 'full'} />
         )}
@@ -1123,11 +1141,17 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
   const [urlError, setUrlError] = useState<string | null>(null)
   const loadFromUrl = useSceneStore((s) => s.actions.loadFromUrl)
 
-  const handleFiles = useCallback(async ({ segments, rejection }: ScanResult) => {
+  const handleFiles = useCallback(async ({ segments, rejection, inventory }: ScanResult) => {
     if (segments.size === 0) {
       // Restating the requirement is what left an ex-Zoox PM asking "what folder
       // do I drop?" twice against a 2 TB tree. Name what we saw instead.
       if (rejection) trackFolderRejected(rejection)
+      if (inventory && inventory.snapshot().entries.length > 0) {
+        teachableAuthoringSession.start(inventory)
+        setError(null)
+        setScanning(false)
+        return
+      }
       setError(describeFolderProblem(rejection))
       setScanning(false)
       return
