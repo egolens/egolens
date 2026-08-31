@@ -74,6 +74,7 @@ const mode = (observation) => ({
   capabilityHash: observation.capabilityHash,
   structuralHash: observation.structuralHash,
   numericHash: observation.numericHash,
+  rendererFrameHash: observation.rendererFrameHash,
   perceptualAlgorithm: observation.perceptualAlgorithm,
   perceptualHash: observation.perceptualHash,
   presentationHash: observation.presentationHash,

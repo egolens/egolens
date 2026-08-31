@@ -31,6 +31,7 @@
       "id": "viewport-boxes-frame-156",
       "frameIndex": 156,
       "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "parityViewport": { "width": 1440, "height": 600 },
       "presentation": {
         "colormapMode": "distance",
         "boxMode": "box",
@@ -43,6 +44,7 @@
       "id": "viewport-frame-0",
       "frameIndex": 0,
       "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "parityViewport": { "width": 1440, "height": 600 },
       "presentation": {
         "colormapMode": "distance",
         "boxMode": "off",

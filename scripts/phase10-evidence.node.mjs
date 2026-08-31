@@ -140,7 +140,7 @@ function modeEvidence(datasetId, mode, shared) {
     recipeHash: shared.recipeHash, formatFingerprint: shared.formatFingerprint,
     operatorSetFingerprint: shared.operatorSetFingerprint,
     capabilityHash: shared.capabilityHash, structuralHash: shared.structuralHash,
-    numericHash: shared.numericHash,
+    numericHash: shared.numericHash, rendererFrameHash: hash(`${datasetId}-renderer-frame`),
     perceptualAlgorithm: 'egolens-perceptual-raster-v2', perceptualHash: shared.perceptualHash,
     presentationHash: shared.presentationHash,
     performanceHash: hash(`${datasetId}-${mode}-performance`),
@@ -284,6 +284,13 @@ test('checked-in conformance captures stay synchronized with the reviewed prefli
       config.perceptualCaptures.map((capture) => capture.id).sort(),
       [...requirement.perceptualReferenceIds].sort(),
     )
+    for (const capture of config.perceptualCaptures) {
+      if (capture.selector === '[data-egolens-capture-region="viewport"]') {
+        assert.deepEqual(capture.parityViewport, { width: 1440, height: 600 })
+      } else {
+        assert.equal(capture.parityViewport, undefined)
+      }
+    }
   }
 })
 
@@ -492,12 +499,16 @@ test('preflight record and dataset assembler prove actual runtime identity and t
     view: { sceneId: 'segment', frameIndex: 0, t0: null, t1: null },
     presentation: { playing: false },
   }
+  const renderedFrame = { frameIndex: 0, timestampMicros: '1', sensors: [] }
   const makeBenchmark = (capture, firstProcess, identity) => {
     const runtimeIdentity = Object.fromEntries(Object.entries(identity)
       .filter(([key]) => key !== 'datasetId' && key !== 'caseId'))
     const runs = Array.from({ length: capture ? 1 : 6 }, (_, index) => ({
       browserProcess: processEvidence(firstProcess + index),
-      preflight: { datasetId: identity.datasetId, sceneId: 'segment', identity: runtimeIdentity, presentation: initialPresentation },
+      preflight: {
+        datasetId: identity.datasetId, sceneId: 'segment', identity: runtimeIdentity,
+        presentation: initialPresentation, renderedFrame,
+      },
       traceCollection: { complete: true, truncated: false },
       snapshots: { afterDisposeSettle: { app: { scene: null, resources: { liveObjectUrls: 0, liveImageBitmaps: 0 } }, liveWorkerTargets: [] } },
       ...(capture ? { conformance: capture } : {}),

@@ -350,15 +350,22 @@ export function assembleGraphSceneV1(input: {
     cameraCalibrations.set(sensor.id, { ...calibration, sensorId: sensor.id, frameId: sensor.frameId })
   }
   const transformsByChild = new Map<string, NormalizedTransformV1>()
-  const addPointTransforms = (plan: GraphBinaryPointCloudPlanV1 | null, modality: 'lidar' | 'radar') => {
-    for (const binding of plan?.bindings ?? []) {
+  const addPointTransforms = (
+    bindings: readonly GraphBinaryPointCloudBindingV1[],
+    modality: 'lidar' | 'radar',
+  ) => {
+    for (const binding of bindings) {
       const sensor = pointSensorForBinding(binding, modality)
       if (!sensor || !binding.egoFromSensor) continue
       transformsByChild.set(sensor.frameId, { parentFrameId: 'ego', childFrameId: sensor.frameId, parentFromChild: binding.egoFromSensor })
     }
   }
-  addPointTransforms(binaryPointPlan, 'lidar')
-  addPointTransforms(radarPlan, 'radar')
+  // Relational source trees can contain several scenes whose sensor tokens
+  // share renderer IDs but carry different calibrations. Static relations
+  // and the compatibility worker must be derived from the selected scene,
+  // exactly like loadFrame(), never from an unrelated first/last binding.
+  addPointTransforms(selectedPointBindings, 'lidar')
+  addPointTransforms(selectedRadarBindings, 'radar')
   for (const [rendererId, calibration] of rangeImagePlan?.calibrations ?? []) {
     const sensor = sensorForId(input.compiledRecipe, String(rendererId), 'lidar')
     if (!sensor || calibration.extrinsic.length !== 16) continue
@@ -632,8 +639,11 @@ export function assembleGraphSceneV1(input: {
   })
 
   const lidarCalibrations = new Map<number, LidarCalibration>()
-  const addLidarCalibrations = (plan: GraphBinaryPointCloudPlanV1 | null, modality: 'lidar' | 'radar') => {
-    for (const binding of plan?.bindings ?? []) {
+  const addLidarCalibrations = (
+    bindings: readonly GraphBinaryPointCloudBindingV1[],
+    modality: 'lidar' | 'radar',
+  ) => {
+    for (const binding of bindings) {
       const sensor = pointSensorForBinding(binding, modality)
       if (!sensor || lidarCalibrations.has(sensor.rendererId)) continue
       lidarCalibrations.set(sensor.rendererId, {
@@ -642,8 +652,8 @@ export function assembleGraphSceneV1(input: {
       })
     }
   }
-  addLidarCalibrations(binaryPointPlan, 'lidar')
-  addLidarCalibrations(radarPlan, 'radar')
+  addLidarCalibrations(selectedPointBindings, 'lidar')
+  addLidarCalibrations(selectedRadarBindings, 'radar')
   if (tablePointPlan) {
     const sensor = input.compiledRecipe.recipe.scene.sensors.find((entry) => entry.modality === 'lidar')
     if (sensor) lidarCalibrations.set(sensor.rendererId, {

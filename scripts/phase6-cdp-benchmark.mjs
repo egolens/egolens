@@ -299,6 +299,35 @@ async function exerciseFeatureToggles(client, pageSession) {
   })()`)
 }
 
+async function perceptualClip(client, pageSession, selector) {
+  return evaluate(client, pageSession, `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!(element instanceof HTMLElement)) return null;
+    const rect = element.getBoundingClientRect();
+    // Capture the deterministic inner integer-pixel rectangle. Flex layout
+    // can place an edge at N + 0.5 CSS pixels and Chromium may round the
+    // same transport-neutral view to N or N + 1 across fresh processes.
+    const x = Math.ceil(rect.left);
+    const y = Math.ceil(rect.top);
+    return {
+      x, y,
+      width: Math.max(0, Math.floor(rect.right) - x),
+      height: Math.max(0, Math.floor(rect.bottom) - y),
+      scale: 1,
+    };
+  })()`)
+}
+
+async function capturePng(client, pageSession, clip) {
+  const screenshot = await client.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+    clip,
+  }, pageSession, timeoutMs)
+  return Buffer.from(screenshot.data, 'base64')
+}
+
 async function captureConformanceArtifact(client, pageSession) {
   if (adapterRecipe) {
     await evaluate(
@@ -340,32 +369,48 @@ async function captureConformanceArtifact(client, pageSession) {
     if (actualFrame !== capture.frameIndex) throw new Error(`Failed to present conformance frame ${capture.frameIndex}`)
     await waitFor(client, pageSession, `[...document.images].every((image) => image.complete)`)
     await delay(settleMs)
-    const clip = await evaluate(client, pageSession, `(() => {
-      const element = document.querySelector(${JSON.stringify(capture.selector)});
-      if (!(element instanceof HTMLElement)) return null;
-      const rect = element.getBoundingClientRect();
-      // Capture the deterministic inner integer-pixel rectangle. Flex layout
-      // can place an edge at N + 0.5 CSS pixels and Chromium may round the
-      // same transport-neutral view to N or N + 1 across fresh processes.
-      const x = Math.ceil(rect.left);
-      const y = Math.ceil(rect.top);
-      return {
-        x, y,
-        width: Math.max(0, Math.floor(rect.right) - x),
-        height: Math.max(0, Math.floor(rect.bottom) - y),
-        scale: 1,
-      };
-    })()`)
+    const clip = await perceptualClip(client, pageSession, capture.selector)
     if (!clip || clip.width <= 0 || clip.height <= 0) {
       throw new Error(`Perceptual capture selector is missing or empty: ${capture.selector}`)
     }
-    const screenshot = await client.send('Page.captureScreenshot', {
-      format: 'png',
-      fromSurface: true,
-      captureBeyondViewport: false,
-      clip,
-    }, pageSession, timeoutMs)
-    const bytes = Buffer.from(screenshot.data, 'base64')
+    const bytes = await capturePng(client, pageSession, clip)
+    let parityBytes = bytes
+    let parityClip = clip
+    if (capture.parityViewport !== undefined) {
+      const { width, height } = capture.parityViewport
+      if (!Number.isSafeInteger(width) || width <= 0
+        || !Number.isSafeInteger(height) || height <= 0) {
+        throw new Error(`Invalid parityViewport for ${capture.id}`)
+      }
+      const previousStyle = await evaluate(client, pageSession, `(() => {
+        const element = document.querySelector(${JSON.stringify(capture.selector)});
+        if (!(element instanceof HTMLElement)) return null;
+        const previous = { flex: element.style.flex, width: element.style.width, height: element.style.height };
+        element.style.flex = '0 0 ${height}px';
+        element.style.width = '${width}px';
+        element.style.height = '${height}px';
+        return previous;
+      })()`)
+      if (!previousStyle) throw new Error(`Parity viewport target is missing: ${capture.selector}`)
+      try {
+        await delay(settleMs)
+        parityClip = await perceptualClip(client, pageSession, capture.selector)
+        if (parityClip?.width !== width || parityClip?.height !== height) {
+          throw new Error(`Parity viewport did not settle at ${width}x${height}: ${JSON.stringify(parityClip)}`)
+        }
+        parityBytes = await capturePng(client, pageSession, parityClip)
+      } finally {
+        await evaluate(client, pageSession, `(() => {
+          const element = document.querySelector(${JSON.stringify(capture.selector)});
+          if (!(element instanceof HTMLElement)) return false;
+          element.style.flex = ${JSON.stringify(previousStyle.flex)};
+          element.style.width = ${JSON.stringify(previousStyle.width)};
+          element.style.height = ${JSON.stringify(previousStyle.height)};
+          return true;
+        })()`)
+        await delay(settleMs)
+      }
+    }
     const reference = {
       id: capture.id,
       sha256: perceptualRasterSha256V1(bytes),
@@ -374,11 +419,18 @@ async function captureConformanceArtifact(client, pageSession) {
     }
     references.push(reference)
     parityReferences.push({
-      ...reference,
-      sha256: perceptualRasterSha256V2(bytes),
+      id: capture.id,
+      sha256: perceptualRasterSha256V2(parityBytes),
+      width: Math.round(parityClip.width),
+      height: Math.round(parityClip.height),
     })
     if (perceptualOutputDirectory) {
       await writeFile(path.join(perceptualOutputDirectory, `${capture.id}.png`), bytes, { flag: 'wx' })
+      await writeFile(
+        path.join(perceptualOutputDirectory, `${capture.id}.parity.png`),
+        parityBytes,
+        { flag: 'wx' },
+      )
     }
   }
 
@@ -736,14 +788,16 @@ async function runScenario(client, browserVersion, runIndex) {
   await delay(settleMs)
   snapshots.afterWarmup = await capture('after-warmup-settle')
   const preflight = expectedPreflightIdentity
-    ? await evaluate(client, pageSession, `(() => {
+    ? await evaluate(client, pageSession, `(async () => {
         const descriptor = globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor();
         const presentation = globalThis.__EGOLENS_ORACLE_CAPTURE__?.presentation();
+        const renderedFrame = await globalThis.__EGOLENS_ORACLE_CAPTURE__?.renderedFrame();
         return descriptor ? {
           datasetId: descriptor.datasetId,
           sceneId: descriptor.sceneId,
           identity: descriptor.preflightIdentity,
           presentation,
+          renderedFrame,
         } : null;
       })()`)
     : null

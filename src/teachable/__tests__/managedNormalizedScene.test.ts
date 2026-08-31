@@ -11,6 +11,7 @@ const ALL_CAPABILITIES = new Set([
   'timeline',
   'egoPoses',
   'pointClouds',
+  'radarPointClouds',
   'cameraImages',
   'boxes3d',
   'lidarSegmentation',
@@ -50,6 +51,7 @@ function delegate(frameCount = 2): NormalizedSceneV1 & { dispose: ReturnType<typ
       nominalFrameRate: 10,
       sensors: [
         { id: 'lidar', rendererId: 1, label: 'LiDAR', modality: 'lidar', frameId: 'lidar-frame', color: '#fff' },
+        { id: 'radar', rendererId: 10, label: 'Radar', modality: 'radar', frameId: 'radar-frame', color: '#f00' },
         {
           id: 'camera', rendererId: 1, label: 'Camera', modality: 'camera', frameId: 'camera-frame', color: '#fff',
           image: { width: 16, height: 8, model: 'pinhole', view: 'front' },
@@ -195,6 +197,28 @@ describe('ManagedNormalizedSceneV1', () => {
     expect(frame.cameraImages[0].encodedBytes.byteLength).toBe(24)
     expect(frame.boxes3d[0].id).toBe('box-0')
     expect(base.loadFrame).toHaveBeenCalledOnce()
+  })
+
+  it('preserves the legacy five-float radar velocity contract at the worker boundary', async () => {
+    const base = delegate()
+    const scene = new ManagedNormalizedSceneV1(base)
+    const batch = pointBatch(0, 0)
+    batch.frames[0].sensorClouds.push({
+      laserName: 10,
+      positions: new Float32Array([1, 2, 3, 4, 5]),
+      pointCount: 1,
+    })
+    scene.attachPointPool(new MockPool(new Map([[0, batch]])), 1)
+
+    await scene.loadPointBatch(0)
+    const frame = await scene.loadFrame(0, { capabilities: ALL_CAPABILITIES })
+
+    expect(frame.radarPointClouds).toHaveLength(1)
+    expect(frame.radarPointClouds[0]).toMatchObject({
+      sensorId: 'radar',
+      stride: 5,
+      attributes: ['x', 'y', 'z', 'speedComp', 'speedRaw'],
+    })
   })
 
   it('deduplicates concurrent batch requests and exposes one cache owner', async () => {

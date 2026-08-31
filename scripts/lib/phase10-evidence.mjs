@@ -480,7 +480,7 @@ export function validateDatasetBaselineEvidenceV1(dataset, candidateCommit) {
     throw new Error(`${dataset.datasetId}: preflight modes reused a browser process`)
   }
   for (const key of [
-    'capabilityHash', 'structuralHash', 'numericHash', 'perceptualAlgorithm',
+    'capabilityHash', 'structuralHash', 'numericHash', 'rendererFrameHash', 'perceptualAlgorithm',
     'perceptualHash', 'presentationHash',
   ]) {
     if (dataset.local[key] !== dataset.remote[key] || dataset.local[key] !== dataset.share[key]) {

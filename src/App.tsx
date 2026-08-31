@@ -298,6 +298,13 @@ interface BrowserConformanceCaptureV1 {
     readonly controlPanelOpen?: boolean
   }): void
   presentation(): Readonly<Record<string, unknown>>
+  renderedFrame(): Promise<Readonly<Record<string, unknown>> | null>
+}
+
+async function browserSha256V1(value: ArrayBufferView): Promise<string> {
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice()
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
 declare global {
@@ -436,6 +443,25 @@ function useOracleCaptureCommand() {
       },
       presentation() {
         return currentPresentationEvidenceV1(getCameraPose()) ?? {}
+      },
+      async renderedFrame() {
+        const state = useSceneStore.getState()
+        const frame = state.currentFrame
+        if (!frame) return null
+        const sensors = await Promise.all([...frame.sensorClouds]
+          .sort(([left], [right]) => left - right)
+          .map(async ([sensorId, cloud]) => ({
+            sensorId,
+            pointCount: cloud.pointCount,
+            positionsHash: await browserSha256V1(cloud.positions),
+            segmentationHash: cloud.segLabels ? await browserSha256V1(cloud.segLabels) : null,
+            panopticHash: cloud.panopticLabels ? await browserSha256V1(cloud.panopticLabels) : null,
+          })))
+        return {
+          frameIndex: state.currentFrameIndex,
+          timestampMicros: frame.timestamp.toString(),
+          sensors,
+        }
       },
     })
     Object.defineProperty(window, '__EGOLENS_ORACLE_CAPTURE__', {

@@ -102,12 +102,15 @@ if (!countedPreflight?.sceneId || !countedPreflight.presentation) {
   throw new Error('Capture benchmark lacks a bound preflight observation')
 }
 const initialPresentationHash = phase10HashV1(countedPreflight.presentation)
+if (!countedPreflight.renderedFrame) throw new Error('Capture benchmark lacks ordinary renderer-frame evidence')
+const rendererFrameHash = phase10HashV1(countedPreflight.renderedFrame)
 for (const [label, artifact] of [['capture', capture], ['performance', performance], ['lifecycle', lifecycle]]) {
   for (const run of [...(artifact.warmups ?? []), ...(artifact.samples ?? [])]) {
     if (run.preflight?.datasetId !== identity.datasetId
       || run.preflight?.sceneId !== countedPreflight.sceneId
       || JSON.stringify(run.preflight?.identity) !== JSON.stringify(expectedRuntimeIdentity)
-      || phase10HashV1(run.preflight?.presentation) !== initialPresentationHash) {
+      || phase10HashV1(run.preflight?.presentation) !== initialPresentationHash
+      || phase10HashV1(run.preflight?.renderedFrame) !== rendererFrameHash) {
       throw new Error(`${label} is not bound to the counted mode identity and initial presentation`)
     }
   }
@@ -145,7 +148,8 @@ if (perceptualParity?.algorithm !== 'egolens-perceptual-raster-v2'
     !== JSON.stringify(expectedPerceptualIds)
   || perceptualParity.references.some((entry) => !/^sha256-[0-9a-f]{64}$/u.test(entry.sha256)
     || !Number.isSafeInteger(entry.width) || entry.width <= 0
-    || !Number.isSafeInteger(entry.height) || entry.height <= 0)) {
+    || !Number.isSafeInteger(entry.height) || entry.height <= 0
+    || (entry.id.startsWith('viewport-') && (entry.width !== 1440 || entry.height !== 600)))) {
   throw new Error('Capture benchmark lacks the reviewed Phase 10 perceptual parity surface')
 }
 const observedIdentity = captured.identity
@@ -176,6 +180,7 @@ const payload = {
   capabilityHash: phase10HashV1(capabilities),
   structuralHash: phase10HashV1(conformance.structural),
   numericHash: phase10HashV1(conformance.numeric),
+  rendererFrameHash,
   perceptualAlgorithm: perceptualParity.algorithm,
   perceptualHash: phase10HashV1(perceptualParity),
   presentationHash: phase10HashV1(presentation),

@@ -8,7 +8,7 @@
     "schema", "datasetId", "caseId", "candidateCommit", "mode", "browserProcess",
     "noAgent", "emptyProfile", "sourceManifestHash", "catalogHash",
     "shareDescriptorHash", "recipeHash", "formatFingerprint", "operatorSetFingerprint",
-    "capabilities", "capabilityHash", "structuralHash", "numericHash", "perceptualAlgorithm", "perceptualHash",
+    "capabilities", "capabilityHash", "structuralHash", "numericHash", "rendererFrameHash", "perceptualAlgorithm", "perceptualHash",
     "presentationHash", "performanceHash", "lifecycleHash", "paused", "passed",
     "observationHash"
   ],
@@ -50,6 +50,7 @@
     "capabilityHash": { "$ref": "#/$defs/hash" },
     "structuralHash": { "$ref": "#/$defs/hash" },
     "numericHash": { "$ref": "#/$defs/hash" },
+    "rendererFrameHash": { "$ref": "#/$defs/hash" },
     "perceptualAlgorithm": { "const": "egolens-perceptual-raster-v2" },
     "perceptualHash": { "$ref": "#/$defs/hash" },
     "presentationHash": { "$ref": "#/$defs/hash" },

@@ -33,6 +33,7 @@
       "id": "viewport-frame-0",
       "frameIndex": 0,
       "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "parityViewport": { "width": 1440, "height": 600 },
       "presentation": {
         "colormapMode": "distance",
         "boxMode": "off",
@@ -45,6 +46,7 @@
       "id": "viewport-lidar-segmentation-frame-39",
       "frameIndex": 39,
       "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "parityViewport": { "width": 1440, "height": 600 },
       "presentation": {
         "colormapMode": "segment",
         "boxMode": "box",
