@@ -2,8 +2,10 @@ import { decodeJsonRecordsV1 } from '../operators/jsonRecords'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
 import type { JsonObject } from '../recipe/types'
+import type { ByteSourceV1 } from '../source/ByteSource'
 import type { PreparedAuthoringRevisionV1 } from './AuthoringSession'
 import type { AuthoringPreviewRuntimeV1 } from './InventoryBindingEvaluator'
+import type { SourceInventoryV1 } from './SourceInventory'
 import { authoringPreviewStoreV1, type AuthoringTimelinePreviewV1 } from './previewStore'
 import { sourceSelectorMatchesV1 } from './sourceSelectors'
 
@@ -49,7 +51,8 @@ function sampleFrames(requested: readonly (number | 'first' | 'middle' | 'last')
 export class BrowserTimelinePreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
   async preparePreview(
     compiledRecipe: CompiledRecipeV1,
-    files: ReadonlyMap<string, File>,
+    byteSource: ByteSourceV1,
+    inventory: SourceInventoryV1,
     signal?: AbortSignal,
   ): Promise<PreparedAuthoringRevisionV1> {
     const capabilities = [...compiledRecipe.capabilities]
@@ -70,12 +73,14 @@ export class BrowserTimelinePreviewRuntimeV1 implements AuthoringPreviewRuntimeV
     if (!source || source.reader !== 'json.records') {
       return capabilityGap('Timeline preview currently requires a json.records source.', '/pipelines/timeline/nodes')
     }
-    const selected = [...files].filter(([path]) => sourceSelectorMatchesV1(compiledRecipe, source, path))
+    const selected = inventory.snapshot().entries
+      .filter((entry) => byteSource.has(entry.path) && sourceSelectorMatchesV1(compiledRecipe, source, entry.path))
     if (selected.length !== 1) return capabilityGap(`Timeline source must resolve to exactly one JSON file; got ${selected.length}.`, `/sources/${sourceId}/files`)
-    const file = selected[0][1]
-    if (file.size > MAX_TIMELINE_JSON_BYTES) throw new Error(`Timeline JSON exceeds ${MAX_TIMELINE_JSON_BYTES} bytes.`)
+    const entry = selected[0]
+    if (entry.size > MAX_TIMELINE_JSON_BYTES) throw new Error(`Timeline JSON exceeds ${MAX_TIMELINE_JSON_BYTES} bytes.`)
     if (signal?.aborted) throw new DOMException('Timeline preview was aborted.', 'AbortError')
-    const rows = decodeJsonRecordsV1<Record<string, unknown>>(await file.text(), {
+    const bytes = await byteSource.read(entry.path, { signal })
+    const rows = decodeJsonRecordsV1<Record<string, unknown>>(new TextDecoder().decode(bytes), {
       maxInputBytes: MAX_TIMELINE_JSON_BYTES,
       maxRecords: MAX_TIMELINE_RECORDS,
       maxDepth: 16,

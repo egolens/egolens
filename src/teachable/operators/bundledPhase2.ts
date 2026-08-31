@@ -397,9 +397,9 @@ const workerOperators = [
 
 /**
  * Compile-time descriptors for the generic operators referenced by bundled
- * Phase 2 recipes. Runtime execution is connected dataset-by-dataset in later
- * phases; recipe compilation never treats a missing implementation as an
- * implicit dataset-specific escape hatch.
+ * Phase 2 recipes. Runtime binding enters the shared RecipeExecutor and selects
+ * only by these versioned reader/operator IDs. Moving every core operator body
+ * behind that executor remains an explicit Phase 10 preflight follow-up.
  */
 export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescriptor[] = [
   ...strictBinaryOperators,

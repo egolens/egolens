@@ -8,7 +8,9 @@ import { openParquetFile, readAllRows, type WaymoParquetFile } from '../../utils
 import { convertAllSensors, type RangeImage } from '../../utils/rangeImage'
 import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
+import { bindRecipeSceneV1, prepareParquetColumnsRuntimeV1 } from '../runtime/bindRecipeScene'
 import { bindWaymoRecipeSceneV1 } from '../runtime/WaymoRecipeScene'
+import { MappedByteSourceV1 } from '../source/ByteSource'
 
 const fixtureRoot = resolve(__dirname, '../../__fixtures__/mock_segment_0000')
 const components = ['vehicle_pose', 'lidar_calibration', 'camera_calibration', 'lidar_box', 'lidar'] as const
@@ -47,7 +49,15 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
   it('matches the compatibility Parquet/range-image oracle structurally and numerically', async () => {
     const parquetFiles = await fixture()
     const legacy = await loadWaymoMetadata(parquetFiles)
-    const { scene } = await bindWaymoRecipeSceneV1({ compiledRecipe: waymoCompiledRecipe, parquetFiles, metadataBundle: legacy })
+    const source = new MappedByteSourceV1([...parquetFiles].map(([component, file]) =>
+      [`${component}/fixture.parquet`, file.buffer] as const))
+    const { scene, executionProfile } = await bindRecipeSceneV1({
+      compiledRecipe: waymoCompiledRecipe,
+      source,
+      preparation: prepareParquetColumnsRuntimeV1(parquetFiles),
+      metadataBundle: legacy,
+    })
+    expect(executionProfile).toBe('core/parquet-range-image@1')
     const actual = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
 
     const lidarRows = await readAllRows(parquetFiles.get('lidar')!, [

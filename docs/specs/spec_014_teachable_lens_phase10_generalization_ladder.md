@@ -1,6 +1,7 @@
 # Spec 014 — Teachable Lens Phase 10 original-data generalization ladder
 
-**Status**: planned (transport/runtime preflight and four-dataset original-drop
+**Status**: in progress (transport/runtime preflight slice 1 implemented;
+full-graph execution, remote/share proofs, and four-dataset original-drop
 evidence pending) · **Date**: 2026-08-30
 
 **Relationship to earlier specs**: this is the normative acceptance addendum for
@@ -79,6 +80,18 @@ preview or that HTTP cannot enumerate a directory. Before a rung's `D`, `A`,
 authoring agent, the exact candidate baseline must satisfy this entry gate.
 Content-blind enumeration and hashing needed to freeze the precommitted case
 manifests are allowed; their output cannot reveal payload semantics.
+
+**Implementation checkpoint — slice 1:** production and isolated conformance
+binding now enter one executor selected by the exact set of versioned public
+reader/operator IDs, with no `sourceFamily` input. Local authoring inspection,
+hashing, and preview plus the nuScenes/Argoverse 2 frame readers consume a
+transport-neutral bounded `ByteSourceV1`; the three shipped structural/numeric
+parity paths exercise the shared entry point. This checkpoint does **not** close
+the preflight gate: the provider-specific preparation/scene bodies still need
+to become full graph execution, and the catalog-backed remote source, manifest
+hash, share descriptor/URL, local↔remote parity, security, performance, and
+fresh-profile evidence remain pending. No held-out rung source is opened by
+this checkpoint.
 
 #### One generic recipe executor
 

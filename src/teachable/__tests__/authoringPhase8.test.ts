@@ -119,7 +119,7 @@ describe('Phase 8 source inventory and bounded inspection', () => {
     const source = inventory()
     source.revoke()
     expect(source.snapshot()).toMatchObject({ revoked: true, entries: [] })
-    expect(() => source.resolveAuthorizedFile('frames.json')).toThrow(/SOURCE_INVENTORY_REVOKED/u)
+    expect(() => source.resolveAuthorizedSource()).toThrow(/SOURCE_INVENTORY_REVOKED/u)
   })
 })
 

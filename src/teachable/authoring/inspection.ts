@@ -150,10 +150,10 @@ export async function inspectSourceInventoryV1(
     return { mode: request.mode, sessionId: inventory.sessionId, path: entry.path, truncated: false, data: metadata(entry) }
   }
 
-  const file = inventory.resolveAuthorizedFile(entry.path)
+  const byteSource = inventory.resolveAuthorizedSource()
   const maxBytes = boundedInteger(request.maxBytes, 16 * 1024, INSPECTION_LIMITS_V1.maxBytes, 'maxBytes')
   if (request.mode === 'table-schema' && entry.extension === '.parquet') {
-    const parquet = await openParquetFile(entry.path, file)
+    const parquet = await openParquetFile(entry.path, await byteSource.asyncBuffer(entry.path))
     abortIfNeeded(signal)
     const schema = (parquet.metadata.schema as unknown as readonly Record<string, unknown>[]).map((column) => ({
       name: column.name,
@@ -173,10 +173,13 @@ export async function inspectSourceInventoryV1(
   if (request.mode === 'table-schema') {
     throw new Error(`CAPABILITY_GAP: table schema inspection does not support ${entry.extension || 'this file type'} yet.`)
   }
-  if ((request.mode === 'json' || request.mode === 'text') && file.size > maxBytes) {
-    throw new Error(`${request.mode} inspection requires the complete file to fit within maxBytes (${file.size} > ${maxBytes}).`)
+  if ((request.mode === 'json' || request.mode === 'text') && entry.size > maxBytes) {
+    throw new Error(`${request.mode} inspection requires the complete file to fit within maxBytes (${entry.size} > ${maxBytes}).`)
   }
-  const bytes = new Uint8Array(await file.slice(0, Math.min(file.size, maxBytes)).arrayBuffer())
+  const bytes = new Uint8Array(await byteSource.read(entry.path, {
+    end: Math.min(entry.size, maxBytes),
+    signal,
+  }))
   abortIfNeeded(signal)
   if (request.mode === 'bytes') {
     const shown = bytes.slice(0, Math.min(bytes.length, INSPECTION_LIMITS_V1.maxHexBytes))
@@ -184,8 +187,8 @@ export async function inspectSourceInventoryV1(
       mode: request.mode,
       sessionId: inventory.sessionId,
       path: entry.path,
-      truncated: shown.length < file.size,
-      data: { byteLength: file.size, hex: [...shown].map((value) => value.toString(16).padStart(2, '0')).join('') },
+      truncated: shown.length < entry.size,
+      data: { byteLength: entry.size, hex: [...shown].map((value) => value.toString(16).padStart(2, '0')).join('') },
     }
   }
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)

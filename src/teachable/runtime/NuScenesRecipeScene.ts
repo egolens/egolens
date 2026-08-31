@@ -3,9 +3,9 @@ import { loadNuScenesSceneMetadata } from '../../adapters/nuscenes/metadata'
 import type { MetadataBundle } from '../../types/dataset'
 import { NUSCENES_CHANNEL_TO_ID } from '../../adapters/nuscenes/manifest'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
-import { resolveFileEntry } from '../../workers/fetchHelper'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
+import type { ByteSourceV1 } from '../source/ByteSource'
 import {
   decodeInterleavedRecordsV1,
   decodeNpzUint16V1,
@@ -34,7 +34,7 @@ export interface NuScenesRecipeSceneInputV1 {
   readonly compiledRecipe: CompiledRecipeV1
   readonly database: NuScenesDatabase
   readonly sceneToken: string
-  readonly files: ReadonlyMap<string, File | string>
+  readonly source: ByteSourceV1
   readonly metadataBundle?: MetadataBundle
 }
 
@@ -99,7 +99,7 @@ export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): Bo
   const frameFiles = bundle.timestamps.map((timestamp) =>
     (bundle.vehiclePoseByFrame.get(timestamp) ?? []) as unknown as FrameSensorFile[],
   )
-  const hasFile = (file?: string): boolean => file !== undefined && input.files.has(file)
+  const hasFile = (file?: string): boolean => file !== undefined && input.source.has(file)
   const evidence: Partial<Record<NormalizedCapabilityV1, boolean>> = {
     timeline: true,
     egoPoses: bundle.poseByFrameIndex.size > 0,
@@ -186,10 +186,9 @@ export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): Bo
   ): Promise<{ cloud: NormalizedPointCloudV1; segmentation: NormalizedFrameV1['lidarSegmentation'] }> => {
     const sensor = pointSensorsByRendererId.get(file.sensorId)
     if (!sensor) throw new Error(`Unknown point sensor renderer ID: ${file.sensorId}`)
-    const entry = input.files.get(file.filename)
-    if (!entry) throw new Error(`Bound point-cloud file is missing: ${file.filename}`)
+    if (!input.source.has(file.filename)) throw new Error(`Bound point-cloud file is missing: ${file.filename}`)
     throwIfAborted(signal)
-    const bytes = await resolveFileEntry(entry)
+    const bytes = await input.source.read(file.filename, { signal })
     throwIfAborted(signal)
     const decoded = transformInterleavedXyzV1(
       file.modality === 'radar'
@@ -200,11 +199,11 @@ export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): Bo
     let semanticLabels: Uint8Array | undefined
     let panopticLabels: Uint16Array | undefined
     if (file.lidarsegFile && hasFile(file.lidarsegFile)) {
-      const labels = await resolveFileEntry(input.files.get(file.lidarsegFile)!)
+      const labels = await input.source.read(file.lidarsegFile, { signal })
       semanticLabels = new Uint8Array(labels)
     }
     if (file.panopticFile && hasFile(file.panopticFile)) {
-      const labels = await resolveFileEntry(input.files.get(file.panopticFile)!)
+      const labels = await input.source.read(file.panopticFile, { signal })
       panopticLabels = await decodeNpzUint16V1(labels, panopticParams, signal)
       if (!semanticLabels) semanticLabels = Uint8Array.from(panopticLabels, (label) => Math.floor(label / 1000))
     }
@@ -282,9 +281,8 @@ export function bindNuScenesRecipeSceneV1(input: NuScenesRecipeSceneInputV1): Bo
         for (const file of files.filter((candidate) => candidate.modality === 'camera')) {
           const sensor = cameraSensorsByRendererId.get(file.sensorId)
           if (!sensor || !sensor.image || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
-          const entry = input.files.get(file.filename)
-          if (!entry) continue
-          const encodedBytes = await resolveFileEntry(entry)
+          if (!input.source.has(file.filename)) continue
+          const encodedBytes = await input.source.read(file.filename, { signal: request.signal })
           throwIfAborted(request.signal)
           cameraImages.push({
             sensorId: sensor.id,

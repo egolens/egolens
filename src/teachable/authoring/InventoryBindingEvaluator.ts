@@ -1,5 +1,7 @@
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
+import type { ByteSourceV1 } from '../source/ByteSource'
+import { scopedByteSourceV1 } from '../source/ByteSource'
 import type { SourceInventoryV1 } from './SourceInventory'
 import type { AuthoringRevisionEvaluatorV1, PreparedAuthoringRevisionV1 } from './AuthoringSession'
 import { sourceSelectorMatchesV1 } from './sourceSelectors'
@@ -7,7 +9,8 @@ import { sourceSelectorMatchesV1 } from './sourceSelectors'
 export interface AuthoringPreviewRuntimeV1 {
   preparePreview(
     compiledRecipe: CompiledRecipeV1,
-    files: ReadonlyMap<string, File>,
+    source: ByteSourceV1,
+    inventory: SourceInventoryV1,
     signal?: AbortSignal,
   ): Promise<PreparedAuthoringRevisionV1>
 }
@@ -17,7 +20,7 @@ function diagnostic(code: string, hint: string, jsonPointer?: string): AdapterDi
 }
 
 function selectFiles(compiled: CompiledRecipeV1, inventory: SourceInventoryV1): {
-  readonly files: ReadonlyMap<string, File>
+  readonly source: ByteSourceV1
   readonly diagnostics: readonly AdapterDiagnostic[]
 } {
   const snapshot = inventory.snapshot()
@@ -29,7 +32,7 @@ function selectFiles(compiled: CompiledRecipeV1, inventory: SourceInventoryV1): 
       diagnostics.push(diagnostic('INVENTORY_ROOT_MISSING', `Required inventory root ${root.path} is absent.`, '/match/inventory/rootEntries'))
     }
   }
-  const selected = new Map<string, File>()
+  const selected = new Set<string>()
   for (const [sourceId, source] of Object.entries(compiled.recipe.sources)) {
     const matches = paths.filter((path) => sourceSelectorMatchesV1(compiled, source, path))
     const minimum = source.files.minCount ?? 1
@@ -42,9 +45,12 @@ function selectFiles(compiled: CompiledRecipeV1, inventory: SourceInventoryV1): 
       ))
       continue
     }
-    for (const path of matches) selected.set(path, inventory.resolveAuthorizedFile(path))
+    for (const path of matches) selected.add(path)
   }
-  return { files: selected, diagnostics }
+  return {
+    source: scopedByteSourceV1(inventory.resolveAuthorizedSource(), selected),
+    diagnostics,
+  }
 }
 
 /** Binds selectors first, then delegates isolated sample/render preparation. */
@@ -77,7 +83,7 @@ export class InventoryBindingEvaluatorV1 implements AuthoringRevisionEvaluatorV1
       return {
         diagnostics: [diagnostic(
           'CAPABILITY_GAP',
-          'The recipe compiles and binds, but no registered preview runtime can sample and render this source family.',
+          'The recipe compiles and binds, but no registered preview runtime can execute this operator graph.',
         )],
         capabilities: new Set(),
         presentedFrames: new Map(),
@@ -87,6 +93,6 @@ export class InventoryBindingEvaluatorV1 implements AuthoringRevisionEvaluatorV1
         dispose() {},
       }
     }
-    return await this.#runtime.preparePreview(compiledRecipe, binding.files, signal)
+    return await this.#runtime.preparePreview(compiledRecipe, binding.source, inventory, signal)
   }
 }
