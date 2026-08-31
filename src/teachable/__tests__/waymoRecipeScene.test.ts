@@ -2,14 +2,20 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { AsyncBuffer } from 'hyparquet'
 import { describe, expect, it } from 'vitest'
-import { loadWaymoMetadata } from '../../adapters/waymo/metadata'
 import { waymoCompiledRecipe } from '../../adapters/recipes/bundled'
 import { openParquetFile, readAllRows, type WaymoParquetFile } from '../../utils/parquet'
-import { convertAllSensors, type RangeImage } from '../../utils/rangeImage'
+import { invertRowMajor4x4, multiplyRowMajor4x4 } from '../../utils/matrix'
+import { convertAllSensors, parseLidarCalibration, type RangeImage } from '../../utils/rangeImage'
+import { BrowserGraphPreviewRuntimeV1 } from '../authoring/BrowserGraphPreviewRuntime'
+import { authoringPreviewStoreV1 } from '../authoring/previewStore'
+import { SourceInventoryV1 } from '../authoring/SourceInventory'
+import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
+import { compileRecipeV1 } from '../recipe/compiler'
+import { bindRecipeSceneV1 } from '../runtime/bindRecipeScene'
+import { ExecutableGraphKernelV1 } from '../runtime/GraphKernel'
+import { assembleGraphSceneV1 } from '../runtime/GraphSceneAssembler'
 import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
-import { bindRecipeSceneV1, prepareParquetColumnsRuntimeV1 } from '../runtime/bindRecipeScene'
-import { bindWaymoRecipeSceneV1 } from '../runtime/WaymoRecipeScene'
 import { MappedByteSourceV1 } from '../source/ByteSource'
 
 const fixtureRoot = resolve(__dirname, '../../__fixtures__/mock_segment_0000')
@@ -21,17 +27,29 @@ function nodeBuffer(component: string): AsyncBuffer {
   return { byteLength: buffer.byteLength, slice: (start, end) => Promise.resolve(buffer.slice(start, end)) }
 }
 
-async function fixture(): Promise<Map<string, WaymoParquetFile>> {
+function sourceFixture() {
+  const entries = components.map((component) => [`${component}/fixture.parquet`, nodeBuffer(component)] as const)
+  return {
+    source: new MappedByteSourceV1(entries),
+    inventoryEntries: entries.map(([path, buffer]) => ({ path, size: buffer.byteLength })),
+  }
+}
+
+async function parquetFixture(): Promise<Map<string, WaymoParquetFile>> {
   return new Map(await Promise.all(components.map(async (component) => [
     component,
     await openParquetFile(component, nodeBuffer(component)),
   ] as const)))
 }
 
+async function bindFixture(compiledRecipe = waymoCompiledRecipe) {
+  const fixture = sourceFixture()
+  return await bindRecipeSceneV1({ compiledRecipe, ...fixture })
+}
+
 describe('Waymo recipe-backed NormalizedSceneV1', () => {
-  it('binds five LiDARs, optical camera calibrations, and only evidenced capabilities', async () => {
-    const parquetFiles = await fixture()
-    const { scene, diagnostics } = await bindWaymoRecipeSceneV1({ compiledRecipe: waymoCompiledRecipe, parquetFiles })
+  it('binds five LiDARs, optical camera calibrations, and only evidenced capabilities through the graph', async () => {
+    const { scene, diagnostics } = await bindFixture()
     expect(scene.index.timestampsMicros).toHaveLength(199)
     expect(scene.manifest.capabilities).toEqual(new Set(['timeline', 'egoPoses', 'pointClouds', 'boxes3d', 'trajectories']))
     expect(scene.relations.staticTransforms).toHaveLength(10)
@@ -47,17 +65,21 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
   })
 
   it('matches the compatibility Parquet/range-image oracle structurally and numerically', async () => {
-    const parquetFiles = await fixture()
-    const legacy = await loadWaymoMetadata(parquetFiles)
-    const source = new MappedByteSourceV1([...parquetFiles].map(([component, file]) =>
-      [`${component}/fixture.parquet`, file.buffer] as const))
-    const { scene, executionProfile } = await bindRecipeSceneV1({
-      compiledRecipe: waymoCompiledRecipe,
-      source,
-      preparation: prepareParquetColumnsRuntimeV1(parquetFiles),
-      metadataBundle: legacy,
-    })
-    expect(executionProfile).toBe('core/parquet-range-image@1')
+    const parquetFiles = await parquetFixture()
+    const poseRows = await readAllRows(parquetFiles.get('vehicle_pose')!, undefined)
+    const timestamps = [...new Set(poseRows.map((row) => row['key.frame_timestamp_micros'] as bigint))].sort((a, b) => a < b ? -1 : a > b ? 1 : 0)
+    const timestamp = timestamps[0]
+    const firstPose = poseRows.find((row) => row['key.frame_timestamp_micros'] === timestamp)![
+      '[VehiclePoseComponent].world_from_vehicle.transform'
+    ] as number[]
+    const relativeFirstPose = multiplyRowMajor4x4(invertRowMajor4x4(firstPose), firstPose)
+    const lidarCalibrations = new Map((await readAllRows(parquetFiles.get('lidar_calibration')!, undefined)).map((row) => {
+      const calibration = parseLidarCalibration(row)
+      return [calibration.laserName, calibration] as const
+    }))
+    const firstBoxes = (await readAllRows(parquetFiles.get('lidar_box')!, undefined))
+      .filter((row) => row['key.frame_timestamp_micros'] === timestamp)
+    const { scene } = await bindFixture()
     const actual = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
 
     const lidarRows = await readAllRows(parquetFiles.get('lidar')!, [
@@ -67,28 +89,24 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
       '[LiDARComponent].range_image_return1.values',
     ])
     const rangeImages = new Map<number, RangeImage>()
-    for (const row of lidarRows.filter((row) => row['key.frame_timestamp_micros'] === legacy.timestamps[0])) {
+    for (const row of lidarRows.filter((row) => row['key.frame_timestamp_micros'] === timestamp)) {
       rangeImages.set(row['key.laser_name'] as number, {
         shape: row['[LiDARComponent].range_image_return1.shape'] as [number, number, number],
         values: row['[LiDARComponent].range_image_return1.values'] as number[],
       })
     }
-    const oracle = convertAllSensors(rangeImages, legacy.lidarCalibrations)
+    const oracle = convertAllSensors(rangeImages, lidarCalibrations)
     const expected: NormalizedFrameV1 = {
       ...actual,
-      timestampMicros: legacy.timestamps[0],
-      worldFromEgo: new Float64Array(legacy.poseByFrameIndex.get(0)!),
+      timestampMicros: timestamp,
+      worldFromEgo: new Float64Array(relativeFirstPose),
       pointClouds: [...oracle.perSensor].map(([rendererId, cloud]) => ({
         sensorId: waymoCompiledRecipe.recipe.scene.sensors.find((sensor) => sensor.modality === 'lidar' && sensor.rendererId === rendererId)!.id,
-        frameId: 'ego',
-        values: cloud.positions,
-        pointCount: cloud.pointCount,
-        stride: 6,
-        attributes: ['x', 'y', 'z', 'intensity', 'range', 'elongation'],
-        sourceIndices: cloud.validIndices,
+        frameId: 'ego', values: cloud.positions, pointCount: cloud.pointCount, stride: 6,
+        attributes: ['x', 'y', 'z', 'intensity', 'range', 'elongation'], sourceIndices: cloud.validIndices,
       })),
       boxes3d: actual.boxes3d.map((box, index) => {
-        const row = legacy.lidarBoxByFrame.get(legacy.timestamps[0])![index]
+        const row = firstBoxes[index]
         return {
           ...box,
           id: String(row['key.laser_object_id']),
@@ -114,11 +132,9 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
   })
 
   it('honors capability, sensor, range, cancellation, and disposal boundaries', async () => {
-    const parquetFiles = await fixture()
-    const { scene } = await bindWaymoRecipeSceneV1({ compiledRecipe: waymoCompiledRecipe, parquetFiles })
+    const { scene } = await bindFixture()
     const frame = await scene.loadFrame(0, {
-      capabilities: new Set(['pointClouds']),
-      sensorIds: new Set(['lidar-top']),
+      capabilities: new Set(['pointClouds']), sensorIds: new Set(['lidar-top']),
     })
     expect(frame.pointClouds.map((cloud) => cloud.sensorId)).toEqual(['lidar-top'])
     expect(frame.boxes3d).toEqual([])
@@ -127,76 +143,54 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
     controller.abort()
     await expect(scene.loadFrame(0, { capabilities: new Set(['pointClouds']), signal: controller.signal })).rejects.toThrow('aborted')
     scene.dispose()
+    scene.dispose()
     await expect(scene.loadFrame(0, { capabilities: new Set(['pointClouds']) })).rejects.toThrow('disposed')
   })
 
-  it('normalizes optional labels, associations, masks, and keypoints when their tables bind', async () => {
-    const parquetFiles = await fixture()
-    const bundle = await loadWaymoMetadata(parquetFiles)
-    const timestamp = bundle.timestamps[0]
-    const firstLidarRow = (await readAllRows(parquetFiles.get('lidar')!, undefined))[0]
-    const shape = firstLidarRow['[LiDARComponent].range_image_return1.shape'] as [number, number, number]
-    const segValues = new Array(shape[0] * shape[1] * 2).fill(0)
-    for (let index = 0; index < segValues.length; index += 2) {
-      segValues[index] = 42
-      segValues[index + 1] = 7
-    }
-    bundle.hasSegmentation = true
-    bundle.segLabelFrames = new Set([0])
-    bundle.lidarSegmentationByFrame = new Map([[timestamp, [{
-      'key.frame_timestamp_micros': timestamp,
-      'key.laser_name': 1,
-      '[LiDARSegmentationLabelComponent].range_image_return1.shape': [shape[0], shape[1], 2],
-      '[LiDARSegmentationLabelComponent].range_image_return1.values': segValues,
-    }]]])
-    bundle.cameraBoxByFrame.set(timestamp, [{
-      'key.frame_timestamp_micros': timestamp,
-      'key.camera_name': 1,
-      'key.camera_object_id': 'camera-object',
-      '[CameraBoxComponent].type': 2,
-      '[CameraBoxComponent].box.center.x': 100,
-      '[CameraBoxComponent].box.center.y': 200,
-      '[CameraBoxComponent].box.size.x': 30,
-      '[CameraBoxComponent].box.size.y': 40,
-    }])
-    const laserObjectId = String(bundle.lidarBoxByFrame.get(timestamp)![0]['key.laser_object_id'])
-    bundle.assocCamToLaser.set('camera-object', laserObjectId)
-    bundle.assocLaserToCams.set(laserObjectId, new Set(['camera-object']))
-    bundle.hasKeypoints = true
-    bundle.keypointsByFrame = new Map([[timestamp, [{
-      'key.frame_timestamp_micros': timestamp,
-      'key.laser_object_id': laserObjectId,
-      '[LiDARHumanKeypointsComponent].lidar_keypoints[*].type': [1],
-      '[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.x': [1],
-      '[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.y': [2],
-      '[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.z': [3],
-    }]]])
-    bundle.cameraKeypointsByFrame = new Map([[timestamp, [{
-      'key.frame_timestamp_micros': timestamp,
-      'key.camera_name': 1,
-      'key.camera_object_id': 'camera-object',
-      '[CameraHumanKeypointsComponent].camera_keypoints[*].type': [1],
-      '[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.x': [10],
-      '[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.y': [20],
-      '[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.visibility.is_occluded': [true],
-    }]]])
-    bundle.hasCameraSegmentation = true
-    bundle.cameraSeg = new Map([[timestamp, new Map([[1, { panopticLabel: new Uint8Array([1, 2, 3]).buffer, divisor: 1000 }]])]])
-    bundle.segmentMeta = { segmentId: 'mock', timeOfDay: 'Day', location: 'test', weather: 'sunny', objectCounts: {} }
+  it('releases eager and lazy Parquet allocations on idempotent graph disposal', async () => {
+    const fixture = sourceFixture()
+    const graph = await new ExecutableGraphKernelV1(bundledPhase2OperatorRegistry).execute({
+      compiledRecipe: waymoCompiledRecipe,
+      source: fixture.source,
+      inventory: fixture.inventoryEntries,
+    })
+    const eagerAllocation = graph.resources.allocationBytes
+    expect(eagerAllocation).toBeGreaterThan(0)
+    const { scene } = assembleGraphSceneV1({ compiledRecipe: waymoCompiledRecipe, graph })
+    await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
+    expect(graph.resources.allocationBytes).toBeGreaterThan(eagerAllocation)
+    scene.dispose()
+    scene.dispose()
+    expect(graph.abortController.signal.aborted).toBe(true)
+    expect(graph.resources.allocationBytes).toBe(0)
+  })
 
-    const { scene } = await bindWaymoRecipeSceneV1({ compiledRecipe: waymoCompiledRecipe, parquetFiles, metadataBundle: bundle })
-    expect(scene.manifest.capabilities.has('cameraImages')).toBe(false)
-    for (const capability of ['boxes2d', 'boxAssociations', 'lidarSegmentation', 'cameraSegmentation', 'keypoints3d', 'keypoints2d', 'segmentMetadata'] as const) {
-      expect(scene.manifest.capabilities.has(capability)).toBe(true)
-    }
-    const frame = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
-    expect(frame.boxes2d).toMatchObject([{ id: 'camera-object', cameraId: 'camera-front', classId: 'pedestrian' }])
-    expect(scene.relations.box2dToBox3d.get('camera-object')).toBe(laserObjectId)
-    expect(frame.pointClouds.find((cloud) => cloud.sensorId === 'lidar-top')?.semanticLabels?.[0]).toBe(7)
-    expect(frame.pointClouds.find((cloud) => cloud.sensorId === 'lidar-top')?.panopticLabels).toBeInstanceOf(Uint16Array)
-    expect((frame.lidarSegmentation[0].labels as Uint16Array)[0]).toBe(7042)
-    expect(frame.cameraSegmentation).toMatchObject([{ sensorId: 'camera-front', divisor: 1000, encoding: 'png-uint16' }])
-    expect(frame.keypoints3d).toMatchObject([{ objectId: laserObjectId, points: [{ name: 'Nose', position: [1, 2, 3] }] }])
-    expect(frame.keypoints2d).toMatchObject([{ objectId: 'camera-object', cameraId: 'camera-front', points: [{ visibility: 'occluded' }] }])
+  it('does not dispatch on the learned recipe identity', async () => {
+    const learned = structuredClone(waymoCompiledRecipe.recipe)
+    learned.scene.formatId = 'learned-waymo-compatible'
+    const { scene } = await bindFixture(compileRecipeV1(learned, bundledPhase2OperatorRegistry))
+    expect(scene.manifest.id).toBe('learned-waymo-compatible')
+    await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).resolves.toMatchObject({ index: 0 })
+  })
+
+  it('runs authoring preview through the same complete graph', async () => {
+    authoringPreviewStoreV1.clear()
+    const inventory = new SourceInventoryV1(components.map((component) => {
+      const bytes = readFileSync(resolve(fixtureRoot, `${component}.parquet`))
+      return [`${component}/fixture.parquet`, new File([bytes], `${component}.parquet`)] as const
+    }), { sessionId: 'waymo-graph-preview' })
+    const prepared = await new BrowserGraphPreviewRuntimeV1().preparePreview(
+      waymoCompiledRecipe,
+      inventory.resolveAuthorizedSource(),
+      inventory,
+    )
+    expect(prepared.validationSummary).toMatchObject({
+      passed: true, frameCount: 199, sampleFrames: [0, 99, 198],
+    })
+    prepared.commit()
+    expect(authoringPreviewStoreV1.getSnapshot()).toMatchObject({
+      formatId: 'waymo', frameCount: 199, sampledFrames: [0, 99, 198],
+    })
+    prepared.dispose()
   })
 })

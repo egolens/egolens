@@ -10,7 +10,7 @@
     {
       "datasetId": "waymo",
       "caseId": "phase6-waymo-rich-001",
-      "recipeHash": "sha256:cece3398540e055698c399f2c703c464e8878c7381c1efc0371d9d68e2b6d742",
+      "recipeHash": "sha256:7f691f45d660440da504e2d1fe74b87b91d98edf62cddfc7b2cc5d6b36f8e2c4",
       "coverage": {
         "requiredCapabilities": [
           "boxes2d", "boxes3d", "cameraImages", "cameraSegmentation",

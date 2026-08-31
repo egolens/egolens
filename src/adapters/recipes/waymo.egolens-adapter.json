@@ -214,7 +214,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "lidar_calibration/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 1
       },
       "columns": [
         "key.laser_name",
@@ -240,7 +241,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "camera_calibration/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.camera_name",
@@ -283,7 +285,7 @@
       "files": {
         "glob": "camera_image/**/*.parquet",
         "order": "numeric-path",
-        "minCount": 1
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -305,7 +307,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "lidar_box/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -341,7 +344,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "camera_box/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -373,7 +377,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "camera_to_lidar_box_association/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.camera_object_id",
@@ -393,7 +398,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "lidar_segmentation/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -417,7 +423,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "camera_segmentation/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -441,7 +448,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "lidar_hkp/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -469,7 +477,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "camera_hkp/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.frame_timestamp_micros",
@@ -499,7 +508,8 @@
       "reader": "parquet.columns",
       "files": {
         "glob": "stats/**/*.parquet",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "columns": [
         "key.segment_context_name",
@@ -1473,8 +1483,9 @@
           "inputs": {
             "rows": "poseRows.rows"
           },
-          "params": {
-            "matrixField": "[VehiclePoseComponent].world_from_vehicle.transform"
+        "params": {
+          "timestampField": "key.frame_timestamp_micros",
+          "matrixField": "[VehiclePoseComponent].world_from_vehicle.transform"
           }
         }
       ],
@@ -1491,11 +1502,19 @@
             "calibration": "lidarCalibrationRows.rows",
             "poses": "poseRows.rows"
           },
-          "params": {
+        "params": {
             "returns": [
               1
             ],
-            "outputFrame": "ego"
+          "outputFrame": "ego",
+          "timestampField": "key.frame_timestamp_micros",
+          "sensorField": "key.laser_name",
+          "shapeField": "[LiDARComponent].range_image_return1.shape",
+          "valuesField": "[LiDARComponent].range_image_return1.values",
+          "extrinsicField": "[LiDARCalibrationComponent].extrinsic.transform",
+          "inclinationValuesField": "[LiDARCalibrationComponent].beam_inclination.values",
+          "inclinationMinField": "[LiDARCalibrationComponent].beam_inclination.min",
+          "inclinationMaxField": "[LiDARCalibrationComponent].beam_inclination.max"
           }
         }
       ],
@@ -1511,8 +1530,30 @@
             "rows": "cameraImageRows.rows",
             "calibration": "cameraCalibrationRows.rows"
           },
-          "params": {
-            "encoding": "jpeg"
+        "params": {
+          "encoding": "jpeg",
+          "timestampField": "key.frame_timestamp_micros",
+          "sensorField": "key.camera_name",
+          "imageField": "[CameraImageComponent].image",
+          "mimeType": "image/jpeg",
+          "extrinsicField": "[CameraCalibrationComponent].extrinsic.transform",
+          "widthField": "[CameraCalibrationComponent].width",
+          "heightField": "[CameraCalibrationComponent].height",
+          "intrinsicFields": [
+            "[CameraCalibrationComponent].intrinsic.f_u",
+            "[CameraCalibrationComponent].intrinsic.f_v",
+            "[CameraCalibrationComponent].intrinsic.c_u",
+            "[CameraCalibrationComponent].intrinsic.c_v"
+          ],
+          "distortionFields": [
+            "[CameraCalibrationComponent].intrinsic.k1",
+            "[CameraCalibrationComponent].intrinsic.k2",
+            "[CameraCalibrationComponent].intrinsic.p1",
+            "[CameraCalibrationComponent].intrinsic.p2",
+            "[CameraCalibrationComponent].intrinsic.k3"
+          ],
+          "opticalToSensor": [0, 0, 1, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 1],
+          "frameIdSuffix": "-frame"
           }
         }
       ],
@@ -1527,8 +1568,23 @@
           "inputs": {
             "rows": "box3dRows.rows"
           },
-          "params": {
-            "frameId": "ego"
+        "params": {
+          "frameId": "ego",
+          "timestampField": "key.frame_timestamp_micros",
+          "objectIdField": "key.laser_object_id",
+          "classField": "[LiDARBoxComponent].type",
+          "classMap": { "0": "unknown", "1": "vehicle", "2": "pedestrian", "3": "sign", "4": "cyclist" },
+          "centerFields": [
+            "[LiDARBoxComponent].box.center.x",
+            "[LiDARBoxComponent].box.center.y",
+            "[LiDARBoxComponent].box.center.z"
+          ],
+          "dimensionFields": [
+            "[LiDARBoxComponent].box.size.x",
+            "[LiDARBoxComponent].box.size.y",
+            "[LiDARBoxComponent].box.size.z"
+          ],
+          "headingField": "[LiDARBoxComponent].box.heading"
           }
         }
       ],
@@ -1543,8 +1599,21 @@
           "inputs": {
             "rows": "box2dRows.rows"
           },
-          "params": {
-            "geometry": "center-size-pixels"
+        "params": {
+          "geometry": "center-size-pixels",
+          "timestampField": "key.frame_timestamp_micros",
+          "sensorField": "key.camera_name",
+          "objectIdField": "key.camera_object_id",
+          "classField": "[CameraBoxComponent].type",
+          "classMap": { "0": "unknown", "1": "vehicle", "2": "pedestrian", "3": "sign", "4": "cyclist" },
+          "centerFields": [
+            "[CameraBoxComponent].box.center.x",
+            "[CameraBoxComponent].box.center.y"
+          ],
+          "dimensionFields": [
+            "[CameraBoxComponent].box.size.x",
+            "[CameraBoxComponent].box.size.y"
+          ]
           }
         }
       ],
@@ -1561,8 +1630,10 @@
             "boxes3d": "boxes3d.result",
             "associations": "associationRows.rows"
           },
-          "params": {
-            "relation": "camera-object-to-lidar-object"
+        "params": {
+          "relation": "camera-object-to-lidar-object",
+          "cameraObjectField": "key.camera_object_id",
+          "lidarObjectField": "key.laser_object_id"
           }
         }
       ],
@@ -1594,8 +1665,13 @@
             "pointClouds": "pointClouds.result",
             "labels": "lidarSegmentationRows.rows"
           },
-          "params": {
-            "taxonomy": "waymo-lidar-semantics"
+        "params": {
+          "taxonomy": "waymo-lidar-semantics",
+          "timestampField": "key.frame_timestamp_micros",
+          "sensorField": "key.laser_name",
+          "shapeField": "[LiDARSegmentationLabelComponent].range_image_return1.shape",
+          "valuesField": "[LiDARSegmentationLabelComponent].range_image_return1.values",
+          "panopticDivisor": 1000
           }
         }
       ],
@@ -1610,9 +1686,14 @@
           "inputs": {
             "rows": "cameraSegmentationRows.rows"
           },
-          "params": {
-            "encoding": "png-uint16",
-            "taxonomy": "waymo-camera-semantics"
+        "params": {
+          "encoding": "png-uint16",
+          "taxonomy": "waymo-camera-semantics",
+          "timestampField": "key.frame_timestamp_micros",
+          "sensorField": "key.camera_name",
+          "labelField": "[CameraSegmentationLabelComponent].panoptic_label",
+          "divisorField": "[CameraSegmentationLabelComponent].panoptic_label_divisor",
+          "panopticDivisor": 1000
           }
         }
       ],
@@ -1627,9 +1708,19 @@
           "inputs": {
             "rows": "keypoints3dRows.rows"
           },
-          "params": {
-            "dimensions": 3,
-            "frameId": "ego"
+        "params": {
+          "dimensions": 3,
+          "frameId": "ego",
+          "timestampField": "key.frame_timestamp_micros",
+          "objectIdField": "key.laser_object_id",
+          "typeField": "[LiDARHumanKeypointsComponent].lidar_keypoints[*].type",
+          "coordinateFields": [
+            "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.x",
+            "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.y",
+            "[LiDARHumanKeypointsComponent].lidar_keypoints[*].keypoint_3d.location_m.z"
+          ],
+          "schemaId": "waymo-human-keypoints-v1",
+          "labels": ["Unspecified", "Nose", "Keypoint 2", "Keypoint 3", "Keypoint 4", "Left Shoulder", "Left Elbow", "Left Wrist", "Left Hip", "Left Knee", "Left Ankle", "Keypoint 11", "Keypoint 12", "Right Shoulder", "Right Elbow", "Right Wrist", "Right Hip", "Right Knee", "Right Ankle", "Forehead", "Head Center"]
           }
         }
       ],
@@ -1644,9 +1735,21 @@
           "inputs": {
             "rows": "keypoints2dRows.rows"
           },
-          "params": {
-            "dimensions": 2,
-            "coordinateSpace": "pixels"
+        "params": {
+          "dimensions": 2,
+          "coordinateSpace": "pixels",
+          "timestampField": "key.frame_timestamp_micros",
+          "sensorField": "key.camera_name",
+          "objectIdField": "key.camera_object_id",
+          "typeField": "[CameraHumanKeypointsComponent].camera_keypoints[*].type",
+          "coordinateFields": [
+            "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.x",
+            "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.location_px.y"
+          ],
+          "occludedField": "[CameraHumanKeypointsComponent].camera_keypoints[*].keypoint_2d.visibility.is_occluded",
+          "schemaId": "waymo-human-keypoints-v1",
+          "frameIdSuffix": "-frame",
+          "labels": ["Unspecified", "Nose", "Keypoint 2", "Keypoint 3", "Keypoint 4", "Left Shoulder", "Left Elbow", "Left Wrist", "Left Hip", "Left Knee", "Left Ankle", "Keypoint 11", "Keypoint 12", "Right Shoulder", "Right Elbow", "Right Wrist", "Right Hip", "Right Knee", "Right Ankle", "Forehead", "Head Center"]
           }
         }
       ],
@@ -1661,16 +1764,18 @@
           "inputs": {
             "rows": "statsRows.rows"
           },
-          "params": {
-            "fields": [
-              "location",
-              "time_of_day",
-              "weather"
-            ]
+        "params": {
+          "mode": "segment-stats",
+          "idField": "key.segment_context_name",
+          "locationField": "[StatsComponent].location",
+          "timeOfDayField": "[StatsComponent].time_of_day",
+          "weatherField": "[StatsComponent].weather",
+          "objectTypesField": "[StatsComponent].lidar_object_counts.types",
+          "objectCountsField": "[StatsComponent].lidar_object_counts.counts"
           }
         }
       ],
-      "result": "selectSegmentMetadata.records"
+      "result": "selectSegmentMetadata.segments"
     }
   },
   "outputs": {

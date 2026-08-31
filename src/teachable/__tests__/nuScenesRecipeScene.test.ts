@@ -119,10 +119,9 @@ describe('nuScenes executable recipe graph', () => {
 
   it('executes the full normalized capability surface without prepared provider state', async () => {
     const { compiledRecipe, files, inventoryEntries } = fixture()
-    const { scene, diagnostics, executionProfile, metadata, availableSegments } = await bindRecipeSceneV1({
+    const { scene, diagnostics, metadata, availableSegments } = await bindRecipeSceneV1({
       compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
     })
-    expect(executionProfile).toBe('core/relational-graph@1')
     expect(diagnostics).toEqual([])
     expect(scene.manifest.capabilities).toEqual(compiledRecipe.capabilities)
     expect(availableSegments).toEqual([expect.objectContaining({ groupId: 'scene', id: 'scene-0001' })])
@@ -200,11 +199,10 @@ describe('nuScenes executable recipe graph', () => {
     const { compiledRecipe, files, inventoryEntries } = fixture()
     const learned = structuredClone(compiledRecipe.recipe)
     learned.scene.formatId = 'learned-nuscenes-compatible'
-    const { scene, executionProfile } = await bindRecipeSceneV1({
+    const { scene } = await bindRecipeSceneV1({
       compiledRecipe: compileRecipeV1(learned, bundledPhase2OperatorRegistry),
       source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
     })
-    expect(executionProfile).toBe('core/relational-graph@1')
     expect(scene.manifest.id).toBe('learned-nuscenes-compatible')
     await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).resolves.toMatchObject({
       index: 0, timestampMicros: 1_000_000n,

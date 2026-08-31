@@ -72,10 +72,9 @@ describe('Argoverse 2 executable recipe graph', () => {
 
   it('executes declared sources and nodes into the full normalized capability surface', async () => {
     const { compiledRecipe, files, inventoryEntries } = fixture()
-    const { scene, diagnostics, executionProfile, metadata } = await bindRecipeSceneV1({
+    const { scene, diagnostics, metadata } = await bindRecipeSceneV1({
       compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'av2-log',
     })
-    expect(executionProfile).toBe('core/feather-timeline@1')
     expect(diagnostics).toEqual([])
     expect(scene.manifest.capabilities).toEqual(compiledRecipe.capabilities)
     expect(scene.index.segments[0]).toMatchObject({ id: 'av2-log', frameCount: 1 })

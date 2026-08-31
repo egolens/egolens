@@ -180,7 +180,16 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   }, {
     oneOf: [
       closedParams({ source: { const: 'projected-box3d' }, clipToImage: { type: 'boolean' } }, ['source', 'clipToImage']),
-      closedParams({ geometry: { const: 'center-size-pixels' } }, ['geometry']),
+      closedParams({
+        geometry: { const: 'center-size-pixels' },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+        objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        classField: { type: 'string', minLength: 1, maxLength: 256 },
+        classMap: { type: 'object', additionalProperties: { type: 'string', minLength: 1, maxLength: 96 } },
+        centerFields: fieldNames(2),
+        dimensionFields: fieldNames(2),
+      }, ['geometry']),
     ],
   }, recordContract(['boxes'])],
   ['geometry.normalize_boxes3d', {
@@ -201,6 +210,8 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         quaternionFields: fieldNames(4),
         centerFields: fieldNames(3),
         dimensionFields: fieldNames(3),
+        classMap: { type: 'object', additionalProperties: { type: 'string', minLength: 1, maxLength: 96 } },
+        headingField: { type: 'string', minLength: 1, maxLength: 256 },
       }, ['frameId']),
       closedParams({
         quaternionOrder: { const: 'wxyz' },
@@ -268,7 +279,23 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         extrinsicQuaternionFields: fieldNames(4),
         extrinsicTranslationFields: fieldNames(3),
       }, ['timestampFrom', 'maxDeltaNs']),
-      closedParams({ encoding: { const: 'jpeg' } }, ['encoding']),
+      closedParams({
+        encoding: { const: 'jpeg' },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+        imageField: { type: 'string', minLength: 1, maxLength: 256 },
+        mimeType: { const: 'image/jpeg' },
+        extrinsicField: { type: 'string', minLength: 1, maxLength: 256 },
+        widthField: { type: 'string', minLength: 1, maxLength: 256 },
+        heightField: { type: 'string', minLength: 1, maxLength: 256 },
+        intrinsicFields: fieldNames(4),
+        distortionFields: fieldNames(5),
+        opticalToSensor: { type: 'array', minItems: 16, maxItems: 16, items: { type: 'number' } },
+        frameIdSuffix: { type: 'string', minLength: 1, maxLength: 32 },
+      }, [
+        'encoding', 'timestampField', 'sensorField', 'imageField', 'mimeType', 'extrinsicField',
+        'widthField', 'heightField', 'intrinsicFields', 'distortionFields', 'opticalToSensor', 'frameIdSuffix',
+      ]),
     ],
   }, recordContract(['images'])],
   ['image.encoded_bytes', byteInputContract, closedParams({
@@ -285,24 +312,58 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     indexRecordKeyField: { type: 'string', minLength: 1, maxLength: 256 },
     indexPathField: { type: 'string', minLength: 1, maxLength: 256 },
     panopticDivisor: { type: 'integer', minimum: 1, maximum: 1000000 },
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+    sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+    shapeField: { type: 'string', minLength: 1, maxLength: 256 },
+    valuesField: { type: 'string', minLength: 1, maxLength: 256 },
   }, ['taxonomy']), recordContract(['segmentation'])],
   ['labels.decode_camera_mask', recordContract(['rows']), closedParams({
     encoding: { const: 'png-uint16' },
     taxonomy: { type: 'string', minLength: 1, maxLength: 96 },
-  }, ['encoding', 'taxonomy']), recordContract(['segmentation'])],
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+    sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+    labelField: { type: 'string', minLength: 1, maxLength: 256 },
+    divisorField: { type: 'string', minLength: 1, maxLength: 256 },
+    panopticDivisor: { type: 'integer', minimum: 1, maximum: 1000000 },
+  }, ['encoding', 'taxonomy', 'timestampField', 'sensorField', 'labelField', 'divisorField']), recordContract(['segmentation'])],
   ['geometry.normalize_keypoints', recordContract(['rows']), {
     oneOf: [
-      closedParams({ dimensions: { const: 3 }, frameId: { type: 'string', minLength: 1, maxLength: 96 } }, ['dimensions', 'frameId']),
-      closedParams({ dimensions: { const: 2 }, coordinateSpace: { const: 'pixels' } }, ['dimensions', 'coordinateSpace']),
+      closedParams({
+        dimensions: { const: 3 }, frameId: { type: 'string', minLength: 1, maxLength: 96 },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        typeField: { type: 'string', minLength: 1, maxLength: 256 },
+        coordinateFields: fieldNames(3), schemaId: { type: 'string', minLength: 1, maxLength: 96 },
+        labels: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'string' } },
+      }, ['dimensions', 'frameId', 'timestampField', 'objectIdField', 'typeField', 'coordinateFields', 'schemaId', 'labels']),
+      closedParams({
+        dimensions: { const: 2 }, coordinateSpace: { const: 'pixels' },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+        objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        typeField: { type: 'string', minLength: 1, maxLength: 256 },
+        coordinateFields: fieldNames(2), occludedField: { type: 'string', minLength: 1, maxLength: 256 },
+        schemaId: { type: 'string', minLength: 1, maxLength: 96 }, frameIdSuffix: { type: 'string', minLength: 1, maxLength: 32 },
+        labels: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'string' } },
+      }, ['dimensions', 'coordinateSpace', 'timestampField', 'sensorField', 'objectIdField', 'typeField', 'coordinateFields', 'occludedField', 'schemaId', 'frameIdSuffix', 'labels']),
     ],
   }, recordContract(['keypoints'])],
   ['geometry.range_image_to_cartesian', recordContract(['rangeImages', 'calibration', 'poses']), closedParams({
     returns: { type: 'array', minItems: 1, maxItems: 2, uniqueItems: true, items: { enum: [1, 2] } },
     outputFrame: { const: 'ego' },
-  }, ['returns', 'outputFrame']), recordContract(['pointClouds'])],
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+    sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+    shapeField: { type: 'string', minLength: 1, maxLength: 256 },
+    valuesField: { type: 'string', minLength: 1, maxLength: 256 },
+    extrinsicField: { type: 'string', minLength: 1, maxLength: 256 },
+    inclinationValuesField: { type: 'string', minLength: 1, maxLength: 256 },
+    inclinationMinField: { type: 'string', minLength: 1, maxLength: 256 },
+    inclinationMaxField: { type: 'string', minLength: 1, maxLength: 256 },
+  }, ['returns', 'outputFrame', 'timestampField', 'sensorField', 'shapeField', 'valuesField', 'extrinsicField', 'inclinationValuesField', 'inclinationMinField', 'inclinationMaxField']), recordContract(['pointClouds'])],
   ['geometry.relative_poses', recordContract(['rows']), closedParams({
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
     matrixField: { type: 'string', minLength: 1, maxLength: 512 },
-  }, ['matrixField']), recordContract(['poses'])],
+  }, ['timestampField', 'matrixField']), recordContract(['poses'])],
   ['records.select', {
     oneOf: [recordContract(['rows']), recordContract(['scenes', 'logs'])],
   }, {
@@ -326,6 +387,15 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         timeDelimiter: { type: 'string', minLength: 1, maxLength: 8 },
         timePartIndex: { type: 'integer', minimum: 0, maximum: 32 },
       }, ['mode', 'sceneLogField', 'logKeyField', 'groupField', 'idField', 'labelField', 'weatherField', 'locationField', 'timeSourceField', 'timeDelimiter', 'timePartIndex']),
+      closedParams({
+        mode: { const: 'segment-stats' },
+        idField: { type: 'string', minLength: 1, maxLength: 256 },
+        locationField: { type: 'string', minLength: 1, maxLength: 256 },
+        timeOfDayField: { type: 'string', minLength: 1, maxLength: 256 },
+        weatherField: { type: 'string', minLength: 1, maxLength: 256 },
+        objectTypesField: { type: 'string', minLength: 1, maxLength: 256 },
+        objectCountsField: { type: 'string', minLength: 1, maxLength: 256 },
+      }, ['mode', 'idField', 'locationField', 'timeOfDayField', 'weatherField', 'objectTypesField', 'objectCountsField']),
     ],
   }, { oneOf: [recordContract(['records']), recordContract(['pointClouds']), recordContract(['segments'])] }],
   ['relations.token_join', {
@@ -365,7 +435,9 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   }, { oneOf: [recordContract(['rows']), recordContract(['poses'])] }],
   ['relations.composite_key_join', recordContract(['boxes2d', 'boxes3d', 'associations']), closedParams({
     relation: { const: 'camera-object-to-lidar-object' },
-  }, ['relation']), recordContract(['relations'])],
+    cameraObjectField: { type: 'string', minLength: 1, maxLength: 256 },
+    lidarObjectField: { type: 'string', minLength: 1, maxLength: 256 },
+  }, ['relation', 'cameraObjectField', 'lidarObjectField']), recordContract(['relations'])],
   ['timeline.join', {
     oneOf: [
       recordContract(['records', 'sampleData', 'calibration']),
@@ -523,6 +595,7 @@ const strictParquetOperator: CoreOperatorDescriptor = {
   },
   execution: 'worker',
   deterministic: true,
+  execute: coreGraphOperatorImplementationsV1['parquet.columns'],
 }
 
 const workerOperators = [
@@ -530,10 +603,8 @@ const workerOperators = [
 ] as const
 
 /**
- * Compile-time descriptors for the generic operators referenced by bundled
- * Phase 2 recipes. Runtime binding enters the shared RecipeExecutor and selects
- * only by these versioned reader/operator IDs. Moving every core operator body
- * behind that executor remains an explicit Phase 10 preflight follow-up.
+ * Compile-time and executable descriptors for the generic operators referenced
+ * by bundled recipes. Every body is invoked by the shared graph kernel.
  */
 export const BUNDLED_PHASE2_OPERATOR_DESCRIPTORS: readonly CoreOperatorDescriptor[] = [
   ...strictBinaryOperators,

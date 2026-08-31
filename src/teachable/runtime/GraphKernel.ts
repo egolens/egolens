@@ -62,6 +62,44 @@ function resolve(reference: string, local: ReadonlyMap<string, Readonly<Record<s
   return value
 }
 
+function releaseGraphValue(value: unknown, seen: WeakSet<object>): void {
+  if (typeof value !== 'object' || value === null || seen.has(value)) return
+  seen.add(value)
+  if ('retainedReleases' in value && (value as { retainedReleases?: unknown }).retainedReleases instanceof Map) {
+    const collection = value as {
+      retainedReleases: Map<unknown, () => void>
+      cache?: Map<unknown, unknown>
+      fileCache?: Map<unknown, unknown>
+      projectionCache?: Map<unknown, unknown>
+      frameIndexCache?: Map<unknown, unknown>
+      frameRowsCache?: Map<unknown, unknown>
+    }
+    for (const release of collection.retainedReleases.values()) release()
+    collection.retainedReleases.clear()
+    collection.cache?.clear()
+    collection.fileCache?.clear()
+    collection.projectionCache?.clear()
+    collection.frameIndexCache?.clear()
+    collection.frameRowsCache?.clear()
+    return
+  }
+  if (value instanceof Map) {
+    if ([...value.values()].every((entry) => typeof entry === 'function')) {
+      for (const release of value.values()) (release as () => void)()
+    } else {
+      for (const entry of value.values()) releaseGraphValue(entry, seen)
+    }
+    value.clear()
+    return
+  }
+  if (value instanceof Set) {
+    value.clear()
+    return
+  }
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return
+  for (const nested of Object.values(value)) releaseGraphValue(nested, seen)
+}
+
 function pipelineOrder(compiled: CompiledRecipeV1): readonly string[] {
   const ids = [...compiled.pipelines.keys()].sort()
   const dependencies = new Map(ids.map((id) => [id, new Set<string>()]))
@@ -118,61 +156,83 @@ export class ExecutableGraphKernelV1 {
         this.throwIfAborted()
         return bytes
       },
-    }
-    const global = new Map<string, Readonly<Record<string, unknown>>>()
-    for (const sourceId of Object.keys(input.compiledRecipe.recipe.sources).sort()) {
-      context.throwIfAborted()
-      const recipeSource = input.compiledRecipe.recipe.sources[sourceId]
-      const files: GraphSourceFileV1[] = input.inventory
-        .filter((entry) => sourceSelectorMatchesV1(input.compiledRecipe, recipeSource, entry.path))
-        .map((entry) => ({ path: entry.path, size: entry.size ?? input.source.byteLength(entry.path) }))
-      if (recipeSource.files.order === 'numeric-path') files.sort((left, right) => numericPathCompare(left.path, right.path))
-      else if (recipeSource.files.order !== 'none') files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
-      const minimum = recipeSource.files.minCount ?? 1
-      const maximum = recipeSource.files.maxCount ?? Number.POSITIVE_INFINITY
-      if (files.length < minimum || files.length > maximum) {
-        throw new Error(`SOURCE_FILE_COUNT_INVALID: ${sourceId} matched ${files.length}; expected ${minimum}-${Number.isFinite(maximum) ? maximum : 'unbounded'}`)
-      }
-      const dependency = input.compiledRecipe.recipe.engine.requiredOperators[recipeSource.reader]
-      resources.node()
-      global.set(sourceId, await this.#registry.executeCore(recipeSource.reader, dependency, { files }, recipeSource.params ?? {}, context))
-    }
-    for (const pipelineId of pipelineOrder(input.compiledRecipe)) {
-      const pipeline = input.compiledRecipe.pipelines.get(pipelineId)!
-      const local = new Map<string, Readonly<Record<string, unknown>>>()
-      for (const node of pipeline.nodes) {
-        const dependency = input.compiledRecipe.recipe.engine.requiredOperators[node.op]
-        const nodeInputs = Object.fromEntries(Object.entries(node.inputs ?? {}).map(([name, reference]) => [name, resolve(reference, local, global)]))
-        resources.node()
-        local.set(node.id, await this.#registry.executeCore(node.op, dependency, nodeInputs, node.params ?? {}, context))
-      }
-      global.set(pipelineId, { result: resolve(pipeline.result, local, global) })
-    }
-    const outputs = new Map<NormalizedCapabilityV1, unknown>()
-    for (const [capability, reference] of Object.entries(input.compiledRecipe.recipe.outputs)) {
-      outputs.set(capability as NormalizedCapabilityV1, resolve(reference, new Map(), global))
-    }
-    let disposed = false
-    return {
-      outputs,
-      get resources() { return resources.snapshot() },
-      abortController,
-      dispose() {
-        if (disposed) return
-        disposed = true
-        abortController.abort()
-        for (const value of global.values()) {
-          for (const nested of Object.values(value)) {
-            if (typeof nested === 'object' && nested !== null && 'cache' in nested && (nested as { cache?: unknown }).cache instanceof Map) {
-              (nested as { cache: Map<unknown, unknown> }).cache.clear()
-              if ('retainedReleases' in nested && (nested as { retainedReleases?: unknown }).retainedReleases instanceof Map) {
-                for (const release of (nested as { retainedReleases: Map<unknown, () => void> }).retainedReleases.values()) release()
-                ;(nested as { retainedReleases: Map<unknown, unknown> }).retainedReleases.clear()
-              }
-            }
-          }
+      async asyncBuffer(path, requestSignal) {
+        this.throwIfAborted()
+        const backing = await input.source.asyncBuffer(path)
+        const readSignal = linkedSignal(signal, requestSignal)
+        return {
+          byteLength: backing.byteLength,
+          async slice(start, end) {
+            if (readSignal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
+            const bytes = await backing.slice(start, end)
+            resources.sourceBytes(bytes.byteLength)
+            if (readSignal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
+            return bytes
+          },
         }
       },
+    }
+    const global = new Map<string, Readonly<Record<string, unknown>>>()
+    const roots: object[] = []
+    const release = () => {
+      const seen = new WeakSet<object>()
+      for (const value of roots) releaseGraphValue(value, seen)
+      roots.length = 0
+      global.clear()
+    }
+    try {
+      for (const sourceId of Object.keys(input.compiledRecipe.recipe.sources).sort()) {
+        context.throwIfAborted()
+        const recipeSource = input.compiledRecipe.recipe.sources[sourceId]
+        const files: GraphSourceFileV1[] = input.inventory
+          .filter((entry) => sourceSelectorMatchesV1(input.compiledRecipe, recipeSource, entry.path))
+          .map((entry) => ({ path: entry.path, size: entry.size ?? input.source.byteLength(entry.path) }))
+        if (recipeSource.files.order === 'numeric-path') files.sort((left, right) => numericPathCompare(left.path, right.path))
+        else if (recipeSource.files.order !== 'none') files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
+        const minimum = recipeSource.files.minCount ?? 1
+        const maximum = recipeSource.files.maxCount ?? Number.POSITIVE_INFINITY
+        if (files.length < minimum || files.length > maximum) {
+          throw new Error(`SOURCE_FILE_COUNT_INVALID: ${sourceId} matched ${files.length}; expected ${minimum}-${Number.isFinite(maximum) ? maximum : 'unbounded'}`)
+        }
+        const dependency = input.compiledRecipe.recipe.engine.requiredOperators[recipeSource.reader]
+        resources.node()
+        const result = await this.#registry.executeCore(recipeSource.reader, dependency, { files }, recipeSource.params ?? {}, context)
+        roots.push(result)
+        global.set(sourceId, result)
+      }
+      for (const pipelineId of pipelineOrder(input.compiledRecipe)) {
+        const pipeline = input.compiledRecipe.pipelines.get(pipelineId)!
+        const local = new Map<string, Readonly<Record<string, unknown>>>()
+        for (const node of pipeline.nodes) {
+          const dependency = input.compiledRecipe.recipe.engine.requiredOperators[node.op]
+          const nodeInputs = Object.fromEntries(Object.entries(node.inputs ?? {}).map(([name, reference]) => [name, resolve(reference, local, global)]))
+          resources.node()
+          const result = await this.#registry.executeCore(node.op, dependency, nodeInputs, node.params ?? {}, context)
+          roots.push(result)
+          local.set(node.id, result)
+        }
+        global.set(pipelineId, { result: resolve(pipeline.result, local, global) })
+      }
+      const outputs = new Map<NormalizedCapabilityV1, unknown>()
+      for (const [capability, reference] of Object.entries(input.compiledRecipe.recipe.outputs)) {
+        outputs.set(capability as NormalizedCapabilityV1, resolve(reference, new Map(), global))
+      }
+      let disposed = false
+      return {
+        outputs,
+        get resources() { return resources.snapshot() },
+        abortController,
+        dispose() {
+          if (disposed) return
+          disposed = true
+          abortController.abort()
+          release()
+        },
+      }
+    } catch (error) {
+      abortController.abort()
+      release()
+      throw error
     }
   }
 }

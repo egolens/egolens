@@ -65,6 +65,7 @@ export interface WaymoParquetFile {
 export async function openParquetFile(
   component: string,
   source: File | string | AsyncBuffer,
+  options: { cache?: boolean } = {},
 ): Promise<WaymoParquetFile> {
   let rawBuffer: AsyncBuffer
   if (source instanceof File) {
@@ -77,7 +78,7 @@ export async function openParquetFile(
   }
 
   // Cache repeated reads (e.g. metadata + first row group in same region)
-  const buffer = cachedAsyncBuffer(rawBuffer)
+  const buffer = options.cache === false ? rawBuffer : cachedAsyncBuffer(rawBuffer)
   const metadata = await parquetMetadataAsync(buffer)
 
   // Build row group index
