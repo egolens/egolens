@@ -53,3 +53,26 @@ describe('local nuScenes version-root scanning', () => {
     })
   })
 })
+
+describe('unsupported folder capture', () => {
+  it('retains a bounded session inventory with stable relative paths', async () => {
+    const root = directory('mystery-drive', new Map([
+      ['frames.json', file('frames.json')],
+      ['sensors', directory('sensors', new Map([
+        ['000001.bin', file('000001.bin')],
+      ]))],
+    ]))
+
+    const result = await scanDirectoryHandle(root)
+
+    expect(result.segments.size).toBe(0)
+    expect(result.inventory?.snapshot()).toMatchObject({
+      entries: [
+        { path: 'frames.json' },
+        { path: 'sensors/000001.bin' },
+      ],
+      revoked: false,
+      truncated: false,
+    })
+  })
+})

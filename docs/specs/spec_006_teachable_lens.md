@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: in-progress (Phases 2–7 shipped; next planned work is Phase 8) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phases 2–8 shipped; next planned work is Phase 9) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 
@@ -1425,6 +1425,26 @@ If inspection proves that a genuinely new decoder/operator is required, the UI
 returns a capability-gap diagnostic. Codex may implement that operator in the
 repository development workflow, but the live authoring session does not embed
 or install its JavaScript.
+
+**Shipped:** unsupported directory and loose-file drops now retain a bounded,
+revocable, session-only `SourceInventoryV1`; no file body is read until an
+explicit bounded inspection, fingerprint, bind, or sample command requests it.
+One shared authoring command layer owns schema validation, compilation, source
+binding, isolated sample preparation, transactional commit, semantic diff,
+exact-parent revision checks, capability-aware review receipts, finalization,
+and import/export. Failed or stale revisions leave the last good artifact and
+observable preview intact, while missing runtime capability returns a structured
+`CAPABILITY_GAP` instead of installing code.
+
+The top-level document registers the five specified WebMCP tools once using
+public feature detection, and the human UI visibly separates Codex proposal,
+EgoLens validation, and exact-frame human review. A real browser sample path
+executes portable JSON timelines through the registered core reader/operator;
+the evaluator boundary accepts the full normalized capability contract and
+requires a registered source-family preview runtime for richer scenes. Finalized
+artifacts and preferred format matches are cached in IndexedDB, while the
+self-contained `.egolens-adapter.json` export remains the source of truth and
+ordinary browser imports re-enter the same validation path.
 
 #### Phase 9 — Prove self-hosting before the mystery dataset
 

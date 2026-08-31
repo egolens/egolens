@@ -17,6 +17,11 @@
 import { getAllKnownComponents, detectDataset } from '../adapters/registry'
 import { nuScenesRecipe } from '../adapters/nuscenes/manifest'
 import { selectVersionRootV1 } from '../teachable/runtime/versionRoot'
+import {
+  MAX_SOURCE_INVENTORY_ENTRIES_V1,
+  SourceInventoryV1,
+  sourceInventoryFromFilesV1,
+} from '../teachable/authoring/SourceInventory'
 
 // ---------------------------------------------------------------------------
 // File System Access API typings not yet in this project's lib.dom setup
@@ -92,6 +97,8 @@ export interface FolderRejection {
 export interface ScanResult {
   segments: Map<string, Map<string, File>>
   rejection?: FolderRejection
+  /** Session-only files retained for Teachable Lens when no adapter matches. */
+  inventory?: SourceInventoryV1
 }
 
 /** Build the diagnostic for a folder that yielded no dataset. */
@@ -185,7 +192,11 @@ export async function scanDirectoryHandle(
     // Nothing recognisable at either level. Report what the user actually
     // pointed at so the message can name the mismatch instead of restating
     // the requirement.
-    return { segments, rejection: describeRejection([...childDirs.keys()]) }
+    return {
+      segments,
+      rejection: describeRejection([...childDirs.keys()]),
+      inventory: await inventoryFromDirectoryHandle(dirHandle),
+    }
   }
 
   // Detect dataset type — nuScenes/AV2 require different scanning strategies
@@ -215,7 +226,11 @@ export async function scanDirectoryHandle(
   }
 
   if (segments.size === 0) {
-    return { segments, rejection: describeRejection([...childDirs.keys()]) }
+    return {
+      segments,
+      rejection: describeRejection([...childDirs.keys()]),
+      inventory: await inventoryFromDirectoryHandle(dirHandle),
+    }
   }
   return { segments }
 }
@@ -470,12 +485,29 @@ export async function scanDataTransfer(
     // Fallback: webkitGetAsEntry
     const entry = item.webkitGetAsEntry?.()
     if (entry?.isDirectory) {
-      return { segments: await scanFileSystemEntry(entry as FileSystemDirectoryEntry) }
+      const directory = entry as FileSystemDirectoryEntry
+      const scanned = await scanFileSystemEntry(directory)
+      if (scanned.size > 0) return { segments: scanned }
+      return {
+        segments: scanned,
+        rejection: describeRejection([]),
+        inventory: await inventoryFromFileSystemEntry(directory),
+      }
     }
   }
 
-  // No directory in the drop at all — loose files, or a browser without either API.
-  return { segments, rejection: describeRejection([]) }
+  // Loose files are still a user-authorized source inventory (and may include
+  // an importable .egolens-adapter.json artifact).
+  const looseFiles: [string, File][] = []
+  for (let index = 0; index < items.length; index += 1) {
+    const file = items[index].getAsFile()
+    if (file) looseFiles.push([file.webkitRelativePath || file.name, file])
+  }
+  return {
+    segments,
+    rejection: describeRejection([]),
+    ...(looseFiles.length > 0 ? { inventory: sourceInventoryFromFilesV1(looseFiles) } : {}),
+  }
 }
 
 /**
@@ -569,4 +601,65 @@ export async function pickAndScanFolder(): Promise<ScanResult> {
 /** Check if the File System Access API is available */
 export function hasDirectoryPicker(): boolean {
   return typeof (window as WindowWithDirectoryPicker).showDirectoryPicker === 'function'
+}
+
+async function inventoryFromDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promise<SourceInventoryV1> {
+  const files: [string, File][] = []
+  let truncated = false
+  const visit = async (directory: FileSystemDirectoryHandle, prefix: string, depth: number): Promise<void> => {
+    if (depth > 12) {
+      truncated = true
+      return
+    }
+    for await (const [name, handle] of directory) {
+      if (files.length >= MAX_SOURCE_INVENTORY_ENTRIES_V1) {
+        truncated = true
+        return
+      }
+      const path = prefix ? `${prefix}/${name}` : name
+      if (handle.kind === 'file') files.push([path, await (handle as FileSystemFileHandle).getFile()])
+      else await visit(handle as FileSystemDirectoryHandle, path, depth + 1)
+    }
+  }
+  await visit(dirHandle, '', 0)
+  return sourceInventoryFromFilesV1(files, { truncated })
+}
+
+async function inventoryFromFileSystemEntry(dirEntry: FileSystemDirectoryEntry): Promise<SourceInventoryV1> {
+  const files: [string, File][] = []
+  let truncated = false
+  const readDir = (entry: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> =>
+    new Promise((resolve, reject) => {
+      const reader = entry.createReader()
+      const entries: FileSystemEntry[] = []
+      const readBatch = (): void => {
+        reader.readEntries((batch) => {
+          if (batch.length === 0) resolve(entries)
+          else {
+            entries.push(...batch)
+            readBatch()
+          }
+        }, reject)
+      }
+      readBatch()
+    })
+  const getFile = (entry: FileSystemFileEntry): Promise<File> =>
+    new Promise((resolve, reject) => entry.file(resolve, reject))
+  const visit = async (directory: FileSystemDirectoryEntry, prefix: string, depth: number): Promise<void> => {
+    if (depth > 12) {
+      truncated = true
+      return
+    }
+    for (const entry of await readDir(directory)) {
+      if (files.length >= MAX_SOURCE_INVENTORY_ENTRIES_V1) {
+        truncated = true
+        return
+      }
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isFile) files.push([path, await getFile(entry as FileSystemFileEntry)])
+      else await visit(entry as FileSystemDirectoryEntry, path, depth + 1)
+    }
+  }
+  await visit(dirEntry, '', 0)
+  return sourceInventoryFromFilesV1(files, { truncated })
 }
