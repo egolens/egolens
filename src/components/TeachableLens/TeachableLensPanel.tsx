@@ -5,6 +5,7 @@ import { downloadRecipeArtifactV1 } from '../../teachable/authoring/portability'
 import { teachableAuthoringSession } from '../../teachable/authoring/browserSession'
 import type { HumanReviewCapabilityV1 } from '../../teachable/authoring/review'
 import { authoringPreviewStoreV1 } from '../../teachable/authoring/previewStore'
+import { fetchRemoteRecipeV1 } from '../../teachable/share/RecipeTransport'
 
 function shortHash(hash: string | null): string {
   return hash ? `${hash.slice(0, 15)}…${hash.slice(-8)}` : '—'
@@ -24,6 +25,8 @@ export default function TeachableLensPanel({
   const [busy, setBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [remoteRecipeUrl, setRemoteRecipeUrl] = useState('')
+  const [remoteRecipeHash, setRemoteRecipeHash] = useState('')
   const inventory = state.inventory
   const reviewed = new Map(state.reviews.map((review) => [review.capability, review]))
 
@@ -39,6 +42,20 @@ export default function TeachableLensPanel({
     } finally {
       setBusy(false)
       if (fileInput.current) fileInput.current.value = ''
+    }
+  }
+
+  const importRemoteRecipe = async () => {
+    setBusy(true)
+    setLocalError(null)
+    try {
+      const verified = await fetchRemoteRecipeV1(remoteRecipeUrl.trim(), remoteRecipeHash.trim())
+      const result = await session.applyRevision(verified.recipe)
+      if (!result.ok) setLocalError(result.diagnostics.map((item) => `${item.code}: ${item.hint}`).join('\n'))
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -124,6 +141,28 @@ export default function TeachableLensPanel({
               {state.phase === 'review' && <button disabled={busy} onClick={() => void finalize()} style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.12), color: colors.accent, cursor: busy ? 'wait' : 'pointer' }}>Finalize</button>}
               {state.exportReady && state.currentArtifact && <button onClick={() => downloadRecipeArtifactV1(state.currentArtifact!)} style={{ padding: '8px 12px', borderRadius: radius.sm, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Export JSON</button>}
             </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 2fr) minmax(220px, 1fr) auto', gap: 8, marginTop: 12 }}>
+            <input
+              aria-label="Remote recipe URL"
+              type="url"
+              value={remoteRecipeUrl}
+              onChange={(event) => setRemoteRecipeUrl(event.target.value)}
+              placeholder="https://…/adapter.json"
+              style={{ minWidth: 0, padding: '8px 10px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgOverlay, color: colors.textPrimary }}
+            />
+            <input
+              aria-label="Expected recipe hash"
+              value={remoteRecipeHash}
+              onChange={(event) => setRemoteRecipeHash(event.target.value)}
+              placeholder="sha256:…"
+              style={{ minWidth: 0, padding: '8px 10px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgOverlay, color: colors.textPrimary, fontFamily: fonts.mono }}
+            />
+            <button
+              disabled={busy || !remoteRecipeUrl.trim() || !remoteRecipeHash.trim()}
+              onClick={() => void importRemoteRecipe()}
+              style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgOverlay, color: colors.textPrimary, cursor: busy ? 'wait' : 'pointer' }}
+            >Import URL</button>
           </div>
         </div>
 

@@ -27,6 +27,7 @@ import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
 import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
 import { getAdapterById, getManifest, setAdapter } from '../adapters/registry'
+import { RecipeBackedDatasetAdapter } from '../teachable/runtime/RecipeBackedDatasetAdapter'
 import {
   detectNuScenesVersionRoot,
   discoverNuScenesScenes,
@@ -75,6 +76,7 @@ import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColum
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
 import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
+import { bundledPhase2OperatorRegistry } from '../teachable/operators/bundledPhase2'
 import type { RecipeInventoryEntryV1 } from '../teachable/runtime/GraphKernel'
 import { decodeJsonRecordsV1 } from '../teachable/operators/jsonRecords'
 import type { GraphSegmentDescriptorV1 } from '../teachable/runtime/GraphValues'
@@ -86,6 +88,15 @@ import {
 import { bridgeNormalizedFrame } from '../teachable/runtime/compatibilityBridge'
 import { markPerformanceEvent, noteFrameRequest } from '../teachable/runtime/performanceProbe'
 import type { NormalizedCapabilityV1, NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
+import {
+  resolvePortableShareUrlV1,
+  type ResolvedPortableShareV1,
+} from '../teachable/share/PortableShareRuntime'
+import {
+  validateShareDescriptorV1,
+  type ShareDescriptorV1,
+  type ShareVector3V1,
+} from '../teachable/share/ShareDescriptor'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,6 +169,12 @@ export interface FrameData {
 
 interface SceneActions {
   loadDataset: (sources: Map<string, File | string>) => Promise<void>
+  /** Empty-profile portable v1 share path; never consults a dataset enum. */
+  loadPortableShare: (
+    url: string,
+    counted?: boolean,
+    onBeforeReady?: (resolved: ResolvedPortableShareV1) => void,
+  ) => Promise<ResolvedPortableShareV1 | null>
   loadFrame: (index: number) => Promise<void>
   nextFrame: () => Promise<void>
   prevFrame: () => Promise<void>
@@ -238,6 +255,8 @@ export interface SceneState {
   cachedFrames: number[]
   /** Sorted frame indices where camera images are cached */
   cameraCachedFrames: number[]
+  /** Descriptor-owned camera-strip state (needed by referenced share URLs). */
+  cameraStripVisible: boolean | null
   /** Number of camera row groups loaded so far */
   cameraLoadedCount: number
   /** Total camera row groups to load */
@@ -412,6 +431,8 @@ const internal = {
   // -- Waymo-specific remote state --
   /** Base URL for remote Waymo loading (e.g. https://bucket.s3.../waymo_data/) */
   waymoBaseUrl: null as string | null,
+  /** Hash-bound identity used to generate subsequent portable share URLs. */
+  portableShareDescriptor: null as ShareDescriptorV1 | null,
 }
 
 function resetInternal() {
@@ -420,6 +441,7 @@ function resetInternal() {
   internal.conformanceSceneFactory = null
   internal.recipeByteSource = null
   internal.recipeInventoryEntries = []
+  internal.portableShareDescriptor = null
   internal.timestamps = []
   internal.pendingSeekFrame = null
   internal.cameraLoadedBatchesEver.clear()
@@ -683,6 +705,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   lastConvertMs: 0,
   cachedFrames: [],
   cameraCachedFrames: [],
+  cameraStripVisible: null,
   cameraLoadedCount: 0,
   cameraTotalCount: 0,
   visibleSensors: new Set(getManifest().lidarSensors.map(s => s.id)),
@@ -722,6 +745,111 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   currentSegment: null,
 
   actions: {
+    loadPortableShare: async (url, counted = false, onBeforeReady) => {
+      resetInternal()
+      clearUrlSource()
+      set({
+        status: 'loading', error: null, errorCode: null,
+        loadStep: 'opening' as LoadStep, loadProgress: 0,
+        currentFrame: null, currentFrameIndex: 0, isPlaying: false,
+      })
+      try {
+        const resolved = await resolvePortableShareUrlV1(url, { counted })
+        const binding = resolved.binding
+        const descriptor = resolved.effectiveDescriptor
+        const manifest = binding.scene.manifest
+        setAdapter(new RecipeBackedDatasetAdapter(
+          resolved.recipe.recipe,
+          bundledPhase2OperatorRegistry,
+          resolved.recipe.compiledRecipe,
+        ))
+        internal.datasetId = manifest.id
+        internal.portableShareDescriptor = resolved.descriptor
+        internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
+          workerTimestamps: binding.metadata.timestamps,
+          delegateOwnsFramePayloads: true,
+        })
+        applyMetadataBundle({
+          ...binding.metadata,
+          hasBoxData: manifest.capabilities.has('boxes3d'),
+          hasSegmentation: manifest.capabilities.has('lidarSegmentation'),
+          hasKeypoints: manifest.capabilities.has('keypoints3d') || manifest.capabilities.has('keypoints2d'),
+          hasCameraSegmentation: manifest.capabilities.has('cameraSegmentation'),
+        }, set, get)
+
+        const pointSensors = new Map(manifest.sensors
+          .filter((sensor) => sensor.modality !== 'camera')
+          .map((sensor) => [sensor.id, sensor.rendererId]))
+        const cameras = new Map(manifest.sensors
+          .filter((sensor) => sensor.modality === 'camera')
+          .map((sensor) => [sensor.id, sensor.rendererId]))
+        const visibleSensors = new Set(descriptor.presentation.visibleSensorIds
+          .flatMap((id) => pointSensors.has(id) ? [pointSensors.get(id)!] : []))
+        const activeCam = descriptor.presentation.activeCameraId === null
+          ? null
+          : cameras.get(descriptor.presentation.activeCameraId) ?? null
+        const resolvedWindow = descriptor.view.t0 !== undefined && descriptor.view.t1 !== undefined
+          ? resolveWindowToFrames(internal.timestamps, descriptor.view.t0, descriptor.view.t1)
+          : null
+        if (descriptor.view.t0 !== undefined && !resolvedWindow) {
+          throw new Error('SHARE_WINDOW_INVALID: t0/t1 do not resolve against the bound scene.')
+        }
+        const playbackWindow = resolvedWindow && descriptor.view.t0 !== undefined && descriptor.view.t1 !== undefined
+          ? { ...resolvedWindow, t0: descriptor.view.t0, t1: descriptor.view.t1 }
+          : null
+        if (typeof document !== 'undefined') {
+          applyTheme(descriptor.presentation.theme, document.documentElement, descriptor.presentation.accent)
+        }
+
+        const scene = internal.normalizedScene
+        const frame = await loadRendererFrame(scene, descriptor.view.frameIndex)
+        if (scene !== internal.normalizedScene || scene.disposed) return null
+        const availableComponents = [...new Set(resolved.catalog.catalog.entries
+          .map((entry) => entry.path.split('/')[0]))].sort()
+        // Camera pose lives at the R3F boundary rather than in Zustand. Queue
+        // it before `ready` mounts the Canvas so the very first frame restores
+        // the descriptor instead of racing its one-time camera initialization.
+        onBeforeReady?.(resolved)
+        set({
+          status: 'ready', error: null, errorCode: null, loadProgress: 1,
+          loadStep: 'first-frame' as LoadStep,
+          availableComponents,
+          availableSegments: [descriptor.view.sceneId],
+          currentSegment: descriptor.view.sceneId,
+          currentFrameIndex: descriptor.view.frameIndex,
+          currentFrame: frame,
+          playbackWindow,
+          isPlaying: false,
+          playbackSpeed: descriptor.presentation.playbackSpeed,
+          cachedFrames: [...scene.cachedPointFrames()],
+          cameraCachedFrames: [...scene.cachedCameraFrames()],
+          cameraLoadedCount: 0,
+          cameraTotalCount: 0,
+          cameraStripVisible: descriptor.presentation.cameraStrip,
+          visibleSensors,
+          activeCam,
+          worldMode: descriptor.presentation.coordinateMode === 'world',
+          colormapMode: descriptor.presentation.colormap,
+          boxMode: descriptor.presentation.boxMode,
+          trailLength: descriptor.presentation.trailLength,
+          pointSize: descriptor.presentation.pointSize,
+          pointOpacity: descriptor.presentation.pointOpacity,
+          showLidarOverlay: descriptor.presentation.overlays.lidarProjection,
+          showKeypoints3D: descriptor.presentation.overlays.keypoints3d,
+          showKeypoints2D: descriptor.presentation.overlays.keypoints2d,
+          showCameraSeg: descriptor.presentation.overlays.cameraSegmentation,
+          followCam: descriptor.presentation.followCamera,
+          theme: descriptor.presentation.theme,
+        })
+        markPerformanceEvent('dataset-ready', { dataset: manifest.id, sceneGeneration: scene.sceneGeneration })
+        return resolved
+      } catch (error) {
+        resetInternal()
+        failLoad(set, error, 'loadPortableShare')
+        return null
+      }
+    },
+
     loadDataset: async (sources) => {
       resetInternal()
       const recipeEntries = [...sources].map(([component, source]) => {
@@ -744,6 +872,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         loadStep: 'opening' as LoadStep,
         cachedFrames: [],
         cameraCachedFrames: [],
+        cameraStripVisible: null,
       })
 
       try {
@@ -811,6 +940,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           currentFrame: hotFrame,
           lastFrameLoadMs: 0,
           lastConvertMs: hotFrame.sensorClouds.size > 0 ? get().lastConvertMs : 0,
+          cachedFrames: [...scene.cachedPointFrames()],
+          cameraCachedFrames: [...scene.cachedCameraFrames()],
         })
         return
       }
@@ -824,6 +955,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           currentFrame: frame,
           lastFrameLoadMs: 0,
           lastConvertMs: frame.sensorClouds.size > 0 ? get().lastConvertMs : 0,
+          cachedFrames: [...scene.cachedPointFrames()],
+          cameraCachedFrames: [...scene.cachedCameraFrames()],
         })
       } catch (error) {
         if (scene !== internal.normalizedScene || scene.disposed) return
@@ -1438,6 +1571,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set({
         status: 'idle',
         error: null,
+        errorCode: null,
         availableComponents: [],
         loadProgress: 0,
         loadStep: 'opening' as LoadStep,
@@ -1484,6 +1618,71 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
   },
 }))
+
+export function hasPortableShareSourceV1(): boolean {
+  return internal.portableShareDescriptor !== null
+}
+
+/** Rebuild a complete descriptor from the current renderer state and stable manifest IDs. */
+export function currentPortableShareDescriptorV1(cameraPose: {
+  readonly position: ShareVector3V1
+  readonly target: ShareVector3V1
+  readonly azimuth: number
+  readonly distance: number
+}): ShareDescriptorV1 | null {
+  const base = internal.portableShareDescriptor
+  const scene = internal.normalizedScene
+  if (!base || !scene) return null
+  const state = useSceneStore.getState()
+  const pointSensorIds = new Map(scene.manifest.sensors
+    .filter((sensor) => sensor.modality !== 'camera')
+    .map((sensor) => [sensor.rendererId, sensor.id]))
+  const cameraIds = new Map(scene.manifest.sensors
+    .filter((sensor) => sensor.modality === 'camera')
+    .map((sensor) => [sensor.rendererId, sensor.id]))
+  const visibleSensorIds = [...state.visibleSensors]
+    .flatMap((rendererId) => pointSensorIds.has(rendererId) ? [pointSensorIds.get(rendererId)!] : [])
+    .sort()
+  const fallbackPose = base.presentation.cameraPose
+  const pose = cameraPose.distance > 0 ? cameraPose : fallbackPose
+  return validateShareDescriptorV1({
+    ...base,
+    view: {
+      sceneId: state.currentSegment ?? base.view.sceneId,
+      frameIndex: state.currentFrameIndex,
+      ...(state.playbackWindow
+        ? { t0: state.playbackWindow.t0, t1: state.playbackWindow.t1 }
+        : {}),
+    },
+    presentation: {
+      cameraStrip: state.cameraStripVisible ?? base.presentation.cameraStrip,
+      coordinateMode: state.worldMode ? 'world' : 'ego',
+      visibleSensorIds,
+      activeCameraId: state.activeCam === null ? null : cameraIds.get(state.activeCam) ?? null,
+      colormap: state.colormapMode,
+      boxMode: state.boxMode,
+      trailLength: state.trailLength,
+      pointSize: state.pointSize,
+      pointOpacity: state.pointOpacity,
+      overlays: {
+        lidarProjection: state.showLidarOverlay,
+        keypoints3d: state.showKeypoints3D,
+        keypoints2d: state.showKeypoints2D,
+        cameraSegmentation: state.showCameraSeg,
+      },
+      playbackSpeed: state.playbackSpeed,
+      followCamera: state.followCam,
+      cameraPose: {
+        position: [...pose.position],
+        target: [...pose.target],
+        azimuth: pose.azimuth,
+        distance: pose.distance,
+      },
+      theme: state.theme,
+      accent: typeof document === 'undefined' ? base.presentation.accent : document.documentElement.dataset.accent ?? null,
+    },
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -2369,7 +2568,8 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
  * Re-evaluated per scene, because all three can change across a switch.
  */
 function cameraImagesWanted(): boolean {
-  const stripVisible = parseCamerasParam() ?? getEmbedParams().controls !== 'none'
+  const portableStrip = useSceneStore.getState().cameraStripVisible
+  const stripVisible = portableStrip ?? parseCamerasParam() ?? getEmbedParams().controls !== 'none'
   if (stripVisible) return true
   const state = useSceneStore.getState()
   return state.colormapMode === 'camera' || state.activeCam !== null

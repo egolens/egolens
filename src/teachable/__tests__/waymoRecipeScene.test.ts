@@ -18,6 +18,7 @@ import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 import { MappedByteSourceV1 } from '../source/ByteSource'
 import { remoteTransportFixtureV1 } from './remoteTransportFixture'
+import { expectPortableShareRoundTripV1 } from './portableShareRoundTripFixture'
 
 const fixtureRoot = resolve(__dirname, '../../__fixtures__/mock_segment_0000')
 const components = ['vehicle_pose', 'lidar_calibration', 'camera_calibration', 'lidar_box', 'lidar'] as const
@@ -221,5 +222,15 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
     local.scene.dispose()
     remote.scene.dispose()
     await hosted.dispose()
+  })
+
+  it('restores a counted portable share in an empty profile through the ordinary store path', async () => {
+    await expectPortableShareRoundTripV1({
+      entries: sourceFixture().entries,
+      compiledRecipe: waymoCompiledRecipe,
+      sceneId: 'segment',
+      referenced: true,
+      cameraPresentation: false,
+    })
   })
 })

@@ -24,19 +24,27 @@ export async function remoteTransportFixtureV1(
   }
   const inventory = new SourceInventoryV1(localFiles)
   const validated = await generateSourceCatalogV1(inventory, { transportChunkSize: 65_536 })
+  const auxiliary = new Map<string, { readonly bytes: Uint8Array; readonly mediaType: string }>()
+  auxiliary.set('/catalog.json', {
+    bytes: new TextEncoder().encode(JSON.stringify(validated.catalog)),
+    mediaType: 'application/json',
+  })
   const requests: Array<{ readonly path: string; readonly range: string | null }> = []
   const rootPath = '/original-source/'
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-    const path = url.pathname.startsWith(rootPath)
+    const sourcePath = url.pathname.startsWith(rootPath)
       ? url.pathname.slice(rootPath.length).split('/').map(decodeURIComponent).join('/')
       : ''
-    const bytes = hosted.get(path)
+    const extra = auxiliary.get(url.pathname)
+    const path = sourcePath || url.pathname
+    const bytes = sourcePath ? hosted.get(sourcePath) : extra?.bytes
     const range = typeof request.headers.range === 'string' ? request.headers.range : null
     requests.push({ path, range })
     response.setHeader('Access-Control-Allow-Origin', '*')
     response.setHeader('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Length, Content-Range')
     response.setHeader('Accept-Ranges', 'bytes')
+    if (extra) response.setHeader('Content-Type', extra.mediaType)
     if (!bytes) {
       response.writeHead(404)
       response.end()
@@ -70,6 +78,7 @@ export async function remoteTransportFixtureV1(
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('REMOTE_FIXTURE_LISTEN_FAILED')
   const rootUrl = `http://127.0.0.1:${address.port}${rootPath}`
+  const origin = `http://127.0.0.1:${address.port}`
   const remote = {
     rootUrl,
     catalog: validated.catalog,
@@ -82,6 +91,19 @@ export async function remoteTransportFixtureV1(
     inventoryEntries: sourceCatalogInventoryEntriesV1(validated.catalog),
     catalog: validated.catalog,
     sourceManifestHash: validated.sourceManifestHash,
+    catalogHash: validated.catalogHash,
+    catalogUrl: `${origin}/catalog.json`,
+    url(path: string) {
+      return `${origin}/${path.replace(/^\/+/, '')}`
+    },
+    hostJson(path: string, value: unknown) {
+      const pathname = `/${path.replace(/^\/+/, '')}`
+      auxiliary.set(pathname, {
+        bytes: new TextEncoder().encode(JSON.stringify(value)),
+        mediaType: 'application/json',
+      })
+      return `${origin}${pathname}`
+    },
     requests,
     async dispose() {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))

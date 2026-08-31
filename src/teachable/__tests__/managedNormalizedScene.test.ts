@@ -155,6 +155,32 @@ function cameraBatch(batchIndex: number, frameIndex: number): CameraBatchResult 
 }
 
 describe('ManagedNormalizedSceneV1', () => {
+  it('lets portable graph delegates own point and camera payloads without dataset workers', async () => {
+    const base = delegate()
+    const cloud = {
+      sensorId: 'lidar', frameId: 'lidar-frame', values: new Float32Array([1, 2, 3, 0.5]),
+      pointCount: 1, stride: 4, attributes: ['x', 'y', 'z', 'intensity'],
+    }
+    const image = {
+      sensorId: 'camera', timestampMicros: 1000n, encodedBytes: new ArrayBuffer(3),
+      mimeType: 'image/jpeg' as const, width: 16, height: 8, calibrationId: 'camera',
+    }
+    vi.mocked(base.loadFrame).mockImplementation(async (index, request) => ({
+      ...emptyFrame(index),
+      pointClouds: request.capabilities.has('pointClouds') ? [cloud] : [],
+      cameraImages: request.capabilities.has('cameraImages') ? [image] : [],
+    }))
+    const scene = new ManagedNormalizedSceneV1(base, { delegateOwnsFramePayloads: true })
+
+    expect(scene.hasPointFrame(0)).toBe(true)
+    expect(scene.hasCameraFrame(0)).toBe(true)
+    const frame = await scene.loadFrame(0, { capabilities: ALL_CAPABILITIES })
+    expect(frame.pointClouds).toEqual([cloud])
+    expect(frame.cameraImages).toEqual([image])
+    expect(scene.cachedPointFrames()).toEqual([0])
+    expect(base.loadFrame).toHaveBeenCalledWith(0, expect.objectContaining({ capabilities: ALL_CAPABILITIES }))
+  })
+
   it('makes worker output authoritative while preserving normalized metadata', async () => {
     const base = delegate()
     const scene = new ManagedNormalizedSceneV1(base)

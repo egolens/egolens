@@ -41,6 +41,10 @@ function withPageLevelParams(params: URLSearchParams): URLSearchParams {
  */
 export function syncWindowToUrl(win: { t0: string; t1: string } | null) {
   const params = new URLSearchParams(window.location.search)
+  // A referenced descriptor is hash-bound. Mutating just t0/t1 would create
+  // an ambiguous representation whose shareHash no longer covers the view;
+  // the explicit Share button emits a new complete inline descriptor instead.
+  if (params.has('share')) return
   if (win) {
     params.set('t0', win.t0)
     params.set('t1', win.t1)

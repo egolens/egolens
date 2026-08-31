@@ -8,6 +8,7 @@ import { ExecutableGraphKernelV1 } from '../runtime/GraphKernel'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 import { MappedByteSourceV1 } from '../source/ByteSource'
 import { remoteTransportFixtureV1 } from './remoteTransportFixture'
+import { expectPortableShareRoundTripV1 } from './portableShareRoundTripFixture'
 
 function feather(columns: Record<string, unknown>): ArrayBuffer {
   const bytes = tableToIPC(tableFromArrays(columns as never))
@@ -166,5 +167,10 @@ describe('Argoverse 2 executable recipe graph', () => {
       sceneId: 'av2-log',
     })).rejects.toMatchObject({ code: 'REMOTE_SOURCE_NOT_FOUND' })
     await hosted.dispose()
+  })
+
+  it('restores a counted portable share in an empty profile through the ordinary store path', async () => {
+    const { compiledRecipe, files } = fixture()
+    await expectPortableShareRoundTripV1({ entries: files, compiledRecipe, sceneId: 'av2-log' })
   })
 })

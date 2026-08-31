@@ -6,6 +6,8 @@ import {
   presentConformanceFrame,
   getThumbnailResolver,
   getSegmentSplits,
+  currentPortableShareDescriptorV1,
+  hasPortableShareSourceV1,
   type BoxMode,
   type ColormapMode,
 } from './stores/useSceneStore'
@@ -41,6 +43,7 @@ import { recipeHashV1 } from './teachable/authoring/hashes'
 import { bundledPhase2OperatorRegistry } from './teachable/operators/bundledPhase2'
 import { compileRecipeV1, type CompiledRecipeV1 } from './teachable/recipe/compiler'
 import type { NormalizedSceneV1 } from './teachable/runtime/normalizedScene'
+import { encodeInlineShareUrlV1 } from './teachable/share/ShareDescriptor'
 
 
 // ---------------------------------------------------------------------------
@@ -57,6 +60,7 @@ function useSegmentDiscovery() {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     const params = new URLSearchParams(window.location.search)
+    if (params.has('share') || params.get('shareVersion') === '1') return
     // A benchmark URL must remain quiescent until CDP has captured the real
     // pre-scene baseline. Dev auto-discovery used to bypass benchmarkHold and
     // start Waymo workers before the runner dispatched benchmark-start.
@@ -93,6 +97,25 @@ type UrlDataset = typeof SUPPORTED_URL_DATASETS[number]
 
 /** Guard against double-invocation from React StrictMode */
 let urlAutoLoadStarted = false
+
+/** Guard against React StrictMode issuing a second empty-profile load. */
+let portableShareAutoLoadStarted = false
+
+function usePortableShareAutoLoad() {
+  const status = useSceneStore((s) => s.status)
+  const loadPortableShare = useSceneStore((s) => s.actions.loadPortableShare)
+
+  useEffect(() => {
+    if (portableShareAutoLoadStarted || status !== 'idle') return
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has('share') && params.get('shareVersion') !== '1') return
+    portableShareAutoLoadStarted = true
+    void loadPortableShare(window.location.href, false, (resolved) => {
+      const pose = resolved.effectiveDescriptor.presentation.cameraPose
+      setPendingCameraPose([...pose.position], [...pose.target], pose.azimuth, pose.distance)
+    })
+  }, [loadPortableShare, status])
+}
 
 function useUrlAutoLoad() {
   const status = useSceneStore((s) => s.status)
@@ -366,6 +389,8 @@ function useUrlViewRestore() {
   useEffect(() => {
     if (urlViewRestoreApplied) return
     if (status !== 'ready') return
+    const initialParams = new URLSearchParams(getInitialSearch() ?? undefined)
+    if (initialParams.has('share') || initialParams.get('shareVersion') === '1') return
 
     // Use initial search (captured before replaceState overwrites view params)
     const viewParams = parseViewParams(getInitialSearch() ?? undefined)
@@ -485,6 +510,7 @@ function useEmbedInitialState(embedParams: EmbedParams) {
 
 function App() {
   const [embedParams] = useState(() => getEmbedParams())
+  usePortableShareAutoLoad()
   useSegmentDiscovery()
   useUrlAutoLoad()
   useBenchmarkLoadCommand()
@@ -777,7 +803,7 @@ function Header() {
       frame: s.currentFrameIndex,
       t0: s.playbackWindow?.t0,
       t1: s.playbackWindow?.t1,
-      cameras: parseCamerasParam() ?? undefined,
+      cameras: s.cameraStripVisible ?? parseCamerasParam() ?? undefined,
       colormap: s.colormapMode,
       boxMode: s.boxMode,
       worldMode: s.worldMode,
@@ -797,7 +823,15 @@ function Header() {
       cameraAzimuth: cam.azimuth,
       cameraDistance: cam.distance || undefined,
     }
-    const url = buildShareUrl(state)
+    const portable = currentPortableShareDescriptorV1(cam)
+    const currentParams = new URLSearchParams(window.location.search)
+    const url = portable
+      ? encodeInlineShareUrlV1(`${window.location.origin}${window.location.pathname}`, portable, {
+          ...(currentParams.has('embed') ? { embed: currentParams.get('embed')! } : {}),
+          ...(currentParams.has('controls') ? { controls: currentParams.get('controls')! } : {}),
+          ...(currentParams.has('origin') ? { origin: currentParams.get('origin')! } : {}),
+        })
+      : buildShareUrl(state)
 
     // Build a human-readable summary of what's captured
     const parts: string[] = [`Frame ${s.currentFrameIndex + 1}`, s.colormapMode]
@@ -921,7 +955,7 @@ function Header() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Share View button — only in URL mode (local files can't be shared) */}
-        {status === 'ready' && hasUrlSource() && (
+        {status === 'ready' && (hasUrlSource() || hasPortableShareSourceV1()) && (
           <div style={{ position: 'relative', flexShrink: 0 }}>
             <button
               onClick={handleShare}
@@ -2018,11 +2052,12 @@ function LoadErrorScreen() {
 
 function SensorView({ embedControls = 'full' }: { embedControls?: ViewerChrome }) {
   const status = useSceneStore((s) => s.status)
+  const portableCameraStrip = useSceneStore((s) => s.cameraStripVisible)
   // The camera strip is content, not chrome. `controls=none` hides it by
   // default; an explicit `cameras=` always wins, so `controls=none&cameras=all`
   // is a bare viewer that still shows camera images.
   const camerasParam = useMemo(() => parseCamerasParam(), [])
-  const showCameraStrip = camerasParam ?? embedControls !== 'none'
+  const showCameraStrip = portableCameraStrip ?? camerasParam ?? embedControls !== 'none'
   const hideCameraStrip = !showCameraStrip
 
   return (
