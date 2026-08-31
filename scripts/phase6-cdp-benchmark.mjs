@@ -233,7 +233,10 @@ async function waitForEndpoint(port, processHandle) {
   throw new Error('Timed out waiting for the Chrome debugging endpoint')
 }
 
-async function evaluate(client, sessionId, expression, commandTimeoutMs = 60_000) {
+// A counted run's explicit timeout governs both wait loops and the CDP command
+// that awaits an in-page workload. Keeping a hidden 60-second command cap made
+// a valid slow Range-backed playback fail before --timeout-ms could apply.
+async function evaluate(client, sessionId, expression, commandTimeoutMs = timeoutMs) {
   const result = await client.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,
