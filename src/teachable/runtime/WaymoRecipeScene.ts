@@ -32,6 +32,7 @@ export interface WaymoRecipeSceneInputV1 {
 export interface BoundWaymoRecipeSceneV1 {
   readonly scene: NormalizedSceneV1
   readonly diagnostics: readonly AdapterDiagnostic[]
+  readonly metadata: MetadataBundle
 }
 
 const OPTICAL_TO_SENSOR = [
@@ -96,14 +97,14 @@ function groupByTimestampAndSensor(rows: readonly ParquetRow[]): Map<bigint, Map
 function attachWaymoSegmentation(
   cloud: NormalizedPointCloudV1,
   row: ParquetRow | undefined,
-): { semanticLabels?: Uint8Array; panopticLabels?: Uint32Array } {
+): { semanticLabels?: Uint8Array; panopticLabels?: Uint16Array } {
   if (!row || !cloud.sourceIndices) return {}
   const shape = row['[LiDARSegmentationLabelComponent].range_image_return1.shape'] as number[] | undefined
   const values = row['[LiDARSegmentationLabelComponent].range_image_return1.values'] as number[] | undefined
   if (!shape || !values) return {}
   const channels = shape.length >= 3 ? shape[2] : 1
   const semanticLabels = new Uint8Array(cloud.pointCount)
-  const panopticLabels = new Uint32Array(cloud.pointCount)
+  const panopticLabels = new Uint16Array(cloud.pointCount)
   for (let index = 0; index < cloud.pointCount; index += 1) {
     const sourceIndex = cloud.sourceIndices[index]
     const instance = Math.max(0, values[sourceIndex * channels] ?? 0)
@@ -116,9 +117,6 @@ function attachWaymoSegmentation(
 
 /** Bind Waymo v2 component Parquet files through the generic recipe-backed scene boundary. */
 export async function bindWaymoRecipeSceneV1(input: WaymoRecipeSceneInputV1): Promise<BoundWaymoRecipeSceneV1> {
-  if (input.compiledRecipe.normalizedManifest.id !== 'waymo') {
-    throw new Error(`Expected the Waymo compiled recipe, got ${input.compiledRecipe.normalizedManifest.id}.`)
-  }
   const parquetFiles = new Map(input.parquetFiles)
   const bundle = input.metadataBundle ?? await loadWaymoMetadata(parquetFiles)
   if (bundle.timestamps.length === 0) throw new Error('TIMELINE_BINDING_EMPTY: Waymo segment has no frames.')
@@ -366,6 +364,7 @@ export async function bindWaymoRecipeSceneV1(input: WaymoRecipeSceneInputV1): Pr
             objectId,
             classId: classIdByRendererId.get(finite(row['[CameraBoxComponent].type'], 'camera box class')) ?? 'unknown',
             cameraId: camera.id,
+            presentation: 'rectangle',
             center: [finite(row['[CameraBoxComponent].box.center.x'], 'camera box x'), finite(row['[CameraBoxComponent].box.center.y'], 'camera box y')],
             dimensions: [finite(row['[CameraBoxComponent].box.size.x'], 'camera box width'), finite(row['[CameraBoxComponent].box.size.y'], 'camera box height')],
           })
@@ -452,5 +451,5 @@ export async function bindWaymoRecipeSceneV1(input: WaymoRecipeSceneInputV1): Pr
       box2dToBox3d.clear()
     },
   }
-  return { scene, diagnostics }
+  return { scene, diagnostics, metadata: bundle }
 }

@@ -17,6 +17,12 @@ dist/
 coverage/
 traces/
 
+# Spec 013 hidden-oracle material. These directories must also be excluded from
+# Adapter Amnesia workspace mounts; Git ignore alone is not a trust boundary.
+/oracle-bundles/
+/oracle-candidates/
+/oracle-receipts/
+
 # Scratch files
 *.mov
 *.mp4

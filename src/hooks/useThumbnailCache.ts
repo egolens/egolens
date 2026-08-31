@@ -11,6 +11,7 @@
  */
 
 import { useRef, useCallback, useSyncExternalStore } from 'react'
+import { createTrackedObjectUrl, revokeTrackedObjectUrl } from '../teachable/runtime/performanceProbe'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,10 +61,11 @@ function getSnapshot() {
 
 const MAX_CONCURRENCY = 3
 let inflight = 0
-const queue: Array<{ segmentId: string; resolve: ThumbnailResolverFn }> = []
+let cacheGeneration = 0
+const queue: Array<{ segmentId: string; resolve: ThumbnailResolverFn; generation: number }> = []
 
 function enqueue(segmentId: string, resolve: ThumbnailResolverFn) {
-  queue.push({ segmentId, resolve })
+  queue.push({ segmentId, resolve, generation: cacheGeneration })
   drainQueue()
 }
 
@@ -71,16 +73,17 @@ function drainQueue() {
   while (inflight < MAX_CONCURRENCY && queue.length > 0) {
     const item = queue.shift()!
     inflight++
-    loadThumbnail(item.segmentId, item.resolve).finally(() => {
+    loadThumbnail(item.segmentId, item.resolve, item.generation).finally(() => {
       inflight--
       drainQueue()
     })
   }
 }
 
-async function loadThumbnail(segmentId: string, resolve: ThumbnailResolverFn) {
+async function loadThumbnail(segmentId: string, resolve: ThumbnailResolverFn, generation: number) {
   try {
     const imageUrl = await resolve(segmentId)
+    if (generation !== cacheGeneration) return
     if (!imageUrl) {
       cache.set(segmentId, { status: 'unavailable', url: null })
       revision++
@@ -91,9 +94,15 @@ async function loadThumbnail(segmentId: string, resolve: ThumbnailResolverFn) {
     const res = await fetch(imageUrl, { signal: AbortSignal.timeout(8_000) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
-    const blobUrl = URL.createObjectURL(blob)
+    if (generation !== cacheGeneration) return
+    const blobUrl = createTrackedObjectUrl(blob)
+    if (generation !== cacheGeneration) {
+      revokeTrackedObjectUrl(blobUrl)
+      return
+    }
     cache.set(segmentId, { status: 'loaded', url: blobUrl })
   } catch {
+    if (generation !== cacheGeneration) return
     cache.set(segmentId, { status: 'unavailable', url: null })
   }
   revision++
@@ -151,8 +160,9 @@ export function useThumbnailCache(resolver: ThumbnailResolverFn | null) {
  * Clear all cached thumbnails (call on dataset switch to avoid stale blob URLs).
  */
 export function clearThumbnailCache() {
+  cacheGeneration++
   for (const entry of cache.values()) {
-    if (entry.url) URL.revokeObjectURL(entry.url)
+    if (entry.url) revokeTrackedObjectUrl(entry.url)
   }
   cache.clear()
   queue.length = 0

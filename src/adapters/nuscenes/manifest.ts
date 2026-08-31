@@ -5,7 +5,7 @@
 import { nuScenesCompiledRecipe } from '../recipes/bundled'
 
 export const nuScenesRecipe = nuScenesCompiledRecipe.recipe
-export const nuScenesManifest = nuScenesCompiledRecipe.compatibilityManifest
+export const nuScenesManifest = nuScenesCompiledRecipe.rendererManifest
 
 /** Dataset-native sensor channel → renderer ID, derived from recipe sensors. */
 export const NUSCENES_CHANNEL_TO_ID: Record<string, number> = Object.fromEntries(

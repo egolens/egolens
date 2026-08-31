@@ -6,4 +6,4 @@
 import { waymoCompiledRecipe } from '../recipes/bundled'
 
 export const waymoRecipe = waymoCompiledRecipe.recipe
-export const waymoManifest = waymoCompiledRecipe.compatibilityManifest
+export const waymoManifest = waymoCompiledRecipe.rendererManifest

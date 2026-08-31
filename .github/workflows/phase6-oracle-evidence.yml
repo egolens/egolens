@@ -1,0 +1,161 @@
+name: Phase 6 hidden-oracle evidence
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase6-oracle-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/spec-006-phase-6' &&
+      contains(github.event.pull_request.labels.*.name, 'phase6-oracle-evidence')
+    runs-on: ubuntu-latest
+    environment: phase6-oracle-judge
+    env:
+      EXPECTED_CANDIDATE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      EXPECTED_PRODUCER_COMMIT: ${{ vars.PHASE6_ORACLE_EXPECTED_PRODUCER_COMMIT }}
+      JUDGE_TOOL_COMMIT: ${{ vars.PHASE6_ORACLE_JUDGE_TOOL_COMMIT }}
+      JUDGE_KEY_ID: ${{ vars.PHASE6_ORACLE_KEY_ID }}
+      JUDGE_VERSION: ${{ vars.PHASE6_ORACLE_JUDGE_VERSION }}
+      EVIDENCE_PARTS: ${{ vars.PHASE6_ORACLE_EVIDENCE_PARTS }}
+      EVIDENCE_ARCHIVE_SHA256: ${{ vars.PHASE6_ORACLE_EVIDENCE_ARCHIVE_SHA256 }}
+    steps:
+      - name: Check out the immutable trusted judge
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${JUDGE_TOOL_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          git init .
+          git remote add origin https://github.com/${GITHUB_REPOSITORY}.git
+          git fetch --depth=1 origin "${JUDGE_TOOL_COMMIT}"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "${JUDGE_TOOL_COMMIT}"
+
+      - name: Materialize protected one-shot inputs
+        shell: bash
+        env:
+          JUDGE_PRIVATE_KEY: ${{ secrets.PHASE6_ORACLE_JUDGE_PRIVATE_KEY }}
+          EVIDENCE_01: ${{ secrets.PHASE6_ORACLE_EVIDENCE_01 }}
+          EVIDENCE_02: ${{ secrets.PHASE6_ORACLE_EVIDENCE_02 }}
+          EVIDENCE_03: ${{ secrets.PHASE6_ORACLE_EVIDENCE_03 }}
+          EVIDENCE_04: ${{ secrets.PHASE6_ORACLE_EVIDENCE_04 }}
+          EVIDENCE_05: ${{ secrets.PHASE6_ORACLE_EVIDENCE_05 }}
+          EVIDENCE_06: ${{ secrets.PHASE6_ORACLE_EVIDENCE_06 }}
+          EVIDENCE_07: ${{ secrets.PHASE6_ORACLE_EVIDENCE_07 }}
+          EVIDENCE_08: ${{ secrets.PHASE6_ORACLE_EVIDENCE_08 }}
+          EVIDENCE_09: ${{ secrets.PHASE6_ORACLE_EVIDENCE_09 }}
+          EVIDENCE_10: ${{ secrets.PHASE6_ORACLE_EVIDENCE_10 }}
+          EVIDENCE_11: ${{ secrets.PHASE6_ORACLE_EVIDENCE_11 }}
+          EVIDENCE_12: ${{ secrets.PHASE6_ORACLE_EVIDENCE_12 }}
+          EVIDENCE_13: ${{ secrets.PHASE6_ORACLE_EVIDENCE_13 }}
+          EVIDENCE_14: ${{ secrets.PHASE6_ORACLE_EVIDENCE_14 }}
+          EVIDENCE_15: ${{ secrets.PHASE6_ORACLE_EVIDENCE_15 }}
+          EVIDENCE_16: ${{ secrets.PHASE6_ORACLE_EVIDENCE_16 }}
+          EVIDENCE_17: ${{ secrets.PHASE6_ORACLE_EVIDENCE_17 }}
+          EVIDENCE_18: ${{ secrets.PHASE6_ORACLE_EVIDENCE_18 }}
+          EVIDENCE_19: ${{ secrets.PHASE6_ORACLE_EVIDENCE_19 }}
+          EVIDENCE_20: ${{ secrets.PHASE6_ORACLE_EVIDENCE_20 }}
+          EVIDENCE_21: ${{ secrets.PHASE6_ORACLE_EVIDENCE_21 }}
+          EVIDENCE_22: ${{ secrets.PHASE6_ORACLE_EVIDENCE_22 }}
+          EVIDENCE_23: ${{ secrets.PHASE6_ORACLE_EVIDENCE_23 }}
+          EVIDENCE_24: ${{ secrets.PHASE6_ORACLE_EVIDENCE_24 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence_dir="${RUNNER_TEMP}/phase6-oracle-evidence"
+          mkdir -p "${evidence_dir}/receipts"
+          test "${EVIDENCE_PARTS}" -ge 1
+          test "${EVIDENCE_PARTS}" -le 24
+          encoded=''
+          for number in $(seq 1 "${EVIDENCE_PARTS}"); do
+            printf -v index '%02d' "${number}"
+            variable="EVIDENCE_${index}"
+            part="${!variable:-}"
+            test -n "${part}"
+            encoded+="${part}"
+          done
+          printf '%s' "${encoded}" | base64 --decode > "${evidence_dir}/archive.json.gz"
+          actual_hash="sha256-$(sha256sum "${evidence_dir}/archive.json.gz" | awk '{print $1}')"
+          test "${actual_hash}" = "${EVIDENCE_ARCHIVE_SHA256}"
+          gzip -d -c "${evidence_dir}/archive.json.gz" > "${evidence_dir}/archive.json"
+          jq -e '.schemaVersion == 1 and (.datasets | keys | sort == ["argoverse2", "nuscenes", "waymo"])' \
+            "${evidence_dir}/archive.json" >/dev/null
+          for dataset in waymo nuscenes argoverse2; do
+            jq -c --arg dataset "${dataset}" '.datasets[$dataset].oracle' \
+              "${evidence_dir}/archive.json" > "${evidence_dir}/${dataset}.oracle.json"
+            jq -c --arg dataset "${dataset}" '.datasets[$dataset].candidate' \
+              "${evidence_dir}/archive.json" > "${evidence_dir}/${dataset}.candidate.json"
+          done
+          test -n "${JUDGE_PRIVATE_KEY}"
+          printf '%s\n' "${JUDGE_PRIVATE_KEY}" > "${evidence_dir}/judge-private.pem"
+
+      - name: Judge and sign each target once
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/phase6-oracle-evidence"
+          for dataset in waymo nuscenes argoverse2; do
+            node scripts/phase6-oracle-judge.mjs \
+              --oracle "${evidence_dir}/${dataset}.oracle.json" \
+              --candidate "${evidence_dir}/${dataset}.candidate.json" \
+              --private-key "${evidence_dir}/judge-private.pem" \
+              --key-id "${JUDGE_KEY_ID}" \
+              --judge-version "${JUDGE_VERSION}" \
+              --expected-candidate-commit "${EXPECTED_CANDIDATE_COMMIT}" \
+              --output "${evidence_dir}/receipts/${dataset}.json"
+          done
+
+      - name: Enforce exact three-dataset coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/phase6-oracle-evidence"
+          node scripts/phase6-oracle-receipt-gate.mjs \
+            --receipt "${evidence_dir}/receipts/waymo.json" \
+            --receipt "${evidence_dir}/receipts/nuscenes.json" \
+            --receipt "${evidence_dir}/receipts/argoverse2.json" \
+            --requirements benchmarks/oracle/phase6-requirements.json \
+            --public-key benchmarks/oracle/keys/phase6-2026-08-public.pem \
+            --key-id "${JUDGE_KEY_ID}" \
+            --expected-generator-commit "${EXPECTED_PRODUCER_COMMIT}" \
+            --expected-candidate-commit "${EXPECTED_CANDIDATE_COMMIT}" \
+            --output "${evidence_dir}/receipts/gate.json"
+          {
+            echo '## Phase 6 hidden-oracle gate'
+            echo
+            jq -r '"Passed: **\(.passed)**\n\nCandidate commit: `\(.expectedCandidateCommit)`\n\n" + (.checks | map("- \(.datasetId)/\(.caseId): `\(.receiptHash)`") | join("\n"))' \
+              "${evidence_dir}/receipts/gate.json"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Destroy protected inputs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/phase6-oracle-evidence"
+          rm -f \
+            "${evidence_dir}/archive.json.gz" \
+            "${evidence_dir}/archive.json" \
+            "${evidence_dir}/judge-private.pem"
+          for dataset in waymo nuscenes argoverse2; do
+            rm -f \
+              "${evidence_dir}/${dataset}.oracle.json" \
+              "${evidence_dir}/${dataset}.candidate.json"
+          done
+
+      - name: Retain public receipts only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: phase6-public-oracle-receipts-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/phase6-oracle-evidence/receipts
+          if-no-files-found: warn
+          retention-days: 90

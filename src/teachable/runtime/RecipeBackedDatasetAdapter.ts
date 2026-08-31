@@ -1,7 +1,7 @@
 import type {
   DatasetAdapter,
   DatasetDetectionEvidence,
-  PreparedRecipeDatasetAdapter,
+  PreparedDatasetAdapter,
 } from '../../adapters/types'
 import type { DatasetManifest } from '../../types/dataset'
 import { OperatorRegistry } from '../operators/registry'
@@ -16,7 +16,7 @@ function matchesPathRule(rule: MatchRuleV1, entryNames: ReadonlySet<string>): bo
   return present && minimum <= 1
 }
 
-export class RecipeBackedDatasetAdapter implements DatasetAdapter<PreparedRecipeDatasetAdapter> {
+export class RecipeBackedDatasetAdapter implements DatasetAdapter<PreparedDatasetAdapter> {
   readonly kind = 'recipe' as const
   readonly compiledRecipe: CompiledRecipeV1
   readonly recipe: EgoLensAdapterRecipeV1
@@ -37,7 +37,7 @@ export class RecipeBackedDatasetAdapter implements DatasetAdapter<PreparedRecipe
   }
 
   get manifest(): DatasetManifest {
-    return this.compiledRecipe.compatibilityManifest
+    return this.compiledRecipe.rendererManifest
   }
 
   matches(evidence: DatasetDetectionEvidence): boolean {
@@ -53,7 +53,7 @@ export class RecipeBackedDatasetAdapter implements DatasetAdapter<PreparedRecipe
     return all && any && !none
   }
 
-  prepare(): PreparedRecipeDatasetAdapter {
+  prepare(): PreparedDatasetAdapter {
     return {
       kind: 'recipe',
       adapterId: this.id,

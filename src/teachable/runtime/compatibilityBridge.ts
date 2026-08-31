@@ -1,4 +1,4 @@
-import type { DatasetManifest, MetadataBundle } from '../../types/dataset'
+import type { DatasetManifest } from '../../types/dataset'
 import type { PointCloud } from '../../utils/rangeImage'
 import type { ParquetRow } from '../../utils/merge'
 import type { EgoLensAdapterRecipeV1, RecipeSourceFieldRoleV1 } from '../recipe/types'
@@ -7,23 +7,17 @@ import type {
   NormalizedBox3dV1,
   NormalizedFrameV1,
   NormalizedManifestV1,
-  NormalizedSceneV1,
+  NormalizedPointCloudV1,
 } from './normalizedScene'
 
-export interface LegacyFrameBridgeV1 {
+/** Renderer-facing frame shape while the R3F components migrate independently. */
+export interface RendererFrameV1 {
   readonly timestamp: bigint
   readonly sensorClouds: Map<number, PointCloud>
   readonly boxes: ParquetRow[]
   readonly cameraBoxes: ParquetRow[]
   readonly cameraImages: Map<number, ArrayBuffer>
   readonly vehiclePose: number[] | null
-}
-
-export interface LegacySceneBridgeV1 {
-  readonly manifest: DatasetManifest
-  readonly metadata: MetadataBundle
-  loadFrame(index: number): Promise<LegacyFrameBridgeV1>
-  dispose(): void
 }
 
 export interface DatasetManifestProjectionV1 {
@@ -44,6 +38,44 @@ const EMPTY_PROJECTION: DatasetManifestProjectionV1 = {
   },
 }
 
+interface ManifestBridgeCacheV1 {
+  readonly sensorIds: ReadonlyMap<string, number>
+  readonly classIds: ReadonlyMap<string, number>
+  readonly lidarPointClouds: WeakMap<NormalizedPointCloudV1, PointCloud>
+  readonly radarPointClouds: WeakMap<NormalizedPointCloudV1, PointCloud>
+  readonly sensorCloudMaps: WeakMap<
+    NormalizedFrameV1['pointClouds'],
+    WeakMap<NormalizedFrameV1['radarPointClouds'], Map<number, PointCloud>>
+  >
+  readonly boxes3d: WeakMap<readonly NormalizedBox3dV1[], ParquetRow[]>
+  readonly boxes2d: WeakMap<readonly NormalizedBox2dV1[], ParquetRow[]>
+  readonly cameraImages: WeakMap<NormalizedFrameV1['cameraImages'], Map<number, ArrayBuffer>>
+}
+
+/**
+ * Renderer projections are derived views of normalized cache entries. Weak
+ * keys keep those views tied to the authoritative scene cache instead of
+ * introducing a second cache owner or retaining evicted frame buffers.
+ */
+const manifestBridgeCaches = new WeakMap<NormalizedManifestV1, ManifestBridgeCacheV1>()
+
+function manifestBridgeCache(manifest: NormalizedManifestV1): ManifestBridgeCacheV1 {
+  const cached = manifestBridgeCaches.get(manifest)
+  if (cached) return cached
+  const created: ManifestBridgeCacheV1 = {
+    sensorIds: new Map(manifest.sensors.map((sensor) => [sensor.id, sensor.rendererId])),
+    classIds: taxonomyRendererIds(manifest),
+    lidarPointClouds: new WeakMap(),
+    radarPointClouds: new WeakMap(),
+    sensorCloudMaps: new WeakMap(),
+    boxes3d: new WeakMap(),
+    boxes2d: new WeakMap(),
+    cameraImages: new WeakMap(),
+  }
+  manifestBridgeCaches.set(manifest, created)
+  return created
+}
+
 const LEGACY_COLUMN_ROLES: Readonly<Record<RecipeSourceFieldRoleV1, keyof DatasetManifest['columnMap']>> = {
   timestamp: 'frameTimestamp',
   sensorId: 'laserName',
@@ -52,7 +84,7 @@ const LEGACY_COLUMN_ROLES: Readonly<Record<RecipeSourceFieldRoleV1, keyof Datase
   egoPose: 'vehiclePose',
 }
 
-/** Raw field names remain in source bindings and are projected only at the legacy edge. */
+/** Raw field names remain in source bindings and are projected only at the renderer edge. */
 export function recipeManifestProjection(recipe: EgoLensAdapterRecipeV1): DatasetManifestProjectionV1 {
   const rootEntries = recipe.match.inventory.rootEntries
   const columnMap = { ...EMPTY_PROJECTION.columnMap }
@@ -173,87 +205,140 @@ function bridgeBox2d(box: NormalizedBox2dV1, cameraIds: ReadonlyMap<string, numb
   }
 }
 
-export function bridgeNormalizedFrame(frame: NormalizedFrameV1, manifest: NormalizedManifestV1): LegacyFrameBridgeV1 {
-  const sensorIds = new Map(manifest.sensors.map((sensor) => [sensor.id, sensor.rendererId]))
-  const classIds = taxonomyRendererIds(manifest)
-  const sensorClouds = new Map<number, PointCloud>()
-  for (const cloud of [...frame.pointClouds, ...frame.radarPointClouds]) {
-    const rendererId = sensorIds.get(cloud.sensorId)
-    if (rendererId === undefined) continue
-    sensorClouds.set(rendererId, {
-      positions: cloud.values,
-      pointCount: cloud.pointCount,
-      segLabels: cloud.semanticLabels instanceof Uint8Array ? cloud.semanticLabels : undefined,
-      panopticLabels: cloud.panopticLabels instanceof Uint16Array ? cloud.panopticLabels : undefined,
-      cameraProjection: cloud.cameraProjection,
-      cameraRgb: cloud.cameraRgb,
-      validIndices: cloud.sourceIndices,
-    })
-  }
+/**
+ * The legacy renderer has a fixed five-float radar layout even though the
+ * normalized contract preserves the source velocity components. Keep that
+ * lossy projection at the renderer boundary so recipes and oracle artifacts
+ * retain the richer, dataset-neutral representation.
+ */
+function bridgeRadarValues(cloud: NormalizedPointCloudV1): Float32Array {
+  const attributeIndex = new Map(cloud.attributes.map((attribute, index) => [attribute, index]))
+  const speedComp = attributeIndex.get('speedComp')
+  const speedRaw = attributeIndex.get('speedRaw')
+  const vxComp = attributeIndex.get('vx_comp')
+  const vyComp = attributeIndex.get('vy_comp')
+  const vx = attributeIndex.get('vx')
+  const vy = attributeIndex.get('vy')
+  const values = new Float32Array(cloud.pointCount * 5)
 
-  return {
-    timestamp: frame.timestampMicros,
-    sensorClouds,
-    boxes: frame.boxes3d.map((box) => bridgeBox3d(box, classIds)),
-    cameraBoxes: frame.boxes2d.map((box) => bridgeBox2d(box, sensorIds, classIds)),
-    cameraImages: new Map(frame.cameraImages.flatMap((camera) => {
-      const rendererId = sensorIds.get(camera.sensorId)
-      return rendererId === undefined ? [] : [[rendererId, camera.encodedBytes] as const]
-    })),
-    vehiclePose: frame.worldFromEgo ? Array.from(frame.worldFromEgo) : null,
+  for (let pointIndex = 0; pointIndex < cloud.pointCount; pointIndex += 1) {
+    const source = pointIndex * cloud.stride
+    const target = pointIndex * 5
+    values[target] = cloud.values[source]
+    values[target + 1] = cloud.values[source + 1]
+    values[target + 2] = cloud.values[source + 2]
+    values[target + 3] = speedComp !== undefined
+      ? cloud.values[source + speedComp]
+      : vxComp !== undefined && vyComp !== undefined
+        ? Math.hypot(cloud.values[source + vxComp], cloud.values[source + vyComp])
+        : 0
+    values[target + 4] = speedRaw !== undefined
+      ? cloud.values[source + speedRaw]
+      : vx !== undefined && vy !== undefined
+        ? Math.hypot(cloud.values[source + vx], cloud.values[source + vy])
+        : 0
   }
+  return values
 }
 
-/**
- * Temporary bridge used while renderers still consume MetadataBundle/FrameData.
- * It is intentionally one-way so legacy field names cannot leak into recipes.
- */
-export function bridgeNormalizedScene(scene: NormalizedSceneV1): LegacySceneBridgeV1 {
-  const timestamps = [...scene.index.timestampsMicros]
-  const timestampToFrame = new Map(timestamps.map((timestamp, index) => [timestamp, index]))
-  const poseByFrameIndex = new Map<number, number[]>()
-  const objectTrajectories = new Map([...scene.relations.trajectories].map(([objectId, points]) => [
-    objectId,
-    points.map((point) => ({
-      frameIndex: point.frameIndex,
-      x: point.position[0],
-      y: point.position[1],
-      z: point.position[2],
-      type: taxonomyRendererIds(scene.manifest).get(point.classId) ?? 0,
-    })),
-  ]))
-  const assocCamToLaser = new Map(scene.relations.box2dToBox3d)
-  const assocLaserToCams = new Map<string, Set<string>>()
-  for (const [cameraId, lidarId] of assocCamToLaser) {
-    const ids = assocLaserToCams.get(lidarId) ?? new Set<string>()
-    ids.add(cameraId)
-    assocLaserToCams.set(lidarId, ids)
+function bridgePointCloud(
+  cloud: NormalizedPointCloudV1,
+  radar: boolean,
+  cache: ManifestBridgeCacheV1,
+): PointCloud {
+  const cloudCache = radar ? cache.radarPointClouds : cache.lidarPointClouds
+  const cached = cloudCache.get(cloud)
+  if (cached) return cached
+  const bridged: PointCloud = {
+    positions: radar ? bridgeRadarValues(cloud) : cloud.values,
+    pointCount: cloud.pointCount,
+    segLabels: cloud.semanticLabels instanceof Uint8Array ? cloud.semanticLabels : undefined,
+    panopticLabels: cloud.panopticLabels,
+    cameraProjection: cloud.cameraProjection,
+    cameraRgb: cloud.cameraRgb,
+    validIndices: cloud.sourceIndices,
   }
+  cloudCache.set(cloud, bridged)
+  return bridged
+}
+
+function bridgeBoxes3d(
+  boxes: readonly NormalizedBox3dV1[],
+  cache: ManifestBridgeCacheV1,
+): ParquetRow[] {
+  const cached = cache.boxes3d.get(boxes)
+  if (cached) return cached
+  const bridged = boxes.map((box) => bridgeBox3d(box, cache.classIds))
+  cache.boxes3d.set(boxes, bridged)
+  return bridged
+}
+
+function bridgeBoxes2d(
+  boxes: readonly NormalizedBox2dV1[],
+  cache: ManifestBridgeCacheV1,
+): ParquetRow[] {
+  const cached = cache.boxes2d.get(boxes)
+  if (cached) return cached
+  // Projected cuboids are observations of the camera projection, not native
+  // 2D rectangles. Preserve the already-shipped BoxProjectionOverlay path.
+  const bridged = boxes
+    .filter((box) => box.presentation !== 'projected-cuboid')
+    .map((box) => bridgeBox2d(box, cache.sensorIds, cache.classIds))
+  cache.boxes2d.set(boxes, bridged)
+  return bridged
+}
+
+function bridgeCameraImages(
+  images: NormalizedFrameV1['cameraImages'],
+  cache: ManifestBridgeCacheV1,
+): Map<number, ArrayBuffer> {
+  const cached = cache.cameraImages.get(images)
+  if (cached) return cached
+  const bridged = new Map(images.flatMap((camera) => {
+    const rendererId = cache.sensorIds.get(camera.sensorId)
+    return rendererId === undefined ? [] : [[rendererId, camera.encodedBytes] as const]
+  }))
+  cache.cameraImages.set(images, bridged)
+  return bridged
+}
+
+function bridgeSensorClouds(
+  frame: NormalizedFrameV1,
+  cache: ManifestBridgeCacheV1,
+): Map<number, PointCloud> {
+  let radarMaps = cache.sensorCloudMaps.get(frame.pointClouds)
+  if (!radarMaps) {
+    radarMaps = new WeakMap()
+    cache.sensorCloudMaps.set(frame.pointClouds, radarMaps)
+  }
+  const cached = radarMaps.get(frame.radarPointClouds)
+  if (cached) return cached
+  const bridged = new Map<number, PointCloud>()
+  for (const cloud of frame.pointClouds) {
+    const rendererId = cache.sensorIds.get(cloud.sensorId)
+    if (rendererId !== undefined) bridged.set(rendererId, bridgePointCloud(cloud, false, cache))
+  }
+  for (const cloud of frame.radarPointClouds) {
+    const rendererId = cache.sensorIds.get(cloud.sensorId)
+    if (rendererId !== undefined) bridged.set(rendererId, bridgePointCloud(cloud, true, cache))
+  }
+  radarMaps.set(frame.radarPointClouds, bridged)
+  return bridged
+}
+
+export function bridgeNormalizedFrame(
+  frame: NormalizedFrameV1,
+  manifest: NormalizedManifestV1,
+  rendererTimestamp: bigint = frame.timestampMicros,
+): RendererFrameV1 {
+  const cache = manifestBridgeCache(manifest)
 
   return {
-    manifest: normalizedManifestToDatasetManifest(scene.manifest),
-    metadata: {
-      timestamps,
-      timestampToFrame,
-      vehiclePoseByFrame: new Map(),
-      worldOriginInverse: null,
-      poseByFrameIndex,
-      lidarCalibrations: new Map(),
-      cameraCalibrations: [],
-      lidarBoxByFrame: new Map(),
-      cameraBoxByFrame: new Map(),
-      objectTrajectories,
-      assocCamToLaser,
-      assocLaserToCams,
-      hasBoxData: scene.manifest.capabilities.has('boxes3d'),
-      segmentMeta: null,
-      hasSegmentation: scene.manifest.capabilities.has('lidarSegmentation'),
-      hasKeypoints: scene.manifest.capabilities.has('keypoints3d') || scene.manifest.capabilities.has('keypoints2d'),
-      hasCameraSegmentation: scene.manifest.capabilities.has('cameraSegmentation'),
-    },
-    loadFrame: async (index) => bridgeNormalizedFrame(await scene.loadFrame(index, {
-      capabilities: scene.manifest.capabilities,
-    }), scene.manifest),
-    dispose: () => scene.dispose(),
+    timestamp: rendererTimestamp,
+    sensorClouds: bridgeSensorClouds(frame, cache),
+    boxes: bridgeBoxes3d(frame.boxes3d, cache),
+    cameraBoxes: bridgeBoxes2d(frame.boxes2d, cache),
+    cameraImages: bridgeCameraImages(frame.cameraImages, cache),
+    vehiclePose: frame.worldFromEgo ? Array.from(frame.worldFromEgo) : null,
   }
 }

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSceneStore } from '../../stores/useSceneStore'
 import { colors, fonts, radius, gradients, alpha } from '../../theme'
 import { syncWindowToUrl } from '../../utils/urlState'
+import { isCameraBufferLoadingV1 } from './timelineBuffer'
 
 // ---------------------------------------------------------------------------
 // Buffer segment computation (pure function, exported for testing)
@@ -55,6 +56,8 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   const isPlaying = useSceneStore((s) => s.isPlaying)
   const cachedFrames = useSceneStore((s) => s.cachedFrames)
   const cameraCachedFrames = useSceneStore((s) => s.cameraCachedFrames)
+  const cameraLoadedCount = useSceneStore((s) => s.cameraLoadedCount)
+  const cameraTotalCount = useSceneStore((s) => s.cameraTotalCount)
   const playbackWindow = useSceneStore((s) => s.playbackWindow)
   const actions = useSceneStore((s) => s.actions)
 
@@ -207,7 +210,7 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
   )
 
   // Show camera lane only when camera is loading behind lidar
-  const showCameraBuffer = cameraCachedFrames.length > 0 && cameraCachedFrames.length < cachedFrames.length
+  const showCameraBuffer = isCameraBufferLoadingV1(cameraLoadedCount, cameraTotalCount)
 
   return (
     <div onMouseEnter={() => setTrackHovered(true)} onMouseLeave={() => setTrackHovered(false)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '14px', fontSize: '13px' }}>
@@ -402,6 +405,8 @@ export default function Timeline({ minimal = false }: { minimal?: boolean } = {}
 
           {/* Invisible range input — matches inset track area */}
           <input
+            aria-label="Frame timeline"
+            data-testid="frame-timeline"
             type="range"
             min={0}
             max={maxFrame}

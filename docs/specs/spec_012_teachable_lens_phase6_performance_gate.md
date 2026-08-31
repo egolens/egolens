@@ -1,6 +1,6 @@
 # Spec 012 — Teachable Lens Phase 6 performance and lifecycle gate
 
-**Status**: planned · **Date**: 2026-08-29
+**Status**: complete (three-dataset performance coverage, isolated 20-switch cross-dataset lifecycle soak, and exact-head hidden-oracle promotion pass) · **Date**: 2026-08-30
 
 **Relationship to Spec 006**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 6. Phase 6 may
@@ -37,6 +37,12 @@ dataset scene, and presentation settings before and after each cutover:
 Use at least five runs after one warm-up run. Compare distributions rather than
 a single fastest run. Store the benchmark scenario, commit, browser version,
 hardware, raw samples, and summary so a future regression can be reproduced.
+The rapid-scrub input must resolve the same stable timeline selector in both
+revisions. Its latency distribution is limited to `frame-presented` trace marks
+whose scene generation matches the initially loaded scene; cold first-frame
+marks from later cross-dataset soak generations are not warm/rapid samples.
+The runner must fail validation when that interaction target or sample set is
+absent rather than substituting another generation.
 
 ### Measurement source matrix
 
@@ -78,9 +84,75 @@ make that interpretation invalid.
 
 Capture coordinated CDP and application snapshots before scene load, after the
 warm-up/settle window, at every soak checkpoint, immediately after disposal,
-and after the post-disposal settle window. A forced-GC snapshot may be recorded
-as an additional diagnostic point, but it must not replace the naturally
-settled measurement or be the only evidence that resources were released.
+and after the post-disposal settle window. Record a forced-GC snapshot only
+after its paired naturally settled snapshot. The natural checkpoint is authoritative
+for live document shape, worker/object/image/renderer ownership, and bounded
+application caches. The forced snapshot is additionally required to prove that
+CDP's all-document node/listener counters contain no reachable detached viewer
+tree. During a heterogeneous cross-dataset soak, paired forced-GC diagnostics
+also provide the retained-memory series, grouped by revisited dataset. The
+runner must collect the page and every live worker target before sampling;
+page-only collection leaves worker V8 garbage in the series. Never fit
+differently sized dataset heaps into one slope. Preserve the original global
+switch index as the independent variable after grouping: a dataset revisited
+every third switch still has three switches between samples, and the regression
+budget is bytes per global switch rather than bytes per revisit. Forced diagnostics must not
+replace the natural checkpoint or rescue a failure in any natural ownership
+invariant. Steady traced FPS is computed only between the initial scene's ready
+mark and its first replacement/disposal mark, excluding later loading periods.
+
+Every warm-up and measured run must start a fresh Chrome process with a fresh
+user-data directory. `Target.closeTarget` is not a sufficient run boundary:
+Chrome may keep a renderer from a completed trace alive after its page target
+disappears, and that renderer can consume CPU and heap while a later run loads.
+The runner must terminate the isolated browser process, wait for exit, and
+remove its profile before starting the next run. The artifact records this as
+`scenario.browserIsolation = "per-run"`.
+
+A lifecycle-only candidate artifact may disable CDP tracing to remove tracing
+overhead while it exercises switches, forced-GC diagnostics, ownership, and
+disposal. Such an artifact must record `scenario.traceEnabled = false` and may
+only supplement a traced performance candidate captured from the same
+production-app commit. It cannot supply or waive latency, FPS, or long-task
+budgets, and a trace-free artifact must never be compared to a traced baseline
+as if their workloads were identical.
+
+### Browser renderer lifecycle findings
+
+The Phase 6 Waymo production smoke and normative switch soak exposed five browser-framework retention
+edges that are not visible in Zustand cache gauges:
+
+1. `@react-three/fiber` 9.5 keeps its last frame state/subscription variables
+   after its animation loop stops;
+2. its embedded React reconciler may retain the last unmounted `FiberRoot` for
+   nested-update detection, while R3F leaves `containerInfo` pointing at the
+   disposed scene store;
+3. `WebGLRenderer.dispose()` does not clear `WebGLAttributes` entries by
+   itself. Every geometry rendered by the main viewer or the secondary BEV
+   renderer must emit `dispose` before renderer disposal, including shared
+   Three.js Sprite geometry used through a portal scene.
+4. `useLoader` uses the process-wide `suspend-react` response cache. A cached
+   GLTF response strongly retains its shared geometries; if a transient model
+   is rendered between ownership samples, that response can keep the geometry,
+   its `WebGLBuffer`, the dead WebGL context, detached canvases, and viewer
+   control DOM reachable. Viewer teardown must clear all model URLs it owns
+   from the loader cache. Browser HTTP caching remains independent and may
+   continue to serve later model loads.
+5. A closed CDP page target does not prove that its Chrome renderer process has
+   exited. Reusing one browser for all benchmark runs left a prior traced
+   renderer consuming about 3.5 GiB RSS and multiple CPU cores while the next
+   Waymo load waited at its first frame. Per-run browser-process isolation
+   removed the survivor; a trace-free nuScenes → Waymo smoke then completed in
+   75 seconds, and a six-switch Waymo/nuScenes/AV2 lifecycle smoke completed in
+   97 seconds with no browser process left behind.
+
+The production build therefore applies a fail-closed R3F 9.5 lifecycle patch:
+it releases last-frame variables at the loop terminal and clears the disposed
+FiberRoot's `containerInfo` only after R3F removes the canvas root. The build
+must fail if the pinned dependency source no longer matches these reviewed
+terminals. Both viewer renderers must track every geometry/material they render,
+dispose those resources before their renderer, and remain safe to recreate on
+the next scene. Re-evaluate and remove the patch when upgrading R3F.
 
 Phase 5 currently binds a shadow `NormalizedSceneV1` while compatibility
 workers still feed the renderer. Its duplicate timestamp/index scans are part
@@ -106,6 +178,17 @@ A point or image buffer may be transferred or viewed without copying, but may
 not be retained independently by a compatibility cache, normalized cache, and
 renderer cache. Cache keys and byte budgets must be explicit. An LRU or
 equivalent bounded policy is required wherever data can grow with frame count.
+Pure compatibility projections may be memoized only as weakly keyed derived
+views whose lifetime follows the normalized manifest/frame component that owns
+their input. This includes renderer sensor/class maps, box rows, and lossy radar
+layouts used by the existing renderer. A hot seek must reuse those projections
+without creating a second strongly retained frame cache.
+Eviction must be operational rather than merely bounded: every consumer-facing
+seek demand-reloads each independently missing point or camera batch. A cache
+hit in one resource class must never suppress restoration of another class.
+Progress counters must record cumulative unique batches separately from current
+LRU residency. Evicting already-read data changes buffer availability, not the
+fact that initial loading completed.
 
 ## 3. Scene disposal is an idempotent contract
 
@@ -194,15 +277,15 @@ description is not sufficient.
 
 ## Phase 6 exit gate
 
-- [ ] Baseline artifacts exist for all three datasets and include coordinated
+- [x] Baseline artifacts exist for all three datasets and include coordinated
       raw CDP traces/metrics and application-probe snapshots.
-- [ ] Resource ownership and byte budgets are implemented and tested.
-- [ ] `dispose()` and cancellation lifecycle invariants pass in CI.
-- [ ] The required browser soak scenarios pass without sustained growth.
-- [ ] Structural, numeric, and perceptual parity still pass.
-- [ ] Every regression budget passes for each dataset cutover.
-- [ ] Each live scene has one frame producer and one cache owner.
-- [ ] Compatibility production paths are removed only after their dataset
+- [x] Resource ownership and byte budgets are implemented and tested.
+- [x] `dispose()` and cancellation lifecycle invariants pass in CI.
+- [x] The required browser soak scenarios pass without sustained growth.
+- [x] Structural, numeric, and perceptual parity still pass.
+- [x] Every regression budget passes for each dataset cutover.
+- [x] Each live scene has one frame producer and one cache owner.
+- [x] Compatibility production paths are removed only after their dataset
       passes all gates.
-- [ ] `registry.ts` and scene loading no longer choose different execution
+- [x] `registry.ts` and scene loading no longer choose different execution
       paths for bundled versus learned recipes.

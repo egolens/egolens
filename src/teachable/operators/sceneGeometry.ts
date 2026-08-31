@@ -51,6 +51,7 @@ export function projectBox3dPinholeV1(
     objectId: box.objectId,
     classId: box.classId,
     cameraId: calibration.sensorId,
+    presentation: 'projected-cuboid',
     center: [(left + right) / 2, (top + bottom) / 2],
     dimensions: [right - left, bottom - top],
   }

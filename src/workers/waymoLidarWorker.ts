@@ -29,19 +29,6 @@ import type {
   SensorCloudResult,
   LidarFrameResult,
   LidarBatchRequest,
-  LidarBatchResult,
-  LidarWorkerReady,
-  LidarWorkerError,
-  LidarWorkerResponse,
-} from './types'
-
-// Re-export shared types so existing consumers can migrate gradually
-export type {
-  SensorCloudResult,
-  LidarFrameResult,
-  LidarBatchResult,
-  LidarWorkerReady,
-  LidarWorkerError,
   LidarWorkerResponse,
 } from './types'
 
@@ -61,16 +48,6 @@ export interface WaymoLidarWorkerInit extends WorkerInitBase {
 }
 
 export type WaymoLidarWorkerRequest = WaymoLidarWorkerInit | LidarBatchRequest
-
-// Legacy aliases for gradual migration
-export type DataWorkerInit = WaymoLidarWorkerInit
-export type DataWorkerRequest = WaymoLidarWorkerRequest
-export type DataWorkerRowGroupResult = LidarBatchResult
-export type DataWorkerReady = LidarWorkerReady
-export type DataWorkerError = LidarWorkerError
-export type DataWorkerResponse = LidarWorkerResponse
-export type FrameResult = LidarFrameResult
-export type DataWorkerLoadRowGroup = LidarBatchRequest
 
 // ---------------------------------------------------------------------------
 // Worker state
@@ -256,6 +233,9 @@ async function handleMessage(msg: WaymoLidarWorkerRequest) {
               }
 
               const segLabels = new Uint8Array(cloud.pointCount)
+              // Preserve the pre-cutover renderer contract. Widening this to
+              // uint32 changes existing panoptic colors and belongs in a
+              // separately reviewed behavior migration.
               const panopticLabels = new Uint16Array(cloud.pointCount)
 
               for (let i = 0; i < cloud.pointCount; i++) {

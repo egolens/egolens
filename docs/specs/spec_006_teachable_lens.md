@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: in-progress (Phases 2–5 shipped; Phase 3–5 addenda → specs 008–011; Phase 6 gate → spec 012) · **Date**: 2026-08-29 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phases 2–6 shipped; next planned work is Phase 7) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 
@@ -1289,10 +1289,92 @@ remaining legacy code:
 - move retained algorithms behind versioned operator contracts;
 - delete dataset-specific orchestration that is now expressed by recipes;
 - keep golden fixtures and oracle outputs, not a second production loader.
+- treat browser-framework roots, secondary renderers, workers, object URLs, and
+  renderer caches as owned runtime resources; apply the measurement and
+  disposal rules in
+  [`spec_012_teachable_lens_phase6_performance_gate.md`](spec_012_teachable_lens_phase6_performance_gate.md).
+
+Phase 6 oracle promotion exposed thirteen renderer-boundary and observation details that remain
+normative for later Teachable Lens work:
+
+- normalized point buffers may be richer than a compatibility renderer buffer;
+  nuScenes radar keeps seven named velocity components in `NormalizedSceneV1`
+  but projects to the legacy five-value `[x,y,z,speedComp,speedRaw]` layout only
+  at the renderer boundary;
+- a normalized 2D box must declare whether it is a native rectangle or the
+  observation of a projected 3D cuboid. The latter is not a new 2D annotation
+  feature: it must keep the already-shipped `BoxProjectionOverlay` camera
+  wireframe presentation and must not silently select the native rectangle
+  overlay;
+- normalized timestamps are microseconds, while a compatibility UI may still
+  key caches and share URLs by a source-unit timeline (AV2 nanoseconds). Keep
+  the source timestamp at that renderer boundary until the UI timeline itself
+  migrates as one reviewed change;
+- typed-array width is observable behavior. Waymo panoptic labels remain the
+  pre-cutover `Uint16Array` during Phase 6; widening them is a separate product
+  migration with its own perceptual and numeric review;
+- a perceptual-capture barrier must follow what is actually visible, not only
+  store state. When camera JPEGs swap asynchronously, capture waits until every
+  requested camera image has decoded and the DOM identifies it as the requested
+  frame; `currentFrameIndex`, a non-empty camera map, `document.images.complete`,
+  or a fixed settle delay alone can still hash the previous image;
+- bounded point and camera caches are independent. A seek must demand-reload
+  each missing batch independently; a hot point frame does not imply that its
+  camera batch survived image-cache eviction;
+- loading progress and cache residency are different signals. Cumulative unique
+  batches drive progress UI, while the current LRU membership drives fast-seek
+  availability; eviction after completed prefetch must not make the UI appear
+  permanently unfinished;
+- perceptual parity hashes a versioned low-frequency raster signature, not raw
+  compositor PNG bytes. The original PNG remains protected diagnostic evidence;
+  the signature removes isolated one-level GPU colour-rounding noise while
+  retaining dimensions, scene content, overlays, and meaningful colour drift.
+- loader caches are runtime resources when their responses contain renderer
+  objects. `useLoader`/`suspend-react` GLTF responses retain shared geometries;
+  leaving those process-wide entries alive after viewer teardown can keep a
+  `WebGLBuffer`, context, detached canvas, and its control DOM reachable even
+  when store, worker, and renderer counters are already zero. Clear every
+  viewer-owned model URL when the viewer is disposed; the browser HTTP cache may
+  remain the transport cache.
+- compatibility projection is a derived renderer view, not another frame
+  owner. Repeated hot seeks must not rebuild sensor/class lookup maps, box rows,
+  or the legacy five-float radar projection. Memoize those pure projections by
+  the normalized manifest/frame component identity with weak keys so eviction
+  and scene disposal still release the authoritative buffers; do not add an
+  independently retained compatibility-frame cache.
+- performance selectors and generation boundaries are part of benchmark
+  validity. The legacy and candidate timelines must expose the same stable
+  interaction target, and warm/rapid frame latency must be derived from the
+  initially loaded scene's full CDP trace. A bounded end-of-soak mark snapshot
+  can otherwise omit that generation and silently substitute later cold
+  cross-dataset first frames.
+- heterogeneous soak checkpoints must not be fitted as one memory series.
+  Preserve every natural checkpoint for operational ownership evidence, then
+  take a paired forced-GC diagnostic and compute retained-growth slopes per
+  revisited dataset. Alternating Waymo, nuScenes, and AV2 heaps in one ordinary
+  least-squares line measures dataset size and GC timing rather than a leak.
+  Preserve each checkpoint's original switch index when fitting those grouped
+  series; treating every third cross-dataset revisit as an adjacent sample
+  inflates a per-switch slope by the revisit interval.
+  Likewise, steady FPS is limited to the initial live scene and excludes later
+  dataset loading intervals.
+- benchmark browser processes are themselves part of measurement isolation.
+  Each warm-up or measured run must use a fresh Chrome process and profile;
+  closing only its page target can leave a renderer from an earlier trace alive,
+  consuming CPU and heap while the next run loads. A trace-free lifecycle
+  artifact may supplement, but not replace, the exact-commit traced candidate
+  artifact used for latency and FPS comparison.
+
+These projections must be explicit and tested. They must not weaken the public
+normalized contract or leak dataset-specific parsing back into the renderer.
 
 **Exit gate:** `registry.ts` does not distinguish bundled and learned recipes by
 execution path. No permanent `loadWaymoDataset`, `parseNuScenesScene`, or
-equivalent dataset-branded production path remains.
+equivalent dataset-branded production path remains. Spec 012 performance and
+lifecycle evidence passes, and the hidden-oracle promotion receipts required by
+[`spec_013_teachable_lens_hidden_oracle_retention.md`](spec_013_teachable_lens_hidden_oracle_retention.md)
+are valid before the compatibility production path is removed from the
+shipping tree.
 
 #### Phase 7 — Add the custom operator extension boundary
 

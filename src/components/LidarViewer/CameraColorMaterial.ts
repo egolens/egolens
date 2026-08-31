@@ -12,6 +12,7 @@
  */
 
 import * as THREE from 'three'
+import { closeTrackedImageBitmap, createTrackedImageBitmap } from '../../teachable/runtime/performanceProbe'
 
 const MAX_CAMERAS = 7
 
@@ -217,12 +218,15 @@ export async function decodeCameraTextures(
     entries.map(async ([camName, jpegBuf]) => {
       try {
         const blob = new Blob([jpegBuf], { type: 'image/jpeg' })
-        const bitmap = await createImageBitmap(blob)
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(bitmap, 0, 0)
-        bitmap.close()
-        return { camName, canvas }
+        const bitmap = await createTrackedImageBitmap(blob)
+        try {
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+          const ctx = canvas.getContext('2d')!
+          ctx.drawImage(bitmap, 0, 0)
+          return { camName, canvas }
+        } finally {
+          closeTrackedImageBitmap(bitmap)
+        }
       } catch {
         return null
       }

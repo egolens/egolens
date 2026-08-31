@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - name: Tests
         run: npx vitest run
+      - name: Oracle receipt cryptography tests
+        run: npm run test:oracle-receipts
       - name: Lint (errors block, warnings reported)
         run: npx eslint src
       - name: Build (includes type-check)

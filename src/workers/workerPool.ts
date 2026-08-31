@@ -16,6 +16,7 @@
 
 import { memLog } from '../utils/memoryLogger'
 import type { MemorySnapshot } from '../utils/memoryLogger'
+import type { WorkerPoolPerformanceSnapshotV1 } from '../teachable/runtime/performanceProbe'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,6 +70,15 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
 
   /** Current count of in-flight dispatched batches (across all workers). */
   private inFlightCount = 0
+  private lifecycleGeneration = 0
+  private terminated = false
+  private requestCount = 0
+  private completedCount = 0
+  private failedCount = 0
+  private cancelledCount = 0
+  private staleResponseCount = 0
+  /** Initialization promises must settle when their owning scene is disposed. */
+  private pendingInitRejects = new Set<(reason?: unknown) => void>()
 
   constructor(concurrency: number, workerFactory: () => Worker, maxConcurrentFetches?: number) {
     this.concurrency = concurrency
@@ -84,6 +94,8 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
    * to the provided payload before sending to each worker.
    */
   async init(payload: TInitPayload): Promise<{ numBatches: number }> {
+    if (this.terminated) throw new Error('Worker pool has been terminated')
+    const generation = this.lifecycleGeneration
     const readyPromises: Promise<{ type: 'ready'; numBatches: number }>[] = []
 
     for (let i = 0; i < this.concurrency; i++) {
@@ -92,12 +104,15 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
       const poolWorker: PoolWorker = { worker, busy: false, ready: false }
       this.workers.push(poolWorker)
 
+      let rejectInit!: (reason?: unknown) => void
       const readyPromise = new Promise<{ type: 'ready'; numBatches: number }>((resolve, reject) => {
+        rejectInit = reject
+        this.pendingInitRejects.add(reject)
         worker.onmessage = (e: MessageEvent<PoolWorkerResponse>) => {
           if (e.data.type === 'ready') {
             poolWorker.ready = true
             worker.onmessage = (ev: MessageEvent<PoolWorkerResponse>) =>
-              this.handleWorkerMessage(i, ev)
+              this.handleWorkerMessage(i, generation, ev)
             resolve(e.data as { type: 'ready'; numBatches: number })
           } else if (e.data.type === 'error') {
             reject(new Error(e.data.message ?? 'Worker init failed'))
@@ -106,7 +121,9 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
         worker.onerror = (e) => reject(new Error(e.message))
       })
 
-      readyPromises.push(readyPromise)
+      readyPromises.push(readyPromise.finally(() => {
+        this.pendingInitRejects.delete(rejectInit)
+      }))
 
       // Check if memory logging is enabled on main thread
       const enableMemLog = typeof window !== 'undefined' && (
@@ -122,67 +139,18 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
       })
     }
 
-    const results = await Promise.all(readyPromises)
-    this.numBatches = results[0].numBatches
-    return { numBatches: this.numBatches }
-  }
-
-  /**
-   * Re-initialize existing workers with a new file (skip worker creation).
-   * Much faster than terminate + init — reuses WASM modules.
-   */
-  async reinit(payload: TInitPayload): Promise<{ numBatches: number }> {
-    // Reject in-flight and queued promises so callers don't hang
-    this.rejectAllPending('Worker pool reinitialized')
-    this.nextRequestId = 0
-
-    const readyPromises: Promise<{ type: 'ready'; numBatches: number }>[] = []
-
-    for (let i = 0; i < this.workers.length; i++) {
-      const pw = this.workers[i]
-      pw.busy = false
-      pw.ready = false
-
-      const readyPromise = new Promise<{ type: 'ready'; numBatches: number }>((resolve, reject) => {
-        pw.worker.onmessage = (e: MessageEvent<PoolWorkerResponse>) => {
-          if (e.data.type === 'ready') {
-            pw.ready = true
-            pw.worker.onmessage = (ev: MessageEvent<PoolWorkerResponse>) =>
-              this.handleWorkerMessage(i, ev)
-            resolve(e.data as { type: 'ready'; numBatches: number })
-          } else if (e.data.type === 'error') {
-            reject(new Error(e.data.message ?? 'Worker reinit failed'))
-          }
-        }
-      })
-
-      readyPromises.push(readyPromise)
-
-      const enableMemLog = typeof window !== 'undefined' && (
-        (window as Window).__WAYMO_MEMORY_LOG === true ||
-        localStorage.getItem('waymo-memory-log') === 'true'
-      )
-
-      pw.worker.postMessage({
-        ...payload,
-        type: 'init',
-        workerIndex: i,
-        enableMemLog,
-      })
+    try {
+      const results = await Promise.all(readyPromises)
+      this.numBatches = results[0].numBatches
+      return { numBatches: this.numBatches }
+    } catch (error) {
+      this.terminate()
+      throw error
     }
-
-    const results = await Promise.all(readyPromises)
-    this.numBatches = results[0].numBatches
-    return { numBatches: this.numBatches }
   }
 
   /** Total batches available (row groups for Waymo). */
   getNumBatches(): number {
-    return this.numBatches
-  }
-
-  // Legacy alias
-  getNumRowGroups(): number {
     return this.numBatches
   }
 
@@ -197,6 +165,8 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
    * fetch limit has been reached.
    */
   requestBatch(batchIndex: number, opts?: { priority?: boolean }): Promise<TResult> {
+    if (this.terminated) return Promise.reject(new Error('Worker pool has been terminated'))
+    this.requestCount += 1
     return new Promise((resolve, reject) => {
       const requestId = this.nextRequestId++
 
@@ -216,18 +186,36 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
     })
   }
 
-  // Legacy alias
-  requestRowGroup(batchIndex: number, opts?: { priority?: boolean }): Promise<TResult> {
-    return this.requestBatch(batchIndex, opts)
-  }
-
   /** Terminate all workers. */
   terminate(): void {
+    if (this.terminated) return
+    this.terminated = true
+    this.lifecycleGeneration += 1
+    this.cancelledCount += this.pendingInitRejects.size
+    for (const reject of this.pendingInitRejects) reject(new Error('Worker pool terminated during initialization'))
+    this.pendingInitRejects.clear()
     this.rejectAllPending('Worker pool terminated')
     for (const pw of this.workers) {
+      pw.worker.onmessage = null
+      pw.worker.onerror = null
       pw.worker.terminate()
     }
     this.workers = []
+  }
+
+  diagnostics(): WorkerPoolPerformanceSnapshotV1 {
+    return {
+      workers: this.workers.length,
+      readyWorkers: this.workers.filter((worker) => worker.ready).length,
+      queued: this.waitQueue.length,
+      inFlight: this.inFlightCount,
+      requests: this.requestCount,
+      completed: this.completedCount,
+      failed: this.failedCount,
+      cancelled: this.cancelledCount,
+      staleResponses: this.staleResponseCount,
+      terminated: this.terminated,
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -236,6 +224,7 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
 
   /** Reject all in-flight and queued promises so callers don't hang. */
   private rejectAllPending(reason: string): void {
+    this.cancelledCount += this.pendingRequests.size + this.waitQueue.length
     for (const [, { reject }] of this.pendingRequests) {
       reject(new Error(reason))
     }
@@ -267,9 +256,15 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
 
   private handleWorkerMessage(
     workerIndex: number,
+    generation: number,
     e: MessageEvent<PoolWorkerResponse | { type: '__memorySnapshot'; snapshot: MemorySnapshot }>,
   ): void {
     const msg = e.data
+
+    if (generation !== this.lifecycleGeneration || this.terminated) {
+      this.staleResponseCount += 1
+      return
+    }
 
     // Forward worker memory snapshots to main thread logger
     if (msg.type === '__memorySnapshot' && 'snapshot' in msg) {
@@ -278,17 +273,25 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
     }
 
     const pw = this.workers[workerIndex]
+    if (!pw) {
+      this.staleResponseCount += 1
+      return
+    }
 
     if (msg.type === 'batchReady' || msg.type === 'error') {
       const rid = 'requestId' in msg ? msg.requestId : -1
       const pending = this.pendingRequests.get(rid ?? -1)
-      if (pending) {
-        this.pendingRequests.delete(rid!)
-        if (msg.type === 'error') {
-          pending.reject(new Error(msg.message ?? 'Worker error'))
-        } else {
-          pending.resolve(msg as unknown as TResult)
-        }
+      if (!pending) {
+        this.staleResponseCount += 1
+        return
+      }
+      this.pendingRequests.delete(rid!)
+      if (msg.type === 'error') {
+        this.failedCount += 1
+        pending.reject(new Error(msg.message ?? 'Worker error'))
+      } else {
+        this.completedCount += 1
+        pending.resolve(msg as unknown as TResult)
       }
 
       // Worker is now idle — decrement in-flight counter and dispatch next

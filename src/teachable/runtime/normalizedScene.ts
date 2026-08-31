@@ -153,6 +153,8 @@ export interface NormalizedBox2dV1 {
   readonly objectId: string
   readonly classId: string
   readonly cameraId: string
+  /** Rectangle annotations render directly; projected cuboids keep the 3D wireframe presentation. */
+  readonly presentation: 'rectangle' | 'projected-cuboid'
   readonly center: readonly [number, number]
   readonly dimensions: readonly [number, number]
 }
@@ -200,7 +202,7 @@ export interface FrameCapabilityRequest {
   readonly signal?: AbortSignal
 }
 
-/** Dataset-neutral scene boundary consumed by recipe and migrated legacy paths. */
+/** Dataset-neutral scene boundary consumed by every recipe runtime path. */
 export interface NormalizedSceneV1 {
   readonly manifest: NormalizedManifestV1
   readonly index: NormalizedSceneIndexV1

@@ -5,6 +5,7 @@ import { loadAV2LogMetadata, type AV2LogDatabase } from '../../adapters/argovers
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import { compileRecipeV1 } from '../recipe/compiler'
 import { bindAV2RecipeSceneV1 } from '../runtime/AV2RecipeScene'
+import { bindRecipeSceneV1 } from '../runtime/bindRecipeScene'
 import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 
@@ -127,5 +128,23 @@ describe('Argoverse 2 recipe-backed NormalizedSceneV1', () => {
       expect(scene.manifest.capabilities.has(capability)).toBe(false)
       expect(diagnostics).toContainEqual(expect.objectContaining({ jsonPointer: `/outputs/${capability}` }))
     }
+  })
+
+  it('binds a learned recipe identity through the same source-family execution path', async () => {
+    const { database, files, compiledRecipe } = fixture()
+    const learnedRecipe = structuredClone(compiledRecipe.recipe)
+    Object.assign(learnedRecipe.scene, { formatId: 'learned-av2-compatible' })
+    const learnedCompiled = compileRecipeV1(learnedRecipe, bundledPhase2OperatorRegistry)
+
+    const { scene } = await bindRecipeSceneV1({
+      sourceFamily: 'feather-log',
+      compiledRecipe: learnedCompiled,
+      database,
+      files,
+    })
+
+    expect(scene.manifest.id).toBe('learned-av2-compatible')
+    await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities }))
+      .resolves.toMatchObject({ index: 0, timestampMicros: 1000n })
   })
 })

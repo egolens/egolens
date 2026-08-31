@@ -71,22 +71,10 @@ describe('adapter registry', () => {
     expect(getAdapterById('missing')).toBeNull()
   })
 
-  it('setManifest() swaps the active manifest', () => {
+  it('setManifest() rejects manifests without a recipe adapter', () => {
     const mock = makeMockManifest()
-    setManifest(mock)
-    expect(getManifest()).toBe(mock)
-    expect(getManifest().id).toBe('test-dataset')
-  })
-
-  it('setManifest() can be called multiple times', () => {
-    const m1 = makeMockManifest({ id: 'a', name: 'A' })
-    const m2 = makeMockManifest({ id: 'b', name: 'B' })
-
-    setManifest(m1)
-    expect(getManifest().id).toBe('a')
-
-    setManifest(m2)
-    expect(getManifest().id).toBe('b')
+    expect(() => setManifest(mock)).toThrow(/not backed by a registered recipe adapter/u)
+    expect(getManifest()).toBe(waymoManifest)
   })
 })
 

@@ -48,7 +48,11 @@ class MockWorker {
     return [...this.pendingBatches.values()]
   }
 
-  terminate() {}
+  terminated = false
+
+  terminate() {
+    this.terminated = true
+  }
 }
 
 describe('WorkerPool maxConcurrentFetches', () => {
@@ -159,6 +163,41 @@ describe('WorkerPool maxConcurrentFetches', () => {
 
     await Promise.all([p0, p1])
     expect(results).toEqual([0, 1])
+  })
+
+  it('idempotently terminates real pool workers and rejects every pending request', async () => {
+    const pool = createPool(1, 1)
+    await pool.init({})
+
+    const inFlight = pool.requestBatch(0)
+    const queued = pool.requestBatch(1)
+    pool.terminate()
+    pool.terminate()
+
+    await expect(inFlight).rejects.toThrow('Worker pool terminated')
+    await expect(queued).rejects.toThrow('Worker pool terminated')
+    await expect(pool.requestBatch(2)).rejects.toThrow('Worker pool has been terminated')
+    expect(mockWorkers[0].terminated).toBe(true)
+    expect(mockWorkers[0].onmessage).toBeNull()
+    expect(mockWorkers[0].onerror).toBeNull()
+    expect(pool.diagnostics()).toMatchObject({
+      workers: 0,
+      queued: 0,
+      inFlight: 0,
+      cancelled: 2,
+      terminated: true,
+    })
+  })
+
+  it('rejects initialization when the owning scene terminates before workers are ready', async () => {
+    const pool = createPool(1)
+    const initialization = pool.init({})
+
+    pool.terminate()
+
+    await expect(initialization).rejects.toThrow('terminated during initialization')
+    expect(mockWorkers[0].terminated).toBe(true)
+    expect(pool.diagnostics()).toMatchObject({ workers: 0, cancelled: 1, terminated: true })
   })
 })
 

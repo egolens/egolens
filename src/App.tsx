@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useSceneStore, getThumbnailResolver, getSegmentSplits } from './stores/useSceneStore'
+import {
+  useSceneStore,
+  createActiveConformanceScene,
+  getActiveConformanceDescriptor,
+  getThumbnailResolver,
+  getSegmentSplits,
+  type BoxMode,
+  type ColormapMode,
+} from './stores/useSceneStore'
+import type {
+  ConformanceCaptureOptionsV1,
+  SceneConformanceArtifactV1,
+} from './teachable/conformance/oracleArtifacts'
+import { areCameraViewsPresentedV1 } from './teachable/conformance/presentationBarrier'
 import LidarViewer, { type ViewerChrome } from './components/LidarViewer/LidarViewer'
 import CameraPanel from './components/CameraPanel/CameraPanel'
 import Timeline from './components/Timeline/Timeline'
@@ -35,6 +48,11 @@ function useSegmentDiscovery() {
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
+    const params = new URLSearchParams(window.location.search)
+    // A benchmark URL must remain quiescent until CDP has captured the real
+    // pre-scene baseline. Dev auto-discovery used to bypass benchmarkHold and
+    // start Waymo workers before the runner dispatched benchmark-start.
+    if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') return
     if (availableSegments.length > 0) return // already discovered
     if (discoveryStarted) return
     discoveryStarted = true
@@ -84,24 +102,195 @@ function useUrlAutoLoad() {
     if (!dataset || !dataUrl) return
     if (!SUPPORTED_URL_DATASETS.includes(dataset as UrlDataset)) return
 
-    urlAutoLoadStarted = true
-
-    try {
-      const baseUrl = normalizeBaseUrl(dataUrl)
-      // A Share View link carries view state; a bare ?dataset&data URL is an
-      // embed or a bookmark. Neither is a preset unless the URL is actually one.
-      const isShared = new URLSearchParams(window.location.search).has('frame')
-      trackDatasetLoad(
-        dataset,
-        isPresetUrl(dataUrl) ? 'preset' : isShared ? 'url_shared' : 'url_direct',
-        baseUrl,
-      )
-      loadFromUrl(dataset, baseUrl, scene)
-    } catch {
-      // Invalid URL — silently ignore, user will see the landing page
-      urlAutoLoadStarted = false
+    const start = () => {
+      if (urlAutoLoadStarted) return
+      urlAutoLoadStarted = true
+      try {
+        const baseUrl = normalizeBaseUrl(dataUrl)
+        // A Share View link carries view state; a bare ?dataset&data URL is an
+        // embed or a bookmark. Neither is a preset unless the URL is actually one.
+        const isShared = new URLSearchParams(window.location.search).has('frame')
+        trackDatasetLoad(
+          dataset,
+          isPresetUrl(dataUrl) ? 'preset' : isShared ? 'url_shared' : 'url_direct',
+          baseUrl,
+        )
+        loadFromUrl(dataset, baseUrl, scene)
+      } catch {
+        // Invalid URL — silently ignore, user will see the landing page
+        urlAutoLoadStarted = false
+      }
     }
+
+    // CDP captures the pre-scene checkpoint, then starts the ordinary command
+    // path. Sampling the read-only probe itself never triggers this event.
+    if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') {
+      window.addEventListener('egolens:benchmark-start', start, { once: true })
+      window.__EGOLENS_BENCHMARK_READY__ = true
+      return () => {
+        window.__EGOLENS_BENCHMARK_READY__ = false
+        window.removeEventListener('egolens:benchmark-start', start)
+      }
+    }
+    start()
   }, [status, loadFromUrl])
+}
+
+/**
+ * Benchmark-only command surface for cross-dataset lifecycle soaks. The
+ * performance probe remains read-only; this event enters the exact same store
+ * command path as the URL form after explicitly disposing the current scene.
+ */
+function useBenchmarkLoadCommand() {
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('perf') !== '1') return
+    const disposeScene = () => {
+      const store = useSceneStore.getState()
+      store.actions.reset()
+      useSceneStore.setState({
+        availableSegments: [],
+        currentSegment: null,
+        segmentMetas: new Map(),
+      })
+      clearUrlSource()
+    }
+    const onLoad = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        dataset?: string
+        data?: string
+        scene?: string
+      }>).detail
+      if (!detail?.dataset || !detail.data) return
+      if (!SUPPORTED_URL_DATASETS.includes(detail.dataset as UrlDataset)) return
+      try {
+        const baseUrl = normalizeBaseUrl(detail.data)
+        disposeScene()
+        trackDatasetLoad(detail.dataset, 'url_direct', baseUrl)
+        void useSceneStore.getState().actions.loadFromUrl(detail.dataset, baseUrl, detail.scene)
+      } catch {
+        // The benchmark runner observes the load timeout/error state.
+      }
+    }
+    // Keep the original URL in place so before/after lifecycle samples render
+    // the same landing document. Unlike browser navigation, this deliberately
+    // leaves the one-shot URL-load guard set and cannot auto-reload the scene.
+    const onDispose = () => disposeScene()
+    window.addEventListener('egolens:benchmark-load', onLoad)
+    window.addEventListener('egolens:benchmark-dispose', onDispose)
+    return () => {
+      window.removeEventListener('egolens:benchmark-load', onLoad)
+      window.removeEventListener('egolens:benchmark-dispose', onDispose)
+    }
+  }, [])
+}
+
+interface BrowserConformanceCaptureV1 {
+  readonly schemaVersion: 1
+  readonly buildCommit: string
+  descriptor(): ReturnType<typeof getActiveConformanceDescriptor>
+  capture(options: Omit<ConformanceCaptureOptionsV1, 'provenance'> & {
+    readonly sourceFingerprint: string
+    readonly capturedAt?: string
+  }): Promise<SceneConformanceArtifactV1>
+  seekFrame(index: number): Promise<number>
+  setPresentation(options: {
+    readonly colormapMode?: ColormapMode
+    readonly boxMode?: BoxMode
+    readonly cameraSegmentation?: boolean
+    readonly activeCamera?: number | null
+    readonly controlPanelOpen?: boolean
+  }): void
+}
+
+declare global {
+  interface Window {
+    __EGOLENS_BENCHMARK_READY__?: boolean
+    __EGOLENS_ORACLE_CAPTURE__?: BrowserConformanceCaptureV1
+  }
+}
+
+/** Installed only for an explicit local/trusted capture run. */
+function useOracleCaptureCommand() {
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('oracleCapture') !== '1') return
+    const api: BrowserConformanceCaptureV1 = Object.freeze({
+      schemaVersion: 1,
+      buildCommit: __EGOLENS_GIT_COMMIT__,
+      descriptor: () => getActiveConformanceDescriptor(),
+      async capture(options: Omit<ConformanceCaptureOptionsV1, 'provenance'> & {
+        readonly sourceFingerprint: string
+        readonly capturedAt?: string
+      }) {
+        if (!/^[0-9a-f]{40}$/u.test(__EGOLENS_GIT_COMMIT__)) {
+          throw new Error('Conformance capture requires an exact Git build commit.')
+        }
+        const { sourceFingerprint, capturedAt, ...captureOptions } = options
+        const { captureSceneConformanceArtifactV1 } = await import('./teachable/conformance/oracleArtifacts')
+        return captureSceneConformanceArtifactV1(
+          createActiveConformanceScene,
+          {
+            ...captureOptions,
+            provenance: {
+              generatorCommit: __EGOLENS_GIT_COMMIT__,
+              runtimeId: `egolens-recipe-${__EGOLENS_GIT_COMMIT__}`,
+              sourceFingerprint,
+              capturedAt: capturedAt ?? new Date().toISOString(),
+            },
+          },
+        )
+      },
+      async seekFrame(index: number) {
+        useSceneStore.getState().actions.pause()
+        const deadline = performance.now() + 60_000
+        while (performance.now() < deadline) {
+          const store = useSceneStore.getState()
+          if (store.status === 'error') {
+            throw new Error(store.error ?? `Conformance frame ${index} failed to load.`)
+          }
+          await store.actions.seekFrame(index)
+          const presented = useSceneStore.getState()
+          const needsCamera = getActiveConformanceDescriptor()?.capabilities.includes('cameraImages') ?? false
+          const cameraFramesPresented = !needsCamera || (presented.currentFrame !== null
+            && presented.currentFrame.cameraImages.size > 0
+            && areCameraViewsPresentedV1(presented.currentFrame.cameraImages.keys(), index))
+          if (presented.currentFrameIndex === index && presented.currentFrame !== null
+            && cameraFramesPresented) return index
+          await new Promise((resolve) => window.setTimeout(resolve, 50))
+        }
+        throw new Error(`Timed out waiting for conformance frame ${index}.`)
+      },
+      setPresentation(options: {
+        readonly colormapMode?: ColormapMode
+        readonly boxMode?: BoxMode
+        readonly cameraSegmentation?: boolean
+        readonly activeCamera?: number | null
+        readonly controlPanelOpen?: boolean
+      }) {
+        const store = useSceneStore.getState()
+        if (options.colormapMode) store.actions.setColormapMode(options.colormapMode)
+        if (options.boxMode) store.actions.setBoxMode(options.boxMode)
+        if (options.cameraSegmentation !== undefined
+          && options.cameraSegmentation !== store.showCameraSeg) store.actions.toggleCameraSeg()
+        if (options.activeCamera !== undefined) store.actions.setActiveCam(options.activeCamera)
+        if (options.controlPanelOpen !== undefined) {
+          const panel = document.querySelector<HTMLElement>('[data-egolens-control-panel]')
+          const open = panel?.dataset.egolensOpen === 'true'
+          if (panel && open !== options.controlPanelOpen) {
+            panel.querySelector<HTMLButtonElement>('[data-egolens-control-panel-toggle]')?.click()
+          }
+        }
+      },
+    })
+    Object.defineProperty(window, '__EGOLENS_ORACLE_CAPTURE__', {
+      configurable: true,
+      enumerable: false,
+      writable: false,
+      value: api,
+    })
+    return () => {
+      delete window.__EGOLENS_ORACLE_CAPTURE__
+    }
+  }, [])
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +427,8 @@ function App() {
   const [embedParams] = useState(() => getEmbedParams())
   useSegmentDiscovery()
   useUrlAutoLoad()
+  useBenchmarkLoadCommand()
+  useOracleCaptureCommand()
   useUrlViewRestore()
   useEmbedInitialState(embedParams)
 
@@ -1754,9 +1945,15 @@ function SensorView({ embedControls = 'full' }: { embedControls?: ViewerChrome }
   const hideCameraStrip = !showCameraStrip
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div
+      data-egolens-capture-region="viewer"
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+    >
       {/* LiDAR 3D View — main area */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div
+        data-egolens-capture-region="viewport"
+        style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+      >
         <div style={{ position: 'absolute', inset: 0 }}>
           {status === 'ready' ? (
             <>
