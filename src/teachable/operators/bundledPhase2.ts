@@ -25,23 +25,6 @@ const byteInputContract: OperatorJsonSchema = {
   additionalProperties: false,
 }
 
-const numericRecordsOutputContract: OperatorJsonSchema = {
-  type: 'object',
-  properties: {
-    values: { type: 'object' },
-    pointCount: { type: 'integer', minimum: 0 },
-    stride: { type: 'integer', minimum: 1, maximum: 64 },
-    attributes: {
-      type: 'array',
-      minItems: 1,
-      maxItems: 64,
-      items: { type: 'string' },
-    },
-  },
-  required: ['values', 'pointCount', 'stride', 'attributes'],
-  additionalProperties: false,
-}
-
 const positiveLimit = { type: 'integer', minimum: 1 }
 
 const interleavedParamsContract: OperatorJsonSchema = {
@@ -205,26 +188,78 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
       recordContract(['rows']),
       recordContract(['annotations']),
       recordContract(['annotations', 'instances', 'categories']),
+      recordContract(['annotations', 'instances', 'categories', 'poses']),
     ],
-  }, closedParams({
-    quaternionOrder: { const: 'wxyz' },
-    frameId: { type: 'string', minLength: 1, maxLength: 96 },
-    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
-    classField: { type: 'string', minLength: 1, maxLength: 256 },
-    objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
-    quaternionFields: fieldNames(4),
-    centerFields: fieldNames(3),
-    dimensionFields: fieldNames(3),
-  }, ['frameId']), recordContract(['boxes'])],
+  }, {
+    oneOf: [
+      closedParams({
+        quaternionOrder: { const: 'wxyz' },
+        frameId: { type: 'string', minLength: 1, maxLength: 96 },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        classField: { type: 'string', minLength: 1, maxLength: 256 },
+        objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        quaternionFields: fieldNames(4),
+        centerFields: fieldNames(3),
+        dimensionFields: fieldNames(3),
+      }, ['frameId']),
+      closedParams({
+        quaternionOrder: { const: 'wxyz' },
+        frameId: { type: 'string', minLength: 1, maxLength: 96 },
+        frameKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        instanceReferenceField: { type: 'string', minLength: 1, maxLength: 256 },
+        instanceKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        instanceCategoryField: { type: 'string', minLength: 1, maxLength: 256 },
+        categoryKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        classField: { type: 'string', minLength: 1, maxLength: 256 },
+        classMap: { type: 'object', additionalProperties: { type: 'string', minLength: 1, maxLength: 96 } },
+        fallbackClassId: { type: 'string', minLength: 1, maxLength: 96 },
+        quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
+        centerField: { type: 'string', minLength: 1, maxLength: 256 },
+        dimensionField: { type: 'string', minLength: 1, maxLength: 256 },
+        dimensionOrder: { type: 'array', minItems: 3, maxItems: 3, uniqueItems: true, items: { type: 'integer', minimum: 0, maximum: 2 } },
+      }, [
+        'quaternionOrder', 'frameId', 'frameKeyField', 'instanceReferenceField', 'instanceKeyField',
+        'instanceCategoryField', 'categoryKeyField', 'classField', 'classMap', 'fallbackClassId',
+        'quaternionField', 'centerField', 'dimensionField', 'dimensionOrder',
+      ]),
+    ],
+  }, recordContract(['boxes'])],
   ['image.bind_camera_frame', {
     oneOf: [
       recordContract(['rows', 'calibration']),
       recordContract(['bytes', 'sampleData', 'calibration']),
+      recordContract(['bytes', 'sampleData', 'calibration', 'sensors']),
       recordContract(['bytes', 'intrinsics', 'extrinsics']),
     ],
   }, {
     oneOf: [
       closedParams({ timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['timestampField']),
+      closedParams({
+        pathField: { type: 'string', minLength: 1, maxLength: 256 },
+        frameKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        recordCalibrationKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        calibrationKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        calibrationSensorKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        modalityField: { type: 'string', minLength: 1, maxLength: 256 },
+        cameraModality: { type: 'string', minLength: 1, maxLength: 96 },
+        keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
+        widthField: { type: 'string', minLength: 1, maxLength: 256 },
+        heightField: { type: 'string', minLength: 1, maxLength: 256 },
+        intrinsicMatrixField: { type: 'string', minLength: 1, maxLength: 256 },
+        quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
+        translationField: { type: 'string', minLength: 1, maxLength: 256 },
+        frameIdSuffix: { type: 'string', minLength: 1, maxLength: 32 },
+        defaultWidth: positiveLimit,
+        defaultHeight: positiveLimit,
+      }, [
+        'pathField', 'frameKeyField', 'timestampField', 'recordCalibrationKeyField', 'calibrationKeyField',
+        'calibrationSensorKeyField', 'sensorKeyField', 'sensorIdField', 'modalityField', 'cameraModality',
+        'keyframeField', 'widthField', 'heightField', 'intrinsicMatrixField', 'quaternionField',
+        'translationField', 'frameIdSuffix', 'defaultWidth', 'defaultHeight',
+      ]),
       closedParams({
         timestampFrom: { const: 'numeric-path' },
         maxDeltaNs: positiveLimit,
@@ -240,8 +275,16 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     mimeType: { enum: ['image/jpeg', 'image/png', 'image/webp'] },
   }, ['mimeType']), recordContract(['bytes'])],
   ['json.records', byteInputContract, emptyParamsContract, recordContract(['rows'])],
-  ['labels.attach_by_point_index', recordContract(['pointClouds', 'labels']), closedParams({
+  ['labels.attach_by_point_index', {
+    oneOf: [
+      recordContract(['pointClouds', 'labels']),
+      recordContract(['pointClouds', 'labels', 'panoptic', 'labelIndex', 'panopticIndex']),
+    ],
+  }, closedParams({
     taxonomy: { type: 'string', minLength: 1, maxLength: 96 },
+    indexRecordKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+    indexPathField: { type: 'string', minLength: 1, maxLength: 256 },
+    panopticDivisor: { type: 'integer', minimum: 1, maximum: 1000000 },
   }, ['taxonomy']), recordContract(['segmentation'])],
   ['labels.decode_camera_mask', recordContract(['rows']), closedParams({
     encoding: { const: 'png-uint16' },
@@ -260,25 +303,98 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['geometry.relative_poses', recordContract(['rows']), closedParams({
     matrixField: { type: 'string', minLength: 1, maxLength: 512 },
   }, ['matrixField']), recordContract(['poses'])],
-  ['records.select', recordContract(['rows']), closedParams({
-    fields: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
-    frameId: { type: 'string', minLength: 1, maxLength: 96 },
-  }, ['fields']), { oneOf: [recordContract(['records']), recordContract(['pointClouds'])] }],
-  ['relations.token_join', recordContract(['sampleData', 'poses']), closedParams({
-    leftKey: { type: 'string', minLength: 1, maxLength: 256 },
-    rightKey: { type: 'string', minLength: 1, maxLength: 256 },
-  }, ['leftKey', 'rightKey']), recordContract(['rows'])],
+  ['records.select', {
+    oneOf: [recordContract(['rows']), recordContract(['scenes', 'logs'])],
+  }, {
+    oneOf: [
+      closedParams({
+        fields: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
+        frameId: { type: 'string', minLength: 1, maxLength: 96 },
+        aliases: { type: 'object', additionalProperties: { type: 'string', minLength: 1, maxLength: 256 } },
+        where: { type: 'array', maxItems: 32, items: { type: 'object', properties: { field: { type: 'string' }, equals: {} }, required: ['field', 'equals'], additionalProperties: false } },
+      }, ['fields']),
+      closedParams({
+        mode: { const: 'segments' },
+        sceneLogField: { type: 'string', minLength: 1, maxLength: 256 },
+        logKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        groupField: { type: 'string', minLength: 1, maxLength: 256 },
+        idField: { type: 'string', minLength: 1, maxLength: 256 },
+        labelField: { type: 'string', minLength: 1, maxLength: 256 },
+        weatherField: { type: 'string', minLength: 1, maxLength: 256 },
+        locationField: { type: 'string', minLength: 1, maxLength: 256 },
+        timeSourceField: { type: 'string', minLength: 1, maxLength: 256 },
+        timeDelimiter: { type: 'string', minLength: 1, maxLength: 8 },
+        timePartIndex: { type: 'integer', minimum: 0, maximum: 32 },
+      }, ['mode', 'sceneLogField', 'logKeyField', 'groupField', 'idField', 'labelField', 'weatherField', 'locationField', 'timeSourceField', 'timeDelimiter', 'timePartIndex']),
+    ],
+  }, { oneOf: [recordContract(['records']), recordContract(['pointClouds']), recordContract(['segments'])] }],
+  ['relations.token_join', {
+    oneOf: [
+      recordContract(['sampleData', 'poses']),
+      recordContract(['sampleData', 'poses', 'calibration', 'sensors']),
+      recordContract(['left', 'right']),
+    ],
+  }, {
+    oneOf: [
+      closedParams({
+        leftKey: { type: 'string', minLength: 1, maxLength: 256 },
+        rightKey: { type: 'string', minLength: 1, maxLength: 256 },
+        join: { enum: ['inner', 'left'] },
+        rightFields: { type: 'object', additionalProperties: { type: 'string', minLength: 1, maxLength: 256 } },
+      }, ['leftKey', 'rightKey']),
+      closedParams({
+        output: { const: 'pose-timeline' },
+        sampleDataCalibrationKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        calibrationKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        calibrationSensorKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        preferredSensorId: { type: 'string', minLength: 1, maxLength: 256 },
+        poseReferenceField: { type: 'string', minLength: 1, maxLength: 256 },
+        poseKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        frameKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
+        quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
+        translationField: { type: 'string', minLength: 1, maxLength: 256 },
+      }, [
+        'output', 'sampleDataCalibrationKeyField', 'calibrationKeyField', 'calibrationSensorKeyField',
+        'sensorKeyField', 'sensorIdField', 'preferredSensorId', 'poseReferenceField', 'poseKeyField',
+        'frameKeyField', 'keyframeField', 'quaternionField', 'translationField',
+      ]),
+    ],
+  }, { oneOf: [recordContract(['rows']), recordContract(['poses'])] }],
   ['relations.composite_key_join', recordContract(['boxes2d', 'boxes3d', 'associations']), closedParams({
     relation: { const: 'camera-object-to-lidar-object' },
   }, ['relation']), recordContract(['relations'])],
   ['timeline.join', {
     oneOf: [
       recordContract(['records', 'sampleData', 'calibration']),
+      recordContract(['records', 'sampleData', 'calibration', 'sensors']),
       recordContract(['timeline', 'poses']),
     ],
   }, {
     oneOf: [
       closedParams({ mode: { const: 'token' }, timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['mode']),
+      closedParams({
+        mode: { const: 'token' },
+        pathField: { type: 'string', minLength: 1, maxLength: 256 },
+        frameKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        recordKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        recordCalibrationKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        calibrationKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        calibrationSensorKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorKeyField: { type: 'string', minLength: 1, maxLength: 256 },
+        sensorIdField: { type: 'string', minLength: 1, maxLength: 256 },
+        keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
+        quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
+        translationField: { type: 'string', minLength: 1, maxLength: 256 },
+        outputFrame: { type: 'string', minLength: 1, maxLength: 96 },
+      }, [
+        'mode', 'pathField', 'frameKeyField', 'recordKeyField', 'timestampField', 'recordCalibrationKeyField',
+        'calibrationKeyField', 'calibrationSensorKeyField', 'sensorKeyField', 'sensorIdField', 'keyframeField',
+        'quaternionField', 'translationField', 'outputFrame',
+      ]),
       closedParams({
         mode: { const: 'nearest' },
         timestampField: { type: 'string', minLength: 1, maxLength: 256 },
@@ -293,6 +409,12 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   }, {
     oneOf: [
       closedParams({ timestampField: { type: 'string', minLength: 1, maxLength: 256 } }, ['timestampField']),
+      closedParams({
+        timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+        timestampUnit: { enum: ['ns', 'us', 'ms', 's'] },
+        keyField: { type: 'string', minLength: 1, maxLength: 256 },
+        groupField: { type: 'string', minLength: 1, maxLength: 256 },
+      }, ['timestampField', 'timestampUnit', 'keyField', 'groupField']),
       closedParams({
         timestampFrom: { const: 'numeric-path' },
         timestampUnit: { enum: ['ns', 'us', 'ms', 's'] },
@@ -323,14 +445,10 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
     tier: 1,
     inputContract: byteInputContract,
     paramsContract: npzParamsContract,
-    outputContract: {
-      type: 'object',
-      properties: { values: { type: 'object' } },
-      required: ['values'],
-      additionalProperties: false,
-    },
+    outputContract: recordContract(['values']),
     execution: 'worker',
     deterministic: true,
+    execute: coreGraphOperatorImplementationsV1['archive.npz_array'],
   },
   {
     name: 'binary.interleaved_records',
@@ -339,7 +457,7 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
     tier: 1,
     inputContract: byteInputContract,
     paramsContract: interleavedParamsContract,
-    outputContract: numericRecordsOutputContract,
+    outputContract: recordContract(['records']),
     validateParams: (params) => {
       try {
         assertValidInterleavedRecordsParamsV1(params as never)
@@ -350,6 +468,7 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
     },
     execution: 'worker',
     deterministic: true,
+    execute: coreGraphOperatorImplementationsV1['binary.interleaved_records'],
   },
   {
     name: 'binary.pcd_records',
@@ -358,9 +477,10 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
     tier: 1,
     inputContract: byteInputContract,
     paramsContract: pcdParamsContract,
-    outputContract: numericRecordsOutputContract,
+    outputContract: recordContract(['records']),
     execution: 'worker',
     deterministic: true,
+    execute: coreGraphOperatorImplementationsV1['binary.pcd_records'],
   },
 ]
 

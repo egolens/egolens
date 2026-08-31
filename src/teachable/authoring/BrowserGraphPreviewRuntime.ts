@@ -68,7 +68,6 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
         binding = assembleGraphSceneV1({
           compiledRecipe,
           graph,
-          sceneId: compiledRecipe.normalizedManifest.id,
         })
         failedScene = binding.scene
       } catch (error) {

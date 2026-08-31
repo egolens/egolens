@@ -31,7 +31,13 @@ const DEFAULT_LIMITS: GraphExecutionLimitsV1 = {
 
 function linkedSignal(lifecycle: AbortSignal, request?: AbortSignal): AbortSignal {
   if (!request) return lifecycle
-  return typeof AbortSignal.any === 'function' ? AbortSignal.any([lifecycle, request]) : lifecycle
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([lifecycle, request])
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  lifecycle.addEventListener('abort', abort, { once: true })
+  request.addEventListener('abort', abort, { once: true })
+  if (lifecycle.aborted || request.aborted) controller.abort()
+  return controller.signal
 }
 
 function numericPathCompare(left: string, right: string): number {
@@ -105,9 +111,9 @@ export class ExecutableGraphKernelV1 {
       throwIfAborted() {
         if (signal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
       },
-      async read(path) {
+      async read(path, requestSignal) {
         this.throwIfAborted()
-        const bytes = await input.source.read(path, { signal })
+        const bytes = await input.source.read(path, { signal: linkedSignal(signal, requestSignal) })
         resources.sourceBytes(bytes.byteLength)
         this.throwIfAborted()
         return bytes

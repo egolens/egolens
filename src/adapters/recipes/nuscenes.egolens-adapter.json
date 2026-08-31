@@ -131,6 +131,12 @@
     ]
   },
   "sources": {
+    "scenes": {
+      "reader": "json.records",
+      "files": {
+        "exact": "{versionRoot}/scene.json"
+      }
+    },
     "samples": {
       "reader": "json.records",
       "files": {
@@ -164,26 +170,57 @@
     "annotations": {
       "reader": "json.records",
       "files": {
-        "exact": "{versionRoot}/sample_annotation.json"
+        "exact": "{versionRoot}/sample_annotation.json",
+        "minCount": 0,
+        "maxCount": 1
       }
     },
     "instances": {
       "reader": "json.records",
       "files": {
-        "exact": "{versionRoot}/instance.json"
+        "exact": "{versionRoot}/instance.json",
+        "minCount": 0,
+        "maxCount": 1
       }
     },
     "categories": {
       "reader": "json.records",
       "files": {
-        "exact": "{versionRoot}/category.json"
+        "exact": "{versionRoot}/category.json",
+        "minCount": 0,
+        "maxCount": 1
+      }
+    },
+    "logs": {
+      "reader": "json.records",
+      "files": {
+        "exact": "{versionRoot}/log.json",
+        "minCount": 0,
+        "maxCount": 1
+      }
+    },
+    "lidarLabelIndex": {
+      "reader": "json.records",
+      "files": {
+        "exact": "{versionRoot}/lidarseg.json",
+        "minCount": 0,
+        "maxCount": 1
+      }
+    },
+    "panopticLabelIndex": {
+      "reader": "json.records",
+      "files": {
+        "exact": "{versionRoot}/panoptic.json",
+        "minCount": 0,
+        "maxCount": 1
       }
     },
     "lidarRecords": {
       "reader": "binary.interleaved_records",
       "files": {
         "glob": "samples/LIDAR_TOP/*.bin",
-        "order": "lexical-path"
+        "order": "lexical-path",
+        "minCount": 1
       },
       "params": {
         "strideBytes": 20,
@@ -216,7 +253,8 @@
       "reader": "binary.pcd_records",
       "files": {
         "glob": "samples/RADAR_*/*.pcd",
-        "order": "lexical-path"
+        "order": "lexical-path",
+        "minCount": 0
       },
       "params": {
         "data": "binary",
@@ -237,7 +275,8 @@
       "reader": "image.encoded_bytes",
       "files": {
         "glob": "samples/CAM_*/*.jpg",
-        "order": "lexical-path"
+        "order": "lexical-path",
+        "minCount": 0
       },
       "params": {
         "mimeType": "image/jpeg"
@@ -247,7 +286,8 @@
       "reader": "binary.interleaved_records",
       "files": {
         "glob": "lidarseg/{versionRoot}/*.bin",
-        "order": "lexical-path"
+        "order": "lexical-path",
+        "minCount": 0
       },
       "params": {
         "strideBytes": 1,
@@ -265,7 +305,8 @@
       "reader": "archive.npz_array",
       "files": {
         "glob": "panoptic/{versionRoot}/*.npz",
-        "order": "lexical-path"
+        "order": "lexical-path",
+        "minCount": 0
       },
       "params": {
         "arrayName": "data"
@@ -1089,7 +1130,10 @@
             "samples": "samples.rows"
           },
           "params": {
-            "timestampField": "timestamp"
+            "timestampField": "timestamp",
+            "timestampUnit": "us",
+            "keyField": "token",
+            "groupField": "scene_token"
           }
         }
       ],
@@ -1103,15 +1147,28 @@
           "version": 1,
           "inputs": {
             "sampleData": "sampleData.rows",
-            "poses": "egoPoses.rows"
+            "poses": "egoPoses.rows",
+            "calibration": "calibrations.rows",
+            "sensors": "sensors.rows"
           },
           "params": {
-            "leftKey": "ego_pose_token",
-            "rightKey": "token"
+            "output": "pose-timeline",
+            "sampleDataCalibrationKeyField": "calibrated_sensor_token",
+            "calibrationKeyField": "token",
+            "calibrationSensorKeyField": "sensor_token",
+            "sensorKeyField": "token",
+            "sensorIdField": "channel",
+            "preferredSensorId": "LIDAR_TOP",
+            "poseReferenceField": "ego_pose_token",
+            "poseKeyField": "token",
+            "frameKeyField": "sample_token",
+            "keyframeField": "is_key_frame",
+            "quaternionField": "rotation",
+            "translationField": "translation"
           }
         }
       ],
-      "result": "joinEgoPoses.rows"
+      "result": "joinEgoPoses.poses"
     },
     "pointClouds": {
       "nodes": [
@@ -1122,10 +1179,24 @@
           "inputs": {
             "records": "lidarRecords.records",
             "sampleData": "sampleData.rows",
-            "calibration": "calibrations.rows"
+            "calibration": "calibrations.rows",
+            "sensors": "sensors.rows"
           },
           "params": {
-            "mode": "token"
+            "mode": "token",
+            "pathField": "filename",
+            "frameKeyField": "sample_token",
+            "recordKeyField": "token",
+            "timestampField": "timestamp",
+            "recordCalibrationKeyField": "calibrated_sensor_token",
+            "calibrationKeyField": "token",
+            "calibrationSensorKeyField": "sensor_token",
+            "sensorKeyField": "token",
+            "sensorIdField": "channel",
+            "keyframeField": "is_key_frame",
+            "quaternionField": "rotation",
+            "translationField": "translation",
+            "outputFrame": "ego"
           }
         }
       ],
@@ -1140,10 +1211,24 @@
           "inputs": {
             "records": "radarRecords.records",
             "sampleData": "sampleData.rows",
-            "calibration": "calibrations.rows"
+            "calibration": "calibrations.rows",
+            "sensors": "sensors.rows"
           },
           "params": {
-            "mode": "token"
+            "mode": "token",
+            "pathField": "filename",
+            "frameKeyField": "sample_token",
+            "recordKeyField": "token",
+            "timestampField": "timestamp",
+            "recordCalibrationKeyField": "calibrated_sensor_token",
+            "calibrationKeyField": "token",
+            "calibrationSensorKeyField": "sensor_token",
+            "sensorKeyField": "token",
+            "sensorIdField": "channel",
+            "keyframeField": "is_key_frame",
+            "quaternionField": "rotation",
+            "translationField": "translation",
+            "outputFrame": "ego"
           }
         }
       ],
@@ -1158,10 +1243,29 @@
           "inputs": {
             "bytes": "cameraBytes.bytes",
             "sampleData": "sampleData.rows",
-            "calibration": "calibrations.rows"
+            "calibration": "calibrations.rows",
+            "sensors": "sensors.rows"
           },
           "params": {
-            "timestampField": "timestamp"
+            "pathField": "filename",
+            "frameKeyField": "sample_token",
+            "timestampField": "timestamp",
+            "recordCalibrationKeyField": "calibrated_sensor_token",
+            "calibrationKeyField": "token",
+            "calibrationSensorKeyField": "sensor_token",
+            "sensorKeyField": "token",
+            "sensorIdField": "channel",
+            "modalityField": "modality",
+            "cameraModality": "camera",
+            "keyframeField": "is_key_frame",
+            "widthField": "width",
+            "heightField": "height",
+            "intrinsicMatrixField": "camera_intrinsic",
+            "quaternionField": "rotation",
+            "translationField": "translation",
+            "frameIdSuffix": "-frame",
+            "defaultWidth": 1600,
+            "defaultHeight": 900
           }
         }
       ],
@@ -1176,11 +1280,49 @@
           "inputs": {
             "annotations": "annotations.rows",
             "instances": "instances.rows",
-            "categories": "categories.rows"
+            "categories": "categories.rows",
+            "poses": "egoPoses.result"
           },
           "params": {
             "quaternionOrder": "wxyz",
-            "frameId": "ego"
+            "frameId": "ego",
+            "frameKeyField": "sample_token",
+            "instanceReferenceField": "instance_token",
+            "instanceKeyField": "token",
+            "instanceCategoryField": "category_token",
+            "categoryKeyField": "token",
+            "classField": "name",
+            "classMap": {
+              "vehicle.car": "car",
+              "vehicle.truck": "truck",
+              "vehicle.bus.bendy": "bus",
+              "vehicle.bus.rigid": "bus",
+              "vehicle.construction": "construction",
+              "vehicle.emergency.ambulance": "emergency",
+              "vehicle.emergency.police": "emergency",
+              "vehicle.trailer": "trailer",
+              "vehicle.motorcycle": "motorcycle",
+              "vehicle.bicycle": "bicycle",
+              "human.pedestrian.adult": "pedestrian",
+              "human.pedestrian.child": "pedestrian",
+              "human.pedestrian.wheelchair": "pedestrian",
+              "human.pedestrian.stroller": "pedestrian",
+              "human.pedestrian.personal_mobility": "pedestrian",
+              "human.pedestrian.police_officer": "pedestrian",
+              "human.pedestrian.construction_worker": "pedestrian",
+              "movable_object.barrier": "barrier",
+              "movable_object.trafficcone": "traffic-cone",
+              "animal": "animal"
+            },
+            "fallbackClassId": "unknown",
+            "quaternionField": "rotation",
+            "centerField": "translation",
+            "dimensionField": "size",
+            "dimensionOrder": [
+              1,
+              0,
+              2
+            ]
           }
         }
       ],
@@ -1229,10 +1371,16 @@
           "version": 1,
           "inputs": {
             "pointClouds": "pointClouds.result",
-            "labels": "lidarLabels.records"
+            "labels": "lidarLabels.records",
+            "panoptic": "panopticLabels.values",
+            "labelIndex": "lidarLabelIndex.rows",
+            "panopticIndex": "panopticLabelIndex.rows"
           },
           "params": {
-            "taxonomy": "nuscenes-lidar-semantics"
+            "taxonomy": "nuscenes-lidar-semantics",
+            "indexRecordKeyField": "sample_data_token",
+            "indexPathField": "filename",
+            "panopticDivisor": 1000
           }
         }
       ],
@@ -1245,17 +1393,25 @@
           "op": "records.select",
           "version": 1,
           "inputs": {
-            "rows": "samples.rows"
+            "scenes": "scenes.rows",
+            "logs": "logs.rows"
           },
           "params": {
-            "fields": [
-              "scene_token",
-              "timestamp"
-            ]
+            "mode": "segments",
+            "sceneLogField": "log_token",
+            "logKeyField": "token",
+            "groupField": "token",
+            "idField": "name",
+            "labelField": "description",
+            "weatherField": "description",
+            "locationField": "location",
+            "timeSourceField": "logfile",
+            "timeDelimiter": "-",
+            "timePartIndex": 4
           }
         }
       ],
-      "result": "selectSceneMetadata.records"
+      "result": "selectSceneMetadata.segments"
     }
   },
   "outputs": {

@@ -5,6 +5,7 @@ import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { ByteSourceV1 } from '../source/ByteSource'
 import type { NormalizedSceneV1 } from './normalizedScene'
 import type { RecipeInventoryEntryV1 } from './GraphKernel'
+import type { GraphSegmentDescriptorV1 } from './GraphValues'
 
 export interface RecipeExecutionInputV1 {
   readonly compiledRecipe: CompiledRecipeV1
@@ -21,6 +22,7 @@ export interface RecipeProviderResultV1 {
   readonly scene: NormalizedSceneV1
   readonly diagnostics: readonly AdapterDiagnostic[]
   readonly metadata: MetadataBundle
+  readonly availableSegments?: readonly GraphSegmentDescriptorV1[]
 }
 
 export interface BoundRecipeSceneV1 extends RecipeProviderResultV1 {
