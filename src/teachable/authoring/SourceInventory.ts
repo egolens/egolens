@@ -1,5 +1,5 @@
 import type { ByteSourceReadOptionsV1, ByteSourceV1 } from '../source/ByteSource'
-import { LocalFileByteSourceV1 } from '../source/ByteSource'
+import { LocalFileByteSourceV1, normalizeSourcePathV1 } from '../source/ByteSource'
 
 export const MAX_SOURCE_INVENTORY_ENTRIES_V1 = 20_000
 
@@ -18,15 +18,12 @@ export interface SourceInventorySnapshotV1 {
   readonly revoked: boolean
 }
 
-function normalizeLogicalPath(path: string): string {
-  const normalized = path.replace(/\\/gu, '/').replace(/^\.\//u, '')
-  if (
-    normalized.length === 0
-    || normalized.startsWith('/')
-    || /^[A-Za-z]:/u.test(normalized)
-    || normalized.split('/').some((part) => part === '' || part === '.' || part === '..')
-  ) throw new Error(`Invalid inventory path: ${path}`)
-  return normalized
+function normalizeInventoryPath(path: string): string {
+  try {
+    return normalizeSourcePathV1(path)
+  } catch (cause) {
+    throw new Error(`Invalid inventory path: ${path}`, { cause })
+  }
 }
 
 function extensionOf(path: string): string {
@@ -56,7 +53,7 @@ export class SourceInventoryV1 {
     this.sessionId = options.sessionId ?? createSessionId()
     this.truncated = options.truncated ?? false
     const sorted = [...files]
-      .map(([path, file]) => [normalizeLogicalPath(path), file] as const)
+      .map(([path, file]) => [normalizeInventoryPath(path), file] as const)
       .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     if (sorted.length > MAX_SOURCE_INVENTORY_ENTRIES_V1) {
       throw new Error(`Source inventory exceeds ${MAX_SOURCE_INVENTORY_ENTRIES_V1} files.`)
@@ -98,7 +95,7 @@ export class SourceInventoryV1 {
 
   entry(path: string): SourceInventoryEntryV1 | null {
     this.#assertActive()
-    const normalized = normalizeLogicalPath(path)
+    const normalized = normalizeInventoryPath(path)
     return this.#entries.find((entry) => entry.path === normalized) ?? null
   }
 
@@ -110,7 +107,7 @@ export class SourceInventoryV1 {
 
   readAuthorizedBytes(path: string, options?: ByteSourceReadOptionsV1): Promise<ArrayBuffer> {
     this.#assertActive()
-    const normalized = normalizeLogicalPath(path)
+    const normalized = normalizeInventoryPath(path)
     if (!this.#entries.some((entry) => entry.path === normalized)) {
       throw new Error(`Inventory path is not authorized: ${normalized}`)
     }

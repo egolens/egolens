@@ -4,6 +4,8 @@ import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { ByteSourceV1 } from '../source/ByteSource'
+import { RemoteByteSourceV1, type RemoteByteSourceOptionsV1 } from '../source/RemoteByteSource'
+import { sourceCatalogInventoryEntriesV1 } from '../source/SourceCatalog'
 import { ExecutableGraphKernelV1, type RecipeInventoryEntryV1 } from './GraphKernel'
 import { assembleGraphSceneV1 } from './GraphSceneAssembler'
 import type { GraphSegmentDescriptorV1 } from './GraphValues'
@@ -24,6 +26,12 @@ export interface BoundRecipeSceneV1 {
   readonly diagnostics: readonly AdapterDiagnostic[]
   readonly metadata: MetadataBundle
   readonly availableSegments?: readonly GraphSegmentDescriptorV1[]
+}
+
+export interface BoundRemoteRecipeSceneV1 extends BoundRecipeSceneV1 {
+  readonly source: RemoteByteSourceV1
+  readonly catalogHash: string
+  readonly sourceManifestHash: string
 }
 
 /**
@@ -49,5 +57,59 @@ export async function bindRecipeSceneV1(
   } catch (error) {
     graph.dispose()
     throw error
+  }
+}
+
+/**
+ * Catalog-backed production entry point for portable remote views. It has no
+ * dataset discovery or fallback path: catalog, source identity, and transport
+ * must validate before the common recipe graph can execute.
+ */
+export async function bindRemoteRecipeSceneV1(
+  input: {
+    readonly compiledRecipe: CompiledRecipeV1
+    readonly remote: RemoteByteSourceOptionsV1
+    readonly sceneId?: string
+    readonly signal?: AbortSignal
+  },
+): Promise<BoundRemoteRecipeSceneV1> {
+  const source = new RemoteByteSourceV1(input.remote)
+  try {
+    const binding = await bindRecipeSceneV1({
+      compiledRecipe: input.compiledRecipe,
+      source,
+      inventoryEntries: sourceCatalogInventoryEntriesV1(source.catalog),
+      sceneId: input.sceneId,
+      signal: input.signal,
+    })
+    const inner = binding.scene
+    let disposed = false
+    const scene: NormalizedSceneV1 = {
+      manifest: inner.manifest,
+      index: inner.index,
+      relations: inner.relations,
+      async loadFrame(index, request) {
+        return await inner.loadFrame(index, request)
+      },
+      dispose() {
+        if (disposed) return
+        disposed = true
+        try {
+          inner.dispose()
+        } finally {
+          source.dispose()
+        }
+      },
+    }
+    return {
+      ...binding,
+      scene,
+      source,
+      catalogHash: source.catalogHash,
+      sourceManifestHash: source.sourceManifestHash,
+    }
+  } catch (cause) {
+    source.dispose()
+    throw cause
   }
 }

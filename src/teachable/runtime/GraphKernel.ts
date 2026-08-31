@@ -164,7 +164,10 @@ export class ExecutableGraphKernelV1 {
           byteLength: backing.byteLength,
           async slice(start, end) {
             if (readSignal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
-            const bytes = await backing.slice(start, end)
+            // Route every lazy slice back through ByteSourceV1 so remote range
+            // verification and request-level cancellation cannot be bypassed by
+            // a transport's AsyncBuffer implementation.
+            const bytes = await input.source.read(path, { start, end, signal: readSignal })
             resources.sourceBytes(bytes.byteLength)
             if (readSignal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
             return bytes

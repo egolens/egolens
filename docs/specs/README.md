@@ -29,4 +29,4 @@ convention and keep their names.
 | 011 | [Teachable Lens Phase 5 implementation findings](spec_011_teachable_lens_phase5_findings.md) | shipped; normative addendum to spec 006 Phase 5+ |
 | 012 | [Teachable Lens Phase 6 performance and lifecycle gate](spec_012_teachable_lens_phase6_performance_gate.md) | complete; three-dataset performance, lifecycle, and exact-head promotion gates passed |
 | 013 | [Teachable Lens hidden-oracle retention](spec_013_teachable_lens_hidden_oracle_retention.md) | complete; Phase 6 promotion and Phase 9 Adapter Amnesia retention gates passed |
-| 014 | [Teachable Lens Phase 10 original-data generalization ladder](spec_014_teachable_lens_phase10_generalization_ladder.md) | in-progress; preflight 10.P1 shipped, 10.P2–P7 ordered before A2D2 → KITTI Raw → ONCE → PandaSet original-drop evidence |
+| 014 | [Teachable Lens Phase 10 original-data generalization ladder](spec_014_teachable_lens_phase10_generalization_ladder.md) | in-progress; preflight 10.P1–P5 implemented, 10.P6–P7 ordered before A2D2 → KITTI Raw → ONCE → PandaSet original-drop evidence |

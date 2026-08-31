@@ -5,10 +5,12 @@ import { SourceInventoryV1 } from '../authoring/SourceInventory'
 import { authoringPreviewStoreV1 } from '../authoring/previewStore'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import { compileRecipeV1 } from '../recipe/compiler'
-import { bindRecipeSceneV1 } from '../runtime/bindRecipeScene'
+import { bindRecipeSceneV1, bindRemoteRecipeSceneV1 } from '../runtime/bindRecipeScene'
 import { ExecutableGraphKernelV1 } from '../runtime/GraphKernel'
 import { assembleGraphSceneV1 } from '../runtime/GraphSceneAssembler'
+import { compareNormalizedFramesV1 } from '../runtime/parity'
 import { MappedByteSourceV1 } from '../source/ByteSource'
+import { remoteTransportFixtureV1 } from './remoteTransportFixture'
 
 function lidarFile(points: readonly (readonly number[])[]): File {
   const buffer = new ArrayBuffer(points.length * 20)
@@ -244,5 +246,29 @@ describe('nuScenes executable recipe graph', () => {
     scene.dispose()
     scene.dispose()
     await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).rejects.toThrow(/disposed/u)
+  })
+
+  it('binds byte-identical local and catalog-backed remote bytes without graph changes', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture()
+    const local = await bindRecipeSceneV1({
+      compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
+    })
+    const hosted = await remoteTransportFixtureV1(files)
+    const remote = await bindRemoteRecipeSceneV1({
+      compiledRecipe, remote: hosted.remote, sceneId: 'scene-0001',
+    })
+    expect(remote.sourceManifestHash).toBe(hosted.sourceManifestHash)
+    expect(remote.scene.manifest).toEqual(local.scene.manifest)
+    expect(remote.metadata).toEqual(local.metadata)
+    const capabilities = local.scene.manifest.capabilities
+    const [localFrame, remoteFrame] = await Promise.all([
+      local.scene.loadFrame(0, { capabilities }),
+      remote.scene.loadFrame(0, { capabilities }),
+    ])
+    expect(compareNormalizedFramesV1(localFrame, remoteFrame)).toEqual([])
+    expect(hosted.requests.length).toBeGreaterThan(0)
+    local.scene.dispose()
+    remote.scene.dispose()
+    await hosted.dispose()
   })
 })
