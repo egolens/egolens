@@ -11,6 +11,7 @@ import { assembleGraphSceneV1 } from '../runtime/GraphSceneAssembler'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 import { MappedByteSourceV1 } from '../source/ByteSource'
 import { remoteTransportFixtureV1 } from './remoteTransportFixture'
+import { expectPortableShareRoundTripV1 } from './portableShareRoundTripFixture'
 
 function lidarFile(points: readonly (readonly number[])[]): File {
   const buffer = new ArrayBuffer(points.length * 20)
@@ -270,5 +271,10 @@ describe('nuScenes executable recipe graph', () => {
     local.scene.dispose()
     remote.scene.dispose()
     await hosted.dispose()
+  })
+
+  it('restores a counted portable share in an empty profile through the ordinary store path', async () => {
+    const { compiledRecipe, files } = fixture()
+    await expectPortableShareRoundTripV1({ entries: files, compiledRecipe, sceneId: 'scene-0001' })
   })
 })

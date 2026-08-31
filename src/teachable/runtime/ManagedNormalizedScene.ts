@@ -29,6 +29,11 @@ export interface OwnedBatchPoolV1<TResult> {
 export interface ManagedNormalizedSceneOptionsV1 {
   /** Worker timestamps before unit normalization (AV2 workers use nanoseconds). */
   readonly workerTimestamps?: readonly bigint[]
+  /**
+   * Portable graph scenes decode their own point/camera payloads through the
+   * delegate and therefore do not attach dataset-specific worker pools.
+   */
+  readonly delegateOwnsFramePayloads?: boolean
   readonly pointCacheByteLimit?: number
   readonly cameraCacheByteLimit?: number
   readonly metadataFrameLimit?: number
@@ -151,6 +156,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
   readonly #pointCacheByteLimit: number
   readonly #cameraCacheByteLimit: number
   readonly #metadataFrameLimit: number
+  readonly #delegateOwnsFramePayloads: boolean
   readonly #abortController = new AbortController()
   readonly #metadataFrames = new Map<number, Promise<NormalizedFrameV1>>()
   readonly #resolvedMetadataFrames = new Map<number, NormalizedFrameV1>()
@@ -198,6 +204,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
     this.#pointCacheByteLimit = positiveByteLimit(options.pointCacheByteLimit, DEFAULT_POINT_CACHE_BYTES)
     this.#cameraCacheByteLimit = positiveByteLimit(options.cameraCacheByteLimit, DEFAULT_CAMERA_CACHE_BYTES)
     this.#metadataFrameLimit = positiveByteLimit(options.metadataFrameLimit, DEFAULT_METADATA_FRAME_LIMIT)
+    this.#delegateOwnsFramePayloads = options.delegateOwnsFramePayloads === true
     const workerTimestamps = options.workerTimestamps ?? delegate.index.timestampsMicros
     workerTimestamps.forEach((timestamp, index) => this.#workerTimestampToFrame.set(timestamp, index))
     this.#unregisterPerformance = registerPerformanceRuntime(this)
@@ -238,18 +245,22 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
   }
 
   hasPointFrame(index: number): boolean {
+    if (this.#delegateOwnsFramePayloads) return Number.isSafeInteger(index) && index >= 0 && index < this.index.timestampsMicros.length
     return this.#pointFrameToBatch.has(index)
   }
 
   hasCameraFrame(index: number): boolean {
+    if (this.#delegateOwnsFramePayloads) return Number.isSafeInteger(index) && index >= 0 && index < this.index.timestampsMicros.length
     return this.#cameraFrameToBatch.has(index)
   }
 
   cachedPointFrames(): readonly number[] {
+    if (this.#delegateOwnsFramePayloads) return [...this.#resolvedMetadataFrames.keys()].sort((left, right) => left - right)
     return [...this.#pointFrameToBatch.keys()].sort((left, right) => left - right)
   }
 
   cachedCameraFrames(): readonly number[] {
+    if (this.#delegateOwnsFramePayloads) return [...this.#resolvedMetadataFrames.keys()].sort((left, right) => left - right)
     return [...this.#cameraFrameToBatch.keys()].sort((left, right) => left - right)
   }
 
@@ -543,7 +554,9 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
     }
     let pending = this.#metadataFrames.get(index)
     if (!pending) {
-      const capabilities = frameCapabilitiesWithoutWorkerOutputs(this.manifest.capabilities)
+      const capabilities = this.#delegateOwnsFramePayloads
+        ? this.manifest.capabilities
+        : frameCapabilitiesWithoutWorkerOutputs(this.manifest.capabilities)
       pending = this.#delegate.loadFrame(index, {
         capabilities,
         signal: linkedSignal(this.#abortController.signal, requestSignal),

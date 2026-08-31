@@ -5,7 +5,7 @@
  * fix in syncSegmentToUrl.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { parseViewParams, buildShareUrl, syncSegmentToUrl, setUrlSource } from '../urlState'
+import { parseViewParams, buildShareUrl, syncSegmentToUrl, syncWindowToUrl, setUrlSource } from '../urlState'
 
 describe('parseViewParams t0/t1', () => {
   it('parses a digit pair as strings (int64-safe)', () => {
@@ -63,5 +63,15 @@ describe('syncSegmentToUrl embed-param preservation', () => {
     // …while the per-scene window does not
     expect(params.get('t0')).toBeNull()
     expect(params.get('t1')).toBeNull()
+  })
+})
+
+describe('hash-bound referenced share window', () => {
+  it('does not mutate a referenced descriptor into an ambiguous mixed form', () => {
+    window.location.href = `http://localhost/?share=${encodeURIComponent('http://127.0.0.1/share.json')}&shareHash=sha256:${'a'.repeat(64)}`
+    const spy = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {})
+    syncWindowToUrl({ t0: '100', t1: '200' })
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
   })
 })
