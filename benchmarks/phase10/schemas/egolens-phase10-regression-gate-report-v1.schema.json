@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-phase10-regression-gate-report-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "candidateCommit", "testFiles", "tests", "suiteHash", "passed", "reportHash"],
+  "properties": {
+    "schema": { "const": "egolens-phase10-regression-gate-report-v1" },
+    "candidateCommit": { "$ref": "#/$defs/commit" },
+    "testFiles": { "type": "integer", "minimum": 1 },
+    "tests": { "type": "integer", "minimum": 1 },
+    "suiteHash": { "$ref": "#/$defs/hash" },
+    "passed": { "const": true },
+    "reportHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+  }
+}

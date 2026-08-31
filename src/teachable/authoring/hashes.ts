@@ -27,9 +27,21 @@ export async function formatFingerprintV1(
   recipe: EgoLensAdapterRecipeV1,
   inventory: SourceInventoryV1,
 ): Promise<string> {
-  const entries = inventory.snapshot().entries.map((entry) => ({
+  return formatFingerprintEntriesV1(recipe, inventory.snapshot().entries)
+}
+
+/** Transport-neutral format identity over the same canonical inventory surface. */
+export async function formatFingerprintEntriesV1(
+  recipe: EgoLensAdapterRecipeV1,
+  inventoryEntries: readonly { readonly path: string; readonly extension?: string }[],
+): Promise<string> {
+  const entries = inventoryEntries.map((entry) => ({
     path: pathTemplate(entry.path),
-    extension: entry.extension,
+    extension: entry.extension ?? (() => {
+      const leaf = entry.path.split('/').at(-1) ?? ''
+      const index = leaf.lastIndexOf('.')
+      return index > 0 ? leaf.slice(index).toLowerCase() : ''
+    })(),
   }))
   const readers = Object.values(recipe.sources).map((source) => source.reader).sort()
   return await sha256Text(canonicalizeJson({ version: 1, entries, readers } as JsonValue))

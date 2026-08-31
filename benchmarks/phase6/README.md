@@ -32,8 +32,9 @@ licensed, pinned sources (do not commit this file):
 
 Pass it as `--switch-scenarios /absolute/path/to/scenarios.json`. The runner
 then alternates those sources through the ordinary application load command in
-one page/runtime. Without this option, Shift+Arrow exercises only the initial
-dataset's segment-switch path and is not sufficient for the Spec 012
+one page/runtime. Without this option, each switch performs a real
+dispose/reload generation of the initial source; that is suitable for the
+same-transport Phase 10 soak but is not sufficient for the Spec 012
 cross-dataset gate.
 
 Use an explicitly licensed URL for Waymo and a pinned log URL for Argoverse 2.

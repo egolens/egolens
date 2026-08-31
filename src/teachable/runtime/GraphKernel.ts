@@ -25,7 +25,11 @@ export interface GraphExecutionResultV1 {
 
 const DEFAULT_LIMITS: GraphExecutionLimitsV1 = {
   maxNodes: 10_000,
-  maxSourceBytes: 512 * 1024 * 1024,
+  // Source bytes are cumulative I/O, not retained memory. A complete shipped
+  // Waymo case is just under 512 MiB and legitimately rereads bounded Parquet
+  // footer/range metadata while traversing the full optional perception
+  // surface. Keep a finite session budget while leaving that overhead room.
+  maxSourceBytes: 1024 * 1024 * 1024,
   maxAllocationBytes: 512 * 1024 * 1024,
 }
 

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-phase10-build-boundary-report-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "candidateCommit", "production", "author", "passed", "reportHash"],
+  "properties": {
+    "schema": { "const": "egolens-phase10-build-boundary-report-v1" },
+    "candidateCommit": { "$ref": "#/$defs/commit" },
+    "production": { "$ref": "#/$defs/build" },
+    "author": { "$ref": "#/$defs/build" },
+    "passed": { "const": true },
+    "reportHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fileCount", "totalBytes", "inventoryHash", "sourceMaps", "deniedMarkers", "exactCommitEmbedded", "passed"],
+      "properties": {
+        "name": { "enum": ["production", "author"] },
+        "fileCount": { "type": "integer", "minimum": 1 },
+        "totalBytes": { "type": "integer", "minimum": 1 },
+        "inventoryHash": { "$ref": "#/$defs/hash" },
+        "sourceMaps": { "const": 0 },
+        "deniedMarkers": { "const": 0 },
+        "exactCommitEmbedded": { "const": true },
+        "passed": { "const": true }
+      }
+    }
+  }
+}

@@ -25,12 +25,20 @@ jobs:
         run: npm run test:oracle-receipts
       - name: Adapter Amnesia trust-boundary tests
         run: npm run test:adapter-amnesia
+      - name: Phase 10 evidence-contract and fresh-process tests
+        run: npm run test:phase10-evidence
       - name: Lint (errors block, warnings reported)
         run: npx eslint src
       - name: Build (includes type-check)
         run: npm run build
       - name: Build isolated Adapter Amnesia author workspace
         run: npm run build:amnesia-author
+      - name: Production and isolated build-boundary scan
+        run: >-
+          npm run phase10:build-boundary --
+          --production dist
+          --author dist-amnesia-author
+          --expected-commit "$(git rev-parse HEAD)"
       - name: Bundle size report
         run: |
           {

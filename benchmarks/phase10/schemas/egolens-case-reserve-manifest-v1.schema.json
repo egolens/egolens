@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-case-reserve-manifest-v1.schema.json",
+  "title": "EgoLens public-safe precommitted case and reserve manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "rung", "datasetId", "releaseId", "officialSourceUrl",
+    "frozenBeforeInspection", "cases", "manifestHash"
+  ],
+  "properties": {
+    "schema": { "const": "egolens-case-reserve-manifest-v1" },
+    "rung": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "datasetId": { "$ref": "#/$defs/id" },
+    "releaseId": { "$ref": "#/$defs/id" },
+    "officialSourceUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+    "frozenBeforeInspection": { "const": true },
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "order", "role", "reserveFor", "caseId", "sourceCaseManifestHash",
+          "sourceManifestHash", "fileCount", "totalBytes"
+        ],
+        "properties": {
+          "order": { "type": "integer", "minimum": 0 },
+          "role": { "enum": ["D", "A", "B", "reserve"] },
+          "reserveFor": { "oneOf": [{ "type": "null" }, { "enum": ["A", "B"] }] },
+          "caseId": { "$ref": "#/$defs/id" },
+          "sourceCaseManifestHash": { "$ref": "#/$defs/hash" },
+          "sourceManifestHash": { "$ref": "#/$defs/hash" },
+          "fileCount": { "type": "integer", "minimum": 1 },
+          "totalBytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        }
+      }
+    },
+    "manifestHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

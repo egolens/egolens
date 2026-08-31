@@ -9,7 +9,9 @@ import {
 } from '../share/ShareDescriptor'
 import { sharedVerifiedRecipeCacheV1 } from '../share/RecipeTransport'
 import {
+  createActiveConformanceScene,
   currentPortableShareDescriptorV1,
+  getActiveConformanceDescriptor,
   useSceneStore,
 } from '../../stores/useSceneStore'
 import { remoteTransportFixtureV1 } from './remoteTransportFixture'
@@ -101,6 +103,18 @@ export async function expectPortableShareRoundTripV1(input: {
     expect(hosted.requests.map((request) => request.path)).toEqual(expect.arrayContaining([
       '/recipe.json', '/catalog.json',
     ]))
+
+    const active = getActiveConformanceDescriptor()
+    expect(active).toMatchObject({
+      datasetId: input.compiledRecipe.normalizedManifest.id,
+      sceneId: input.sceneId,
+      frameCount: state.totalFrames,
+    })
+    const isolated = await createActiveConformanceScene()
+    expect(isolated.manifest.id).toBe(input.compiledRecipe.normalizedManifest.id)
+    await expect(isolated.loadFrame(0, { capabilities: isolated.manifest.capabilities }))
+      .resolves.toMatchObject({ index: 0 })
+    isolated.dispose()
 
     const rebuilt = currentPortableShareDescriptorV1(descriptor.presentation.cameraPose)
     expect(rebuilt?.source).toEqual(descriptor.source)

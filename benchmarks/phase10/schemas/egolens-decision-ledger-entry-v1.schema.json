@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-decision-ledger-entry-v1.schema.json",
+  "title": "EgoLens append-only evidence and decision ledger entry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "ledgerId", "sequence", "previousEntryHash", "event", "occurredAt",
+    "sourceCaseManifestHash", "attemptHash", "firstFailureHash", "classification",
+    "chosenLayer", "genericChangeCommit", "consumedCaseIdHash",
+    "replacementCaseManifestHash", "regressionEvidenceHashes", "detailsHash", "entryHash"
+  ],
+  "properties": {
+    "schema": { "const": "egolens-decision-ledger-entry-v1" },
+    "ledgerId": { "$ref": "#/$defs/id" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "previousEntryHash": { "$ref": "#/$defs/nullableHash" },
+    "event": {
+      "enum": [
+        "baseline-frozen", "first-failure", "failure-classified", "generic-change-chosen",
+        "case-consumed", "replacement-selected", "regression-result", "attempt-retained"
+      ]
+    },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "sourceCaseManifestHash": { "$ref": "#/$defs/nullableHash" },
+    "attemptHash": { "$ref": "#/$defs/nullableHash" },
+    "firstFailureHash": { "$ref": "#/$defs/nullableHash" },
+    "classification": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/classification" }] },
+    "chosenLayer": {
+      "oneOf": [
+        { "type": "null" },
+        { "enum": ["source-declaration", "generic-operator", "trusted-extension", "authoring-observability", "runtime-resource", "recipe-contract", "normalized-scene-contract"] }
+      ]
+    },
+    "genericChangeCommit": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/commit" }] },
+    "consumedCaseIdHash": { "$ref": "#/$defs/nullableHash" },
+    "replacementCaseManifestHash": { "$ref": "#/$defs/nullableHash" },
+    "regressionEvidenceHashes": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } },
+    "detailsHash": { "$ref": "#/$defs/hash" },
+    "entryHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableHash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "classification": {
+      "enum": [
+        "source-limitation", "generic-reader-operator-gap", "extension-security-gap",
+        "authoring-observability-gap", "runtime-resource-gap", "recipe-contract-gap",
+        "normalized-scene-contract-gap"
+      ]
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "datasetId": "waymo",
+  "caseId": "phase6-waymo-rich-001",
+  "sourceFingerprint": "sha256-dc9b8680e1500c4305b01a5129b484bd827b6b50f8ec993786f7b7b2cca2e7a5",
+  "requiredCapabilities": [
+    "boxes2d",
+    "boxes3d",
+    "cameraImages",
+    "cameraSegmentation",
+    "egoPoses",
+    "lidarSegmentation",
+    "pointClouds",
+    "segmentMetadata",
+    "timeline",
+    "trajectories"
+  ],
+  "frameIndices": [0, 29, 79, 129, 197],
+  "sampleValuesPerBuffer": 64,
+  "perceptualCaptures": [
+    {
+      "id": "front-camera-frame-29",
+      "frameIndex": 29,
+      "selector": "[data-egolens-camera-id=\"1\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "front-camera-segmentation-frame-129",
+      "frameIndex": 129,
+      "selector": "[data-egolens-camera-id=\"1\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": true,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-frame-0",
+      "frameIndex": 0,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "off",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-lidar-segmentation-frame-79",
+      "frameIndex": 79,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "presentation": {
+        "colormapMode": "segment",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    }
+  ]
+}

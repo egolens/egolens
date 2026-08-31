@@ -511,6 +511,113 @@ export async function scanDataTransfer(
 }
 
 /**
+ * Scan a browser directory-input FileList. This is the ordinary non-handle
+ * picker path and is also the only CDP-attachable local-source surface used by
+ * the fresh-process evidence runner. It never reads bytes itself; it only
+ * preserves the browser-authorized File objects under canonical relative keys.
+ */
+export function scanSelectedFiles(files: FileList | readonly File[]): ScanResult {
+  const selected = Array.from(files)
+  const raw = selected.map((file) => ({
+    file,
+    path: (file.webkitRelativePath || file.name).replaceAll('\\', '/'),
+  })).filter((entry) => entry.path.length > 0)
+  const firstSegments = raw.map((entry) => entry.path.split('/'))
+  const commonFirst = firstSegments.length > 0
+    && firstSegments.every((segments) => segments.length > 1 && segments[0] === firstSegments[0]?.[0])
+    ? firstSegments[0]![0]
+    : null
+  const policyCandidates = new Set(nuScenesRecipe.match.versionRoot?.candidates ?? [])
+  const preserveFirst = commonFirst !== null && (
+    getAllKnownComponents().has(commonFirst)
+    || policyCandidates.has(commonFirst)
+    || ['samples', 'sweeps', 'lidarseg', 'panoptic', 'sensors', 'calibration'].includes(commonFirst)
+  )
+  const entries = raw.map((entry) => ({
+    file: entry.file,
+    path: commonFirst && !preserveFirst ? entry.path.split('/').slice(1).join('/') : entry.path,
+  })).sort((left, right) => left.path.localeCompare(right.path, 'en'))
+  const inventory = sourceInventoryFromFilesV1(
+    entries.map((entry) => [entry.path, entry.file] as [string, File]),
+  )
+  const topLevel = [...new Set(entries.map((entry) => entry.path.split('/')[0]).filter(Boolean))]
+
+  const policy = nuScenesRecipe.match.versionRoot
+  if (policy) {
+    const filesByRoot = new Map<string, Map<string, File>>()
+    for (const candidate of policy.candidates) filesByRoot.set(candidate, new Map())
+    for (const entry of entries) {
+      const [root, fileName, ...rest] = entry.path.split('/')
+      if (rest.length === 0 && fileName?.endsWith('.json') && filesByRoot.has(root)) {
+        filesByRoot.get(root)!.set(fileName, entry.file)
+      }
+    }
+    const viableRoots = [...filesByRoot]
+      .filter(([, found]) => policy.requiredFiles.every((file) => found.has(file)))
+      .map(([root]) => root)
+    if (viableRoots.length > 0) {
+      const selectedRoot = selectVersionRootV1(policy, viableRoots)
+      const allFiles = new Map<string, File>(filesByRoot.get(selectedRoot))
+      allFiles.set('__versionRoot__', new File([], selectedRoot))
+      for (const entry of entries) {
+        if (entry.path.startsWith('samples/')
+          || entry.path.startsWith(`lidarseg/${selectedRoot}/`)
+          || entry.path.startsWith(`panoptic/${selectedRoot}/`)) {
+          allFiles.set(entry.path, entry.file)
+        }
+      }
+      return { segments: new Map([['__nuscenes__', allFiles]]), inventory }
+    }
+  }
+
+  const av2Prefixes = [...new Set(entries.flatMap((entry) => {
+    const segments = entry.path.split('/')
+    const index = segments.indexOf('sensors')
+    return index < 0 ? [] : [segments.slice(0, index).join('/')]
+  }))].sort()
+  const av2Prefix = av2Prefixes.find((prefix) => {
+    const start = prefix ? `${prefix}/calibration/` : 'calibration/'
+    return entries.some((entry) => entry.path.startsWith(start))
+  })
+  if (av2Prefix !== undefined) {
+    const start = av2Prefix ? `${av2Prefix}/` : ''
+    const allFiles = new Map<string, File>()
+    for (const entry of entries) {
+      if (!entry.path.startsWith(start)) continue
+      const relative = entry.path.slice(start.length)
+      if ((relative.endsWith('.feather') && !relative.includes('/'))
+        || /^calibration\/[^/]+\.feather$/u.test(relative)
+        || /^sensors\/lidar\/[^/]+\.feather$/u.test(relative)
+        || /^sensors\/cameras\/[^/]+\/[^/]+\.jpg$/u.test(relative)) {
+        allFiles.set(relative, entry.file)
+      }
+    }
+    const logId = av2Prefix.split('/').at(-1) || commonFirst || 'av2_log'
+    allFiles.set('__logId__', new File([], logId))
+    return { segments: new Map([['__argoverse2__', allFiles]]), inventory }
+  }
+
+  const segments = new Map<string, Map<string, File>>()
+  for (const entry of entries) {
+    const parts = entry.path.split('/')
+    const componentIndex = parts.findIndex((part) => getAllKnownComponents().has(part))
+    const fileName = parts.at(-1)
+    if (componentIndex < 0 || !fileName?.endsWith('.parquet')) continue
+    const component = parts[componentIndex]
+    const segmentId = fileName.slice(0, -'.parquet'.length)
+    const componentFiles = segments.get(segmentId) ?? new Map<string, File>()
+    componentFiles.set(component, entry.file)
+    segments.set(segmentId, componentFiles)
+  }
+  if (segments.size > 0) return { segments, inventory }
+  return {
+    segments,
+    rejection: describeRejection(topLevel),
+    ...(entries.length > 0 ? { inventory } : {}),
+  }
+}
+
+/**
  * Scan using the legacy FileSystemEntry API (webkitGetAsEntry).
  */
 async function scanFileSystemEntry(

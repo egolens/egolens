@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-preflight-mode-observation-v1.schema.json",
+  "title": "EgoLens Phase 10 preflight mode observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "datasetId", "caseId", "candidateCommit", "mode", "browserProcess",
+    "noAgent", "emptyProfile", "sourceManifestHash", "catalogHash",
+    "shareDescriptorHash", "recipeHash", "formatFingerprint", "operatorSetFingerprint",
+    "capabilities", "capabilityHash", "structuralHash", "numericHash", "perceptualHash",
+    "presentationHash", "performanceHash", "lifecycleHash", "paused", "passed",
+    "observationHash"
+  ],
+  "properties": {
+    "schema": { "const": "egolens-preflight-mode-observation-v1" },
+    "datasetId": { "enum": ["waymo", "nuscenes", "argoverse2"] },
+    "caseId": { "$ref": "#/$defs/id" },
+    "candidateCommit": { "$ref": "#/$defs/commit" },
+    "mode": { "enum": ["local", "remote", "share"] },
+    "browserProcess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processNonce", "profileNonce", "profileMode", "startedAt", "stoppedAt",
+        "processExitObserved", "userDataDirectoryCreatedFresh", "userDataDirectoryRemoved",
+        "evidenceHash"
+      ],
+      "properties": {
+        "processNonce": { "$ref": "#/$defs/uuid" },
+        "profileNonce": { "$ref": "#/$defs/uuid" },
+        "profileMode": { "const": "empty" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "stoppedAt": { "type": "string", "format": "date-time" },
+        "processExitObserved": { "const": true },
+        "userDataDirectoryCreatedFresh": { "const": true },
+        "userDataDirectoryRemoved": { "const": true },
+        "evidenceHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "noAgent": { "const": true },
+    "emptyProfile": { "type": "boolean" },
+    "sourceManifestHash": { "$ref": "#/$defs/hash" },
+    "catalogHash": { "$ref": "#/$defs/nullableHash" },
+    "shareDescriptorHash": { "$ref": "#/$defs/nullableHash" },
+    "recipeHash": { "$ref": "#/$defs/hash" },
+    "formatFingerprint": { "$ref": "#/$defs/hash" },
+    "operatorSetFingerprint": { "$ref": "#/$defs/hash" },
+    "capabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "capabilityHash": { "$ref": "#/$defs/hash" },
+    "structuralHash": { "$ref": "#/$defs/hash" },
+    "numericHash": { "$ref": "#/$defs/hash" },
+    "perceptualHash": { "$ref": "#/$defs/hash" },
+    "presentationHash": { "$ref": "#/$defs/hash" },
+    "performanceHash": { "$ref": "#/$defs/hash" },
+    "lifecycleHash": { "$ref": "#/$defs/hash" },
+    "paused": { "const": true },
+    "passed": { "const": true },
+    "observationHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableHash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "uuid": { "type": "string", "format": "uuid" }
+  }
+}

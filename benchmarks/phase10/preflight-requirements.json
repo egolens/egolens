@@ -1,0 +1,101 @@
+{
+  "kind": "egolens-phase10-preflight-requirements",
+  "schemaVersion": 1,
+  "baselinePolicy": {
+    "exactCandidateCommit": true,
+    "heldOutSemanticInspectionBeforeFreeze": false,
+    "heldOutContentBlindManifestFreezeBeforeFreeze": false,
+    "requiredModes": ["local", "remote", "share"],
+    "shareRequiresEmptyProfile": true,
+    "shareOpensPaused": true,
+    "agentCallsPerMode": 0
+  },
+  "datasets": [
+    {
+      "datasetId": "waymo",
+      "caseId": "phase6-waymo-rich-001",
+      "recipeHash": "sha256:7f691f45d660440da504e2d1fe74b87b91d98edf62cddfc7b2cc5d6b36f8e2c4",
+      "requiredCapabilities": [
+        "boxes2d", "boxes3d", "cameraImages", "cameraSegmentation",
+        "egoPoses", "lidarSegmentation", "pointClouds", "segmentMetadata",
+        "timeline", "trajectories"
+      ],
+      "frameIndices": [0, 29, 79, 129, 197],
+      "perceptualReferenceIds": [
+        "front-camera-frame-29", "front-camera-segmentation-frame-129",
+        "viewport-frame-0", "viewport-lidar-segmentation-frame-79"
+      ]
+    },
+    {
+      "datasetId": "nuscenes",
+      "caseId": "phase6-nuscenes-urban-vru-001",
+      "recipeHash": "sha256:244268a28844062f768b2d434020fd32e8753380141d6dd0f85f3b525acd7b9a",
+      "requiredCapabilities": [
+        "boxes2d", "boxes3d", "cameraImages", "egoPoses",
+        "lidarSegmentation", "pointClouds", "radarPointClouds",
+        "segmentMetadata", "timeline", "trajectories"
+      ],
+      "frameIndices": [0, 19, 39],
+      "perceptualReferenceIds": [
+        "front-camera-frame-19", "viewport-frame-0",
+        "viewport-lidar-segmentation-frame-39"
+      ]
+    },
+    {
+      "datasetId": "argoverse2",
+      "caseId": "phase6-av2-urban-001",
+      "recipeHash": "sha256:6cc1de10672380c8672648c9a69e9dc65ee97b207cb621a5c7a348c4393a5eda",
+      "requiredCapabilities": [
+        "boxes2d", "boxes3d", "cameraImages", "egoPoses", "pointClouds",
+        "segmentMetadata", "timeline", "trajectories"
+      ],
+      "frameIndices": [0, 78, 156],
+      "perceptualReferenceIds": [
+        "front-camera-frame-78", "viewport-boxes-frame-156", "viewport-frame-0"
+      ]
+    }
+  ],
+  "requiredNegativeCases": [
+    "catalog-traversal",
+    "cors-denial",
+    "credential-isolation",
+    "redirect-confinement",
+    "source-tampering",
+    "oversized-response",
+    "abort-propagation",
+    "missing-range-support",
+    "source-hash-mismatch",
+    "recipe-hash-mismatch",
+    "descriptor-hash-mismatch",
+    "ambiguous-share-form",
+    "unavailable-registered-extension"
+  ],
+  "requiredGates": [
+    "regression",
+    "productionBuild",
+    "authorBuild",
+    "productionBoundary",
+    "authorBoundary",
+    "adapterAmnesia",
+    "oracleReceipts",
+    "performanceLifecycle",
+    "evidenceHarness"
+  ],
+  "generalizationHarness": {
+    "phases": ["D", "A", "B-persisted-local", "B-imported-local", "B-remote-share"],
+    "failureClassifications": [
+      "source-limitation",
+      "generic-reader-operator-gap",
+      "extension-security-gap",
+      "authoring-observability-gap",
+      "runtime-resource-gap",
+      "recipe-contract-gap",
+      "normalized-scene-contract-gap"
+    ],
+    "requiresPrecommittedReserves": true,
+    "requiresFirstFailureBeforeChange": true,
+    "requiresHashChainedLedger": true,
+    "requiresSemanticHumanCorrectionForA": true,
+    "requiresFreshBrowserProcessForEveryRun": true
+  }
+}

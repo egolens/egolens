@@ -58,6 +58,25 @@ function makeSource(
 }
 
 describe('RemoteByteSourceV1 verified transport', () => {
+  it('invokes Web IDL fetch with the global receiver', async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const receivers: unknown[] = []
+    const request = async function (this: unknown): Promise<Response> {
+      receivers.push(this)
+      return new Response(bytes.slice().buffer, {
+        status: 200,
+        headers: { 'content-length': String(bytes.byteLength) },
+      })
+    } as typeof fetch
+    const source = makeSource(bytes, {
+      rootUrl: 'https://data.example.test/root/',
+      fetch: request,
+    }, null)
+
+    await expect(source.read('frames/data.bin')).resolves.toEqual(bytes.buffer)
+    expect(receivers).toEqual([globalThis])
+  })
+
   it('expands ranges to transport chunks, verifies them, and reuses verified cache bytes', async () => {
     const bytes = new Uint8Array(140_000)
     for (let index = 0; index < bytes.length; index += 1) bytes[index] = index & 0xff

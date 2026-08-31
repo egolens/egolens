@@ -3,7 +3,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { verifyAmnesiaAttestation } from './lib/amnesia-evidence.mjs'
-import { canonicalize, verifySignedReceipt } from './lib/oracle-receipts.mjs'
+import { canonicalize, sha256Canonical, verifySignedReceipt } from './lib/oracle-receipts.mjs'
 
 const argv = process.argv.slice(2)
 const values = (name) => argv.flatMap((entry, index) => entry === `--${name}` ? [argv[index + 1]] : []).filter(Boolean)
@@ -47,7 +47,7 @@ const receipts = await Promise.all(receiptPaths.map(async (receiptPath) => ({
   path: path.resolve(receiptPath),
   receipt: JSON.parse(await readFile(path.resolve(receiptPath), 'utf8')),
 })))
-const checks = receipts.map(({ path: receiptPath, receipt }) => {
+const checks = receipts.map(({ receipt }) => {
   const requiredChecks = ['integrity', 'target', 'coverage', 'structural', 'numeric', 'perceptual']
   const receiptChecks = Array.isArray(receipt.checks) ? receipt.checks : []
   const requirement = requirementByTarget.get(targetKey(receipt.target ?? {}))
@@ -57,7 +57,6 @@ const checks = receipts.map(({ path: receiptPath, receipt }) => {
   return {
     datasetId: receipt.target?.datasetId ?? null,
     caseId: receipt.target?.caseId ?? null,
-    path: receiptPath,
     passed: verifySignedReceipt(receipt, publicKey, options.keyId)
       && receipt.passed === true
       && receipt.oracleGeneratorCommit === options.expectedGeneratorCommit
@@ -85,10 +84,10 @@ const report = {
   expectedCandidateCommit: options.expectedCandidateCommit,
   amnesiaAttestationHash: attestation.attestationHash,
   signingKeyId: options.keyId,
+  requirementsHash: sha256Canonical(requirements),
   checks,
 }
 const json = `${JSON.stringify(report, null, 2)}\n`
 if (options.output) await writeFile(path.resolve(options.output), json, { flag: 'wx' })
 process.stdout.write(json)
 if (!report.passed) process.exitCode = 1
-

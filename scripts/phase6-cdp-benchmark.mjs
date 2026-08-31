@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import {
+  closeFreshProcessWorkspaceV1,
+  createFreshProcessWorkspaceV1,
+  validateFreshProcessEvidenceSetV1,
+} from './lib/fresh-process-evidence.mjs'
 import { perceptualRasterSha256V1 } from './lib/perceptual-raster.mjs'
 
 const CHROME = process.env.EGOLENS_CHROME
@@ -67,6 +71,37 @@ const adapterRecipe = adapterRecipePath
   ? JSON.parse(await readFile(adapterRecipePath, 'utf8'))
   : null
 const adapterAmnesia = options['adapter-amnesia'] === true
+const localSourceRoot = options['local-source']
+  ? path.resolve(String(options['local-source']))
+  : null
+const expectedSourceManifestHash = options['expected-source-manifest-hash']
+  ? String(options['expected-source-manifest-hash'])
+  : null
+const preflightScene = options.scene ? String(options.scene) : null
+const preflightPresentation = options.presentation
+  ? JSON.parse(await readFile(path.resolve(String(options.presentation)), 'utf8'))
+  : null
+const expectedPreflightIdentity = options['expected-preflight-identity']
+  ? JSON.parse(await readFile(path.resolve(String(options['expected-preflight-identity'])), 'utf8'))
+  : null
+const preflightIdentityKeys = [
+  'datasetId', 'caseId', 'sourceManifestHash', 'catalogHash', 'shareDescriptorHash',
+  'recipeHash', 'formatFingerprint', 'operatorSetFingerprint',
+]
+if (expectedPreflightIdentity
+  && JSON.stringify(Object.keys(expectedPreflightIdentity).sort()) !== JSON.stringify([...preflightIdentityKeys].sort())) {
+  throw new Error('--expected-preflight-identity must contain the closed Phase 10 identity shape')
+}
+if (expectedSourceManifestHash && !/^sha256:[0-9a-f]{64}$/u.test(expectedSourceManifestHash)) {
+  throw new Error('--expected-source-manifest-hash must be a lowercase sha256: digest')
+}
+if (localSourceRoot && !expectedSourceManifestHash) {
+  throw new Error('--local-source requires --expected-source-manifest-hash for counted identity verification')
+}
+if (expectedPreflightIdentity && localSourceRoot
+  && expectedPreflightIdentity.sourceManifestHash !== expectedSourceManifestHash) {
+  throw new Error('Local source and expected preflight identity hashes disagree')
+}
 if (Boolean(conformanceConfig) !== Boolean(conformanceOutput)) {
   throw new Error('--conformance-config and --conformance-output must be provided together')
 }
@@ -75,6 +110,12 @@ if (adapterAmnesia !== Boolean(adapterRecipe)) {
 }
 if (adapterAmnesia && !conformanceConfig) {
   throw new Error('Adapter Amnesia is available only for a one-shot conformance capture')
+}
+if (localSourceRoot && (() => {
+  const params = new URL(String(options.url)).searchParams
+  return params.has('share') || params.get('shareVersion') === '1'
+})()) {
+  throw new Error('--local-source cannot be combined with a portable share URL')
 }
 if (conformanceConfig && (warmupCount !== 0 || runCount !== 1)) {
   throw new Error('conformance capture requires --warmups 0 --runs 1')
@@ -102,10 +143,13 @@ for (const [index, scenario] of switchScenarios.entries()) {
 
 function withPerf(urlString) {
   const url = new URL(urlString)
+  if (url.searchParams.has('share') || url.searchParams.get('shareVersion') === '1') {
+    return url.href
+  }
   url.searchParams.set('perf', '1')
   url.searchParams.set('benchmarkHold', '1')
   url.searchParams.set('speed', '4')
-  if (conformanceConfig) url.searchParams.set('oracleCapture', '1')
+  if (conformanceConfig || expectedPreflightIdentity) url.searchParams.set('oracleCapture', '1')
   if (adapterAmnesia) url.searchParams.set('adapterAmnesia', '1')
   return url.href
 }
@@ -211,6 +255,29 @@ async function waitFor(client, sessionId, expression, timeout = timeoutMs) {
   throw new Error(`Timed out waiting for: ${expression}`)
 }
 
+async function enumerateLocalSourceFiles(root) {
+  const rootStat = await lstat(root)
+  if (rootStat.isSymbolicLink()) throw new Error('--local-source cannot be a symbolic link')
+  if (rootStat.isFile()) return [root]
+  if (!rootStat.isDirectory()) throw new Error('--local-source must be a regular file or directory')
+  const files = []
+  const visit = async (directory) => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name)
+      if (entry.isSymbolicLink()) throw new Error(`--local-source contains a symbolic link: ${entry.name}`)
+      if (entry.isDirectory()) await visit(absolute)
+      else if (entry.isFile()) files.push(absolute)
+      else throw new Error(`--local-source contains a non-regular entry: ${entry.name}`)
+      if (files.length > 50_000) throw new Error('--local-source exceeds the 50,000-file browser inventory limit')
+    }
+  }
+  await visit(root)
+  if (files.length === 0) throw new Error('--local-source is empty')
+  return files
+}
+
 async function exerciseFeatureToggles(client, pageSession) {
   await evaluate(client, pageSession, `(async () => {
     const pause = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -248,6 +315,7 @@ async function captureConformanceArtifact(client, pageSession) {
   )
   const expectedCapabilities = [...conformanceConfig.requiredCapabilities].sort()
   if (!descriptor || descriptor.datasetId !== conformanceConfig.datasetId
+    || (preflightScene && descriptor.sceneId !== preflightScene)
     || JSON.stringify(descriptor.capabilities) !== JSON.stringify(expectedCapabilities)
     || (adapterAmnesia && (descriptor.mode !== 'adapter-amnesia'
       || !/^sha256:[0-9a-f]{64}$/u.test(descriptor.recipeHash)))
@@ -275,7 +343,17 @@ async function captureConformanceArtifact(client, pageSession) {
       const element = document.querySelector(${JSON.stringify(capture.selector)});
       if (!(element instanceof HTMLElement)) return null;
       const rect = element.getBoundingClientRect();
-      return { x: rect.left, y: rect.top, width: rect.width, height: rect.height, scale: 1 };
+      // Capture the deterministic inner integer-pixel rectangle. Flex layout
+      // can place an edge at N + 0.5 CSS pixels and Chromium may round the
+      // same transport-neutral view to N or N + 1 across fresh processes.
+      const x = Math.ceil(rect.left);
+      const y = Math.ceil(rect.top);
+      return {
+        x, y,
+        width: Math.max(0, Math.floor(rect.right) - x),
+        height: Math.max(0, Math.floor(rect.bottom) - y),
+        scale: 1,
+      };
     })()`)
     if (!clip || clip.width <= 0 || clip.height <= 0) {
       throw new Error(`Perceptual capture selector is missing or empty: ${capture.selector}`)
@@ -311,6 +389,11 @@ async function captureConformanceArtifact(client, pageSession) {
     perceptualReferences: references,
   })})`, timeoutMs)
   if (!artifact?.artifactHash) throw new Error('Conformance capture returned no artifact')
+  const presentation = await evaluate(
+    client,
+    pageSession,
+    'globalThis.__EGOLENS_ORACLE_CAPTURE__.presentation()',
+  )
   await mkdir(path.dirname(conformanceOutput), { recursive: true })
   await writeFile(conformanceOutput, `${JSON.stringify(artifact)}\n`, { flag: 'wx' })
   return {
@@ -320,6 +403,8 @@ async function captureConformanceArtifact(client, pageSession) {
     generatorCommit: artifact.provenance?.generatorCommit ?? null,
     runtimeId: artifact.provenance?.runtimeId ?? null,
     recipeHash: descriptor.recipeHash,
+    identity: descriptor.preflightIdentity,
+    presentation,
   }
 }
 
@@ -497,6 +582,7 @@ async function runScenario(client, browserVersion, runIndex) {
 
   await Promise.all([
     client.send('Page.enable', {}, pageSession),
+    client.send('DOM.enable', {}, pageSession),
     client.send('Runtime.enable', {}, pageSession),
     client.send('Network.enable', { maxTotalBufferSize: 100_000_000 }, pageSession),
     client.send('Performance.enable', {}, pageSession),
@@ -513,6 +599,19 @@ async function runScenario(client, browserVersion, runIndex) {
       filter: [{ type: 'worker', exclude: false }, { type: 'service_worker', exclude: false }, { exclude: true }],
     }, pageSession),
   ])
+  await client.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `
+      Object.defineProperties(globalThis, {
+        __EGOLENS_BENCHMARK_MODE__: { value: true, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_BENCHMARK_HOLD__: { value: true, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_ORACLE_CAPTURE_REQUESTED__: { value: ${Boolean(conformanceConfig || expectedPreflightIdentity)}, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_ADAPTER_AMNESIA_CAPTURE__: { value: ${adapterAmnesia}, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_EXPECTED_SOURCE_MANIFEST_HASH__: { value: ${JSON.stringify(expectedSourceManifestHash)}, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_PREFLIGHT_SCENE__: { value: ${JSON.stringify(preflightScene)}, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_PREFLIGHT_PRESENTATION__: { value: ${JSON.stringify(preflightPresentation)}, configurable: false, enumerable: false, writable: false },
+      });
+    `,
+  }, pageSession)
 
   const capture = async (label) => {
     const pageHeap = await client.send('Runtime.getHeapUsage', {}, pageSession)
@@ -599,11 +698,56 @@ async function runScenario(client, browserVersion, runIndex) {
   // React effects and produces false DOM/listener growth after disposal.
   await delay(settleMs)
   snapshots.beforeSceneLoad = await capture('before-scene-load')
-  await evaluate(client, pageSession, `window.dispatchEvent(new Event('egolens:benchmark-start')); true`)
+  if (localSourceRoot) {
+    // Enumerate first so symlinks, special entries, empty roots, and the
+    // browser inventory cap are rejected before granting the browser access.
+    // A webkitdirectory input itself must receive the directory path; passing
+    // the enumerated leaves loses webkitRelativePath in Chromium and no
+    // change event is dispatched.
+    await enumerateLocalSourceFiles(localSourceRoot)
+    const document = await client.send('DOM.getDocument', { depth: 2, pierce: true }, pageSession)
+    const input = await client.send('DOM.querySelector', {
+      nodeId: document.root.nodeId,
+      selector: '[data-testid="dataset-folder-input"]',
+    }, pageSession)
+    if (!input.nodeId) throw new Error('Ordinary local folder input is missing')
+    await client.send('DOM.setFileInputFiles', { files: [localSourceRoot], nodeId: input.nodeId }, pageSession, timeoutMs)
+  } else {
+    await evaluate(client, pageSession, `window.dispatchEvent(new Event('egolens:benchmark-start')); true`)
+  }
   await waitFor(client, pageSession, `Boolean(globalThis.__EGOLENS_PERF__?.snapshot().marks.some((mark) => mark.name.startsWith('egolens:dataset-ready:')))`)
   await waitFor(client, pageSession, `Boolean(globalThis.__EGOLENS_PERF__?.snapshot().marks.some((mark) => mark.name.startsWith('egolens:first-usable-frame:')))`)
+  if (localSourceRoot && (conformanceConfig || expectedPreflightIdentity)) {
+    await waitFor(client, pageSession, `(() => {
+      const descriptor = globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor();
+      return descriptor?.preflightIdentity?.sourceManifestHash === ${JSON.stringify(expectedSourceManifestHash)}
+        && (${JSON.stringify(preflightScene)} === null || descriptor.sceneId === ${JSON.stringify(preflightScene)});
+    })()`)
+  }
   await delay(settleMs)
   snapshots.afterWarmup = await capture('after-warmup-settle')
+  const preflight = expectedPreflightIdentity
+    ? await evaluate(client, pageSession, `(() => {
+        const descriptor = globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor();
+        const presentation = globalThis.__EGOLENS_ORACLE_CAPTURE__?.presentation();
+        return descriptor ? {
+          datasetId: descriptor.datasetId,
+          sceneId: descriptor.sceneId,
+          identity: descriptor.preflightIdentity,
+          presentation,
+        } : null;
+      })()`)
+    : null
+  if (expectedPreflightIdentity) {
+    const actualIdentity = preflight?.identity
+    const expectedRuntimeIdentity = Object.fromEntries(preflightIdentityKeys.slice(2)
+      .map((key) => [key, expectedPreflightIdentity[key]]))
+    if (!preflight || preflight.datasetId !== expectedPreflightIdentity.datasetId
+      || (preflightScene && preflight.sceneId !== preflightScene)
+      || JSON.stringify(actualIdentity) !== JSON.stringify(expectedRuntimeIdentity)) {
+      throw new Error(`Observed preflight identity does not match the counted mode: ${JSON.stringify(preflight)}`)
+    }
+  }
   const conformance = conformanceConfig
     ? await captureConformanceArtifact(client, pageSession)
     : null
@@ -644,8 +788,7 @@ async function runScenario(client, browserVersion, runIndex) {
     if (crossScenario) {
       await evaluate(client, pageSession, `window.dispatchEvent(new CustomEvent('egolens:benchmark-load', { detail: ${JSON.stringify(crossScenario)} })); true`)
     } else {
-      const code = index % 2 === 0 ? 'ArrowRight' : 'ArrowLeft'
-      await evaluate(client, pageSession, `window.dispatchEvent(new KeyboardEvent('keydown', { code: '${code}', key: '${code}', shiftKey: true, bubbles: true })); true`)
+      await evaluate(client, pageSession, `window.dispatchEvent(new Event('egolens:benchmark-reload')); true`)
     }
     await waitFor(client, pageSession, `globalThis.__EGOLENS_PERF__?.snapshot().scene?.sceneGeneration !== ${JSON.stringify(previousGeneration)}`)
     await waitFor(client, pageSession, `globalThis.__EGOLENS_PERF__?.snapshot().marks.some((mark) => mark.name.startsWith('egolens:dataset-ready:') && mark.detail?.sceneGeneration === globalThis.__EGOLENS_PERF__.snapshot().scene?.sceneGeneration)`)
@@ -712,6 +855,7 @@ async function runScenario(client, browserVersion, runIndex) {
     trace,
     heapSnapshot,
     conformance,
+    preflight,
     adapterAmnesia: adapterAmnesia ? {
       recipeFile: path.basename(adapterRecipePath),
       recipeHash: conformance?.recipeHash ?? null,
@@ -729,7 +873,8 @@ async function runScenario(client, browserVersion, runIndex) {
 }
 
 async function launchBrowser() {
-  const profileDir = await mkdtemp(path.join(tmpdir(), 'egolens-phase6-chrome-'))
+  const workspace = await createFreshProcessWorkspaceV1('egolens-phase6-chrome-')
+  const { profileDir } = workspace
   const port = 9222 + Math.floor(Math.random() * 500)
   const chrome = spawn(CHROME, [
     `--remote-debugging-port=${port}`,
@@ -748,22 +893,17 @@ async function launchBrowser() {
     const endpoint = await waitForEndpoint(port, chrome)
     client = await CdpClient.connect(endpoint.webSocketDebuggerUrl)
     const browserVersion = await client.send('Browser.getVersion')
-    return { profileDir, chrome, client, browserVersion }
+    return { ...workspace, chrome, client, browserVersion }
   } catch (error) {
-    if (chrome.exitCode === null) chrome.kill('SIGTERM')
-    await rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    await closeFreshProcessWorkspaceV1(workspace, chrome)
     throw error
   }
 }
 
-async function closeBrowser({ profileDir, chrome, client }) {
+async function closeBrowser(isolatedBrowser) {
+  const { chrome, client } = isolatedBrowser
   client.close()
-  if (chrome.exitCode === null) {
-    const exited = new Promise((resolve) => chrome.once('exit', resolve))
-    chrome.kill('SIGTERM')
-    await Promise.race([exited, delay(5_000)])
-  }
-  await rm(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  return closeFreshProcessWorkspaceV1(isolatedBrowser, chrome)
 }
 
 const warmups = []
@@ -774,15 +914,19 @@ for (let index = 0; index < warmupCount + runCount; index++) {
   recordedBrowserVersion ??= isolatedBrowser.browserVersion
   const startedAt = Date.now()
   process.stderr.write(`[phase6] ${index < warmupCount ? 'warmup' : 'sample'} ${index + 1}/${warmupCount + runCount} started\n`)
+  let run
   try {
-    const run = await runScenario(isolatedBrowser.client, isolatedBrowser.browserVersion, index)
-    if (index < warmupCount) warmups.push(run)
-    else samples.push(run)
+    run = await runScenario(isolatedBrowser.client, isolatedBrowser.browserVersion, index)
   } finally {
-    await closeBrowser(isolatedBrowser)
+    const browserProcess = await closeBrowser(isolatedBrowser)
+    if (run) run.browserProcess = browserProcess
   }
+  if (index < warmupCount) warmups.push(run)
+  else samples.push(run)
   process.stderr.write(`[phase6] run ${index + 1}/${warmupCount + runCount} completed in ${Math.round((Date.now() - startedAt) / 1000)}s\n`)
 }
+
+validateFreshProcessEvidenceSetV1([...warmups, ...samples].map((run) => run.browserProcess))
 
 {
   const output = {
@@ -801,6 +945,13 @@ for (let index = 0; index < warmupCount + runCount; index++) {
       traceEventLimit,
       traceEnabled,
       browserIsolation: 'per-run',
+      freshProcessEvidence: 'egolens-fresh-browser-process-v1',
+      sourceMode: localSourceRoot
+        ? 'local-directory-input'
+        : (new URL(String(options.url)).searchParams.has('share')
+            || new URL(String(options.url)).searchParams.get('shareVersion') === '1')
+          ? 'portable-share'
+          : 'remote-url',
       viewport: { width: viewport[0], height: viewport[1] },
     },
     environment: {

@@ -75,7 +75,7 @@ import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe }
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
-import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
+import { bindRecipeSceneV1, bindRemoteRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
 import { bundledPhase2OperatorRegistry } from '../teachable/operators/bundledPhase2'
 import type { RecipeInventoryEntryV1 } from '../teachable/runtime/GraphKernel'
 import { decodeJsonRecordsV1 } from '../teachable/operators/jsonRecords'
@@ -93,10 +93,22 @@ import {
   type ResolvedPortableShareV1,
 } from '../teachable/share/PortableShareRuntime'
 import {
+  shareDescriptorHashV1,
   validateShareDescriptorV1,
   type ShareDescriptorV1,
   type ShareVector3V1,
 } from '../teachable/share/ShareDescriptor'
+import { formatFingerprintEntriesV1 } from '../teachable/authoring/hashes'
+import { operatorSetFingerprintV1 } from '../teachable/recipe/fingerprints'
+
+export interface PreflightRuntimeIdentityV1 {
+  readonly sourceManifestHash: string
+  readonly catalogHash: string | null
+  readonly shareDescriptorHash: string | null
+  readonly recipeHash: string
+  readonly formatFingerprint: string
+  readonly operatorSetFingerprint: string
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -433,6 +445,8 @@ const internal = {
   waymoBaseUrl: null as string | null,
   /** Hash-bound identity used to generate subsequent portable share URLs. */
   portableShareDescriptor: null as ShareDescriptorV1 | null,
+  /** Exact identity observed by the trusted fresh-process preflight capture. */
+  preflightRuntimeIdentity: null as PreflightRuntimeIdentityV1 | null,
 }
 
 function resetInternal() {
@@ -442,6 +456,7 @@ function resetInternal() {
   internal.recipeByteSource = null
   internal.recipeInventoryEntries = []
   internal.portableShareDescriptor = null
+  internal.preflightRuntimeIdentity = null
   internal.timestamps = []
   internal.pendingSeekFrame = null
   internal.cameraLoadedBatchesEver.clear()
@@ -765,6 +780,33 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         ))
         internal.datasetId = manifest.id
         internal.portableShareDescriptor = resolved.descriptor
+        const inventoryEntries = resolved.catalog.manifestEntries.map((entry) => ({ path: entry.path }))
+        const [formatFingerprint, operatorSetFingerprint] = await Promise.all([
+          formatFingerprintEntriesV1(resolved.recipe.recipe, inventoryEntries),
+          operatorSetFingerprintV1(resolved.recipe.recipe.engine.requiredOperators),
+        ])
+        internal.preflightRuntimeIdentity = Object.freeze({
+          sourceManifestHash: resolved.catalog.sourceManifestHash,
+          catalogHash: resolved.catalog.catalogHash,
+          shareDescriptorHash: resolved.request.mode === 'referenced'
+            ? shareDescriptorHashV1(resolved.descriptor)
+            : null,
+          recipeHash: resolved.recipe.recipeHash,
+          formatFingerprint,
+          operatorSetFingerprint,
+        })
+        internal.conformanceSceneFactory = async (
+          compiledRecipe = resolved.recipe.compiledRecipe,
+        ) => (await bindRemoteRecipeSceneV1({
+          compiledRecipe,
+          sceneId: descriptor.view.sceneId,
+          remote: {
+            rootUrl: descriptor.source.rootUrl,
+            catalog: resolved.catalog.catalog,
+            expectedCatalogHash: descriptor.source.catalogHash,
+            expectedSourceManifestHash: descriptor.source.sourceManifestHash,
+          },
+        })).scene
         internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
           workerTimestamps: binding.metadata.timestamps,
           delegateOwnsFramePayloads: true,
@@ -1623,17 +1665,16 @@ export function hasPortableShareSourceV1(): boolean {
   return internal.portableShareDescriptor !== null
 }
 
-/** Rebuild a complete descriptor from the current renderer state and stable manifest IDs. */
-export function currentPortableShareDescriptorV1(cameraPose: {
+function currentStablePresentationV1(cameraPose: {
   readonly position: ShareVector3V1
   readonly target: ShareVector3V1
   readonly azimuth: number
   readonly distance: number
-}): ShareDescriptorV1 | null {
-  const base = internal.portableShareDescriptor
+}): ShareDescriptorV1['presentation'] | null {
   const scene = internal.normalizedScene
-  if (!base || !scene) return null
+  if (!scene) return null
   const state = useSceneStore.getState()
+  const base = internal.portableShareDescriptor
   const pointSensorIds = new Map(scene.manifest.sensors
     .filter((sensor) => sensor.modality !== 'camera')
     .map((sensor) => [sensor.rendererId, sensor.id]))
@@ -1643,8 +1684,75 @@ export function currentPortableShareDescriptorV1(cameraPose: {
   const visibleSensorIds = [...state.visibleSensors]
     .flatMap((rendererId) => pointSensorIds.has(rendererId) ? [pointSensorIds.get(rendererId)!] : [])
     .sort()
-  const fallbackPose = base.presentation.cameraPose
+  const fallbackPose = base?.presentation.cameraPose ?? {
+    position: [8, 8, 8] as ShareVector3V1,
+    target: [0, 0, 0] as ShareVector3V1,
+    azimuth: 0,
+    distance: Math.sqrt(192),
+  }
   const pose = cameraPose.distance > 0 ? cameraPose : fallbackPose
+  return {
+    cameraStrip: state.cameraStripVisible ?? scene.manifest.capabilities.has('cameraImages'),
+    coordinateMode: state.worldMode ? 'world' : 'ego',
+    visibleSensorIds,
+    activeCameraId: state.activeCam === null ? null : cameraIds.get(state.activeCam) ?? null,
+    colormap: state.colormapMode,
+    boxMode: state.boxMode,
+    trailLength: state.trailLength,
+    pointSize: state.pointSize,
+    pointOpacity: state.pointOpacity,
+    overlays: {
+      lidarProjection: state.showLidarOverlay,
+      keypoints3d: state.showKeypoints3D,
+      keypoints2d: state.showKeypoints2D,
+      cameraSegmentation: state.showCameraSeg,
+    },
+    playbackSpeed: state.playbackSpeed,
+    followCamera: state.followCam,
+    cameraPose: {
+      position: [...pose.position],
+      target: [...pose.target],
+      azimuth: pose.azimuth,
+      distance: pose.distance,
+    },
+    theme: state.theme,
+    accent: typeof document === 'undefined' ? base?.presentation.accent ?? null : document.documentElement.dataset.accent ?? null,
+  }
+}
+
+/** Public-safe, stable-ID presentation evidence for local, remote, and share modes. */
+export function currentPresentationEvidenceV1(cameraPose: {
+  readonly position: ShareVector3V1
+  readonly target: ShareVector3V1
+  readonly azimuth: number
+  readonly distance: number
+}): Readonly<Record<string, unknown>> | null {
+  const presentation = currentStablePresentationV1(cameraPose)
+  if (!presentation) return null
+  const state = useSceneStore.getState()
+  return {
+    view: {
+      sceneId: state.currentSegment,
+      frameIndex: state.currentFrameIndex,
+      t0: state.playbackWindow?.t0 ?? null,
+      t1: state.playbackWindow?.t1 ?? null,
+    },
+    presentation: { ...presentation, playing: state.isPlaying },
+  }
+}
+
+/** Rebuild a complete descriptor from the current renderer state and stable manifest IDs. */
+export function currentPortableShareDescriptorV1(cameraPose: {
+  readonly position: ShareVector3V1
+  readonly target: ShareVector3V1
+  readonly azimuth: number
+  readonly distance: number
+}): ShareDescriptorV1 | null {
+  const base = internal.portableShareDescriptor
+  if (!base) return null
+  const state = useSceneStore.getState()
+  const presentation = currentStablePresentationV1(cameraPose)
+  if (!presentation) return null
   return validateShareDescriptorV1({
     ...base,
     view: {
@@ -1654,33 +1762,7 @@ export function currentPortableShareDescriptorV1(cameraPose: {
         ? { t0: state.playbackWindow.t0, t1: state.playbackWindow.t1 }
         : {}),
     },
-    presentation: {
-      cameraStrip: state.cameraStripVisible ?? base.presentation.cameraStrip,
-      coordinateMode: state.worldMode ? 'world' : 'ego',
-      visibleSensorIds,
-      activeCameraId: state.activeCam === null ? null : cameraIds.get(state.activeCam) ?? null,
-      colormap: state.colormapMode,
-      boxMode: state.boxMode,
-      trailLength: state.trailLength,
-      pointSize: state.pointSize,
-      pointOpacity: state.pointOpacity,
-      overlays: {
-        lidarProjection: state.showLidarOverlay,
-        keypoints3d: state.showKeypoints3D,
-        keypoints2d: state.showKeypoints2D,
-        cameraSegmentation: state.showCameraSeg,
-      },
-      playbackSpeed: state.playbackSpeed,
-      followCamera: state.followCam,
-      cameraPose: {
-        position: [...pose.position],
-        target: [...pose.target],
-        azimuth: pose.azimuth,
-        distance: pose.distance,
-      },
-      theme: state.theme,
-      accent: typeof document === 'undefined' ? base.presentation.accent : document.documentElement.dataset.accent ?? null,
-    },
+    presentation,
   })
 }
 
@@ -2887,16 +2969,25 @@ async function runPostWorkerPipeline(
 
 export function getActiveConformanceDescriptor(): {
   readonly datasetId: string
+  readonly sceneId: string | null
   readonly frameCount: number
   readonly capabilities: readonly NormalizedCapabilityV1[]
+  readonly preflightIdentity: PreflightRuntimeIdentityV1 | null
 } | null {
   const scene = internal.normalizedScene
   if (!scene || scene.disposed || !internal.conformanceSceneFactory) return null
   return {
     datasetId: scene.manifest.id,
+    sceneId: useSceneStore.getState().currentSegment,
     frameCount: scene.index.timestampsMicros.length,
     capabilities: [...scene.manifest.capabilities].sort(),
+    preflightIdentity: internal.preflightRuntimeIdentity,
   }
+}
+
+/** Bind independently computed local-source identity to the active counted run. */
+export function setActivePreflightRuntimeIdentityV1(identity: PreflightRuntimeIdentityV1): void {
+  internal.preflightRuntimeIdentity = Object.freeze({ ...identity })
 }
 
 export async function createActiveConformanceScene(

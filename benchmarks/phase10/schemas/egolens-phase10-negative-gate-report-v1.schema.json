@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-phase10-negative-gate-report-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "candidateCommit", "sourceTestHash", "cases", "passed", "reportHash"],
+  "properties": {
+    "schema": { "const": "egolens-phase10-negative-gate-report-v1" },
+    "candidateCommit": { "$ref": "#/$defs/commit" },
+    "sourceTestHash": { "$ref": "#/$defs/hash" },
+    "cases": {
+      "type": "array", "minItems": 13, "maxItems": 13,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "passed", "evidenceHash"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" }, "passed": { "const": true }, "evidenceHash": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "passed": { "const": true },
+    "reportHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+  }
+}

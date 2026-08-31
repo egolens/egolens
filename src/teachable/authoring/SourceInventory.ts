@@ -1,7 +1,10 @@
 import type { ByteSourceReadOptionsV1, ByteSourceV1 } from '../source/ByteSource'
 import { LocalFileByteSourceV1, normalizeSourcePathV1 } from '../source/ByteSource'
 
-export const MAX_SOURCE_INVENTORY_ENTRIES_V1 = 20_000
+// The complete official nuScenes mini extraction contains about 32k source
+// objects. Keep enumeration bounded while allowing that shipped baseline to
+// remain an unchanged release root instead of a hand-pruned scene subset.
+export const MAX_SOURCE_INVENTORY_ENTRIES_V1 = 50_000
 
 export interface SourceInventoryEntryV1 {
   readonly path: string

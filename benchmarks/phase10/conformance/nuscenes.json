@@ -1,0 +1,57 @@
+{
+  "datasetId": "nuscenes",
+  "caseId": "phase6-nuscenes-urban-vru-001",
+  "sourceFingerprint": "sha256-277ea9f12350c1d8c00e4fe4582a487a23829c905ed847f7e9b5f987d7fa02cf",
+  "requiredCapabilities": [
+    "boxes2d",
+    "boxes3d",
+    "cameraImages",
+    "egoPoses",
+    "lidarSegmentation",
+    "pointClouds",
+    "radarPointClouds",
+    "segmentMetadata",
+    "timeline",
+    "trajectories"
+  ],
+  "frameIndices": [0, 19, 39],
+  "sampleValuesPerBuffer": 64,
+  "perceptualCaptures": [
+    {
+      "id": "front-camera-frame-19",
+      "frameIndex": 19,
+      "selector": "[data-egolens-camera-id=\"2\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-frame-0",
+      "frameIndex": 0,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "off",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-lidar-segmentation-frame-39",
+      "frameIndex": 39,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "presentation": {
+        "colormapMode": "segment",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    }
+  ]
+}

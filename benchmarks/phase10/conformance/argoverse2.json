@@ -1,0 +1,55 @@
+{
+  "datasetId": "argoverse2",
+  "caseId": "phase6-av2-urban-001",
+  "sourceFingerprint": "sha256-9f786d49304d1025d42e9c86d324706d96cf9428db4bf5a930d99c2c93c64789",
+  "requiredCapabilities": [
+    "boxes2d",
+    "boxes3d",
+    "cameraImages",
+    "egoPoses",
+    "pointClouds",
+    "segmentMetadata",
+    "timeline",
+    "trajectories"
+  ],
+  "frameIndices": [0, 78, 156],
+  "sampleValuesPerBuffer": 64,
+  "perceptualCaptures": [
+    {
+      "id": "front-camera-frame-78",
+      "frameIndex": 78,
+      "selector": "[data-egolens-camera-id=\"4\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-boxes-frame-156",
+      "frameIndex": 156,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-frame-0",
+      "frameIndex": 0,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "off",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    }
+  ]
+}
