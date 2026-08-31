@@ -60,8 +60,21 @@ const conformanceOutput = options['conformance-output']
 const perceptualOutputDirectory = options['perceptual-output-dir']
   ? path.resolve(String(options['perceptual-output-dir']))
   : null
+const adapterRecipePath = options['adapter-recipe']
+  ? path.resolve(String(options['adapter-recipe']))
+  : null
+const adapterRecipe = adapterRecipePath
+  ? JSON.parse(await readFile(adapterRecipePath, 'utf8'))
+  : null
+const adapterAmnesia = options['adapter-amnesia'] === true
 if (Boolean(conformanceConfig) !== Boolean(conformanceOutput)) {
   throw new Error('--conformance-config and --conformance-output must be provided together')
+}
+if (adapterAmnesia !== Boolean(adapterRecipe)) {
+  throw new Error('--adapter-amnesia and --adapter-recipe <json> must be provided together')
+}
+if (adapterAmnesia && !conformanceConfig) {
+  throw new Error('Adapter Amnesia is available only for a one-shot conformance capture')
 }
 if (conformanceConfig && (warmupCount !== 0 || runCount !== 1)) {
   throw new Error('conformance capture requires --warmups 0 --runs 1')
@@ -93,6 +106,7 @@ function withPerf(urlString) {
   url.searchParams.set('benchmarkHold', '1')
   url.searchParams.set('speed', '4')
   if (conformanceConfig) url.searchParams.set('oracleCapture', '1')
+  if (adapterAmnesia) url.searchParams.set('adapterAmnesia', '1')
   return url.href
 }
 
@@ -219,6 +233,14 @@ async function exerciseFeatureToggles(client, pageSession) {
 }
 
 async function captureConformanceArtifact(client, pageSession) {
+  if (adapterRecipe) {
+    await evaluate(
+      client,
+      pageSession,
+      `globalThis.__EGOLENS_ORACLE_CAPTURE__.installRecipe(${JSON.stringify(adapterRecipe)})`,
+      timeoutMs,
+    )
+  }
   const descriptor = await evaluate(
     client,
     pageSession,
@@ -227,6 +249,8 @@ async function captureConformanceArtifact(client, pageSession) {
   const expectedCapabilities = [...conformanceConfig.requiredCapabilities].sort()
   if (!descriptor || descriptor.datasetId !== conformanceConfig.datasetId
     || JSON.stringify(descriptor.capabilities) !== JSON.stringify(expectedCapabilities)
+    || (adapterAmnesia && (descriptor.mode !== 'adapter-amnesia'
+      || !/^sha256:[0-9a-f]{64}$/u.test(descriptor.recipeHash)))
     || Math.max(...conformanceConfig.frameIndices) >= descriptor.frameCount) {
     throw new Error(`Conformance descriptor does not match the reviewed target: ${JSON.stringify(descriptor)}`)
   }
@@ -294,6 +318,8 @@ async function captureConformanceArtifact(client, pageSession) {
     coverage: artifact.coverage,
     artifactHash: artifact.artifactHash,
     generatorCommit: artifact.provenance?.generatorCommit ?? null,
+    runtimeId: artifact.provenance?.runtimeId ?? null,
+    recipeHash: descriptor.recipeHash,
   }
 }
 
@@ -686,6 +712,10 @@ async function runScenario(client, browserVersion, runIndex) {
     trace,
     heapSnapshot,
     conformance,
+    adapterAmnesia: adapterAmnesia ? {
+      recipeFile: path.basename(adapterRecipePath),
+      recipeHash: conformance?.recipeHash ?? null,
+    } : null,
     traceCollection: {
       eventsSeen: traceEventsSeen,
       retainedEvents: trace.length,

@@ -3,6 +3,7 @@ import {
   useSceneStore,
   createActiveConformanceScene,
   getActiveConformanceDescriptor,
+  presentConformanceFrame,
   getThumbnailResolver,
   getSegmentSplits,
   type BoxMode,
@@ -36,6 +37,10 @@ import SearchableSelect, { type SelectItem } from './components/SearchableSelect
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
+import { recipeHashV1 } from './teachable/authoring/hashes'
+import { bundledPhase2OperatorRegistry } from './teachable/operators/bundledPhase2'
+import { compileRecipeV1, type CompiledRecipeV1 } from './teachable/recipe/compiler'
+import type { NormalizedSceneV1 } from './teachable/runtime/normalizedScene'
 
 
 // ---------------------------------------------------------------------------
@@ -187,10 +192,16 @@ function useBenchmarkLoadCommand() {
   }, [])
 }
 
+type BrowserConformanceDescriptorV1 = NonNullable<ReturnType<typeof getActiveConformanceDescriptor>> & {
+  readonly mode: 'production' | 'adapter-amnesia'
+  readonly recipeHash: string | null
+}
+
 interface BrowserConformanceCaptureV1 {
   readonly schemaVersion: 1
   readonly buildCommit: string
-  descriptor(): ReturnType<typeof getActiveConformanceDescriptor>
+  descriptor(): BrowserConformanceDescriptorV1 | null
+  installRecipe(recipe: unknown): Promise<BrowserConformanceDescriptorV1>
   capture(options: Omit<ConformanceCaptureOptionsV1, 'provenance'> & {
     readonly sourceFingerprint: string
     readonly capturedAt?: string
@@ -215,11 +226,43 @@ declare global {
 /** Installed only for an explicit local/trusted capture run. */
 function useOracleCaptureCommand() {
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('oracleCapture') !== '1') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('oracleCapture') !== '1') return
+    const adapterAmnesia = params.get('adapterAmnesia') === '1'
+    let installed: {
+      readonly compiledRecipe: CompiledRecipeV1
+      readonly recipeHash: string
+      readonly scene: NormalizedSceneV1
+    } | null = null
     const api: BrowserConformanceCaptureV1 = Object.freeze({
       schemaVersion: 1,
       buildCommit: __EGOLENS_GIT_COMMIT__,
-      descriptor: () => getActiveConformanceDescriptor(),
+      descriptor: () => {
+        if (installed) {
+          return {
+            datasetId: installed.scene.manifest.id,
+            frameCount: installed.scene.index.timestampsMicros.length,
+            capabilities: [...installed.scene.manifest.capabilities].sort(),
+            mode: 'adapter-amnesia' as const,
+            recipeHash: installed.recipeHash,
+          }
+        }
+        const descriptor = getActiveConformanceDescriptor()
+        return descriptor ? { ...descriptor, mode: 'production' as const, recipeHash: null } : null
+      },
+      async installRecipe(recipe: unknown) {
+        if (!adapterAmnesia) throw new Error('Adapter recipes may be installed only in explicit Adapter Amnesia capture mode.')
+        const compiledRecipe = compileRecipeV1(recipe, bundledPhase2OperatorRegistry)
+        const active = getActiveConformanceDescriptor()
+        if (!active || active.datasetId !== compiledRecipe.normalizedManifest.id) {
+          throw new Error('The candidate recipe does not target the active source case.')
+        }
+        installed?.scene.dispose()
+        const scene = await createActiveConformanceScene(compiledRecipe)
+        const recipeHash = await recipeHashV1(compiledRecipe.recipe)
+        installed = { compiledRecipe, recipeHash, scene }
+        return api.descriptor()!
+      },
       async capture(options: Omit<ConformanceCaptureOptionsV1, 'provenance'> & {
         readonly sourceFingerprint: string
         readonly capturedAt?: string
@@ -227,15 +270,20 @@ function useOracleCaptureCommand() {
         if (!/^[0-9a-f]{40}$/u.test(__EGOLENS_GIT_COMMIT__)) {
           throw new Error('Conformance capture requires an exact Git build commit.')
         }
+        if (adapterAmnesia && !installed) {
+          throw new Error('Adapter Amnesia capture requires an externally supplied candidate recipe.')
+        }
         const { sourceFingerprint, capturedAt, ...captureOptions } = options
         const { captureSceneConformanceArtifactV1 } = await import('./teachable/conformance/oracleArtifacts')
         return captureSceneConformanceArtifactV1(
-          createActiveConformanceScene,
+          () => createActiveConformanceScene(installed?.compiledRecipe),
           {
             ...captureOptions,
             provenance: {
               generatorCommit: __EGOLENS_GIT_COMMIT__,
-              runtimeId: `egolens-recipe-${__EGOLENS_GIT_COMMIT__}`,
+              runtimeId: installed
+                ? `egolens-amnesia-${__EGOLENS_GIT_COMMIT__}-${installed.recipeHash}`
+                : `egolens-recipe-${__EGOLENS_GIT_COMMIT__}`,
               sourceFingerprint,
               capturedAt: capturedAt ?? new Date().toISOString(),
             },
@@ -245,14 +293,21 @@ function useOracleCaptureCommand() {
       async seekFrame(index: number) {
         useSceneStore.getState().actions.pause()
         const deadline = performance.now() + 60_000
+        // An Amnesia scene returns fresh frame/image objects on every load.
+        // Present it once, then wait for React and JPEG decode to commit that
+        // exact object; repeatedly loading here would restart the camera
+        // presentation barrier and could never settle.
+        if (installed) await presentConformanceFrame(installed.scene, index)
         while (performance.now() < deadline) {
           const store = useSceneStore.getState()
           if (store.status === 'error') {
             throw new Error(store.error ?? `Conformance frame ${index} failed to load.`)
           }
-          await store.actions.seekFrame(index)
+          if (!installed) await store.actions.seekFrame(index)
           const presented = useSceneStore.getState()
-          const needsCamera = getActiveConformanceDescriptor()?.capabilities.includes('cameraImages') ?? false
+          const needsCamera = installed
+            ? installed.scene.manifest.capabilities.has('cameraImages')
+            : (getActiveConformanceDescriptor()?.capabilities.includes('cameraImages') ?? false)
           const cameraFramesPresented = !needsCamera || (presented.currentFrame !== null
             && presented.currentFrame.cameraImages.size > 0
             && areCameraViewsPresentedV1(presented.currentFrame.cameraImages.keys(), index))
@@ -291,6 +346,8 @@ function useOracleCaptureCommand() {
       value: api,
     })
     return () => {
+      installed?.scene.dispose()
+      installed = null
       delete window.__EGOLENS_ORACLE_CAPTURE__
     }
   }, [])
