@@ -63,9 +63,9 @@ describe('adapter registry', () => {
     expect(getManifest().id).toBe('waymo')
   })
 
-  it('exposes legacy datasets through the formal adapter strategy boundary', () => {
-    expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
-    expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'legacy', adapterId: 'nuscenes' })
+  it('exposes bundled recipes through the formal adapter strategy boundary', () => {
+    expect(getAdapter()).toMatchObject({ id: 'waymo', kind: 'recipe', manifest: waymoManifest })
+    expect(getAdapterById('nuscenes')?.prepare()).toMatchObject({ kind: 'recipe', adapterId: 'nuscenes' })
     expect(getAdapterById('missing')).toBeNull()
   })
 
@@ -100,7 +100,7 @@ describe('detectDataset', () => {
 
   it('returns the matching strategy as well as the compatibility manifest', () => {
     const adapter = detectDatasetAdapter(['vehicle_pose', 'lidar', 'camera_image'])
-    expect(adapter).toMatchObject({ id: 'waymo', kind: 'legacy', manifest: waymoManifest })
+    expect(adapter).toMatchObject({ id: 'waymo', kind: 'recipe', manifest: waymoManifest })
   })
 
   it('detects Waymo even with extra unknown dirs', () => {

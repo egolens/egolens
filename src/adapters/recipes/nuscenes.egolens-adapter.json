@@ -1,0 +1,192 @@
+{
+  "kind": "egolens-adapter",
+  "schemaVersion": 1,
+  "engine": {
+    "minimumVersion": "1.0.0",
+    "requiredOperators": {
+      "json.records": { "major": 1, "provider": "core" },
+      "binary.interleaved_records": { "major": 1, "provider": "core" },
+      "image.encoded_bytes": { "major": 1, "provider": "core" },
+      "timeline.from_records": { "major": 1, "provider": "core" },
+      "geometry.relative_poses": { "major": 1, "provider": "core" },
+      "records.select": { "major": 1, "provider": "core" },
+      "image.bind_camera_frame": { "major": 1, "provider": "core" },
+      "geometry.normalize_boxes3d": { "major": 1, "provider": "core" },
+      "geometry.normalize_boxes2d": { "major": 1, "provider": "core" },
+      "relations.token_join": { "major": 1, "provider": "core" },
+      "tracks.derive_trajectories": { "major": 1, "provider": "core" },
+      "labels.attach_by_point_index": { "major": 1, "provider": "core" }
+    }
+  },
+  "identity": {
+    "name": "nuScenes",
+    "description": "nuScenes JSON tables with binary LiDAR, radar, and encoded camera samples"
+  },
+  "match": {
+    "inventory": {
+      "rootEntries": [
+        { "path": "samples", "required": true },
+        { "path": "sweeps", "required": false },
+        { "path": "maps", "required": false },
+        { "path": "lidarseg", "required": false },
+        { "path": "panoptic", "required": false },
+        { "path": "v1.0-mini", "required": true },
+        { "path": "v1.0-trainval", "required": false },
+        { "path": "v1.0-test", "required": false },
+        { "path": "LICENSE", "required": false }
+      ]
+    },
+    "all": [
+      { "kind": "path", "glob": "samples/LIDAR_TOP/*.pcd.bin", "minCount": 1 },
+      { "kind": "path", "glob": "v1.0-mini/sample.json", "minCount": 1 }
+    ]
+  },
+  "sources": {
+    "sampleRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/sample.json" } },
+    "sampleDataRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/sample_data.json" } },
+    "sensorRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/sensor.json" } },
+    "calibratedSensorRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/calibrated_sensor.json" } },
+    "egoPoseRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/ego_pose.json" } },
+    "annotationRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/sample_annotation.json" } },
+    "categoryRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/category.json" } },
+    "instanceRows": { "reader": "json.records", "files": { "exact": "v1.0-mini/instance.json" } },
+    "lidarFrames": { "reader": "binary.interleaved_records", "files": { "glob": "samples/LIDAR_TOP/*.pcd.bin", "order": "lexical-path", "minCount": 1 }, "params": { "scalar": "float32", "sourceStride": 5, "selectedFields": [0, 1, 2, 3] } },
+    "radarFrames": { "reader": "binary.interleaved_records", "files": { "glob": "samples/RADAR_*/*.pcd", "order": "lexical-path" }, "params": { "encoding": "pcd-binary" } },
+    "cameraFrames": { "reader": "image.encoded_bytes", "files": { "glob": "samples/CAM_*/*.jpg", "order": "lexical-path" } },
+    "lidarSegmentationRows": { "reader": "binary.interleaved_records", "files": { "glob": "lidarseg/**/*.bin", "order": "lexical-path" }, "params": { "scalar": "uint8", "sourceStride": 1 } }
+  },
+  "scene": {
+    "formatId": "nuscenes",
+    "timeline": { "timestampUnit": "us", "nominalFrameRate": 2 },
+    "coordinateFrames": [
+      { "id": "world", "convention": { "x": "forward", "y": "left", "z": "up", "handedness": "right", "lengthUnit": "m" } },
+      { "id": "ego", "parent": "world", "convention": { "x": "forward", "y": "left", "z": "up", "handedness": "right", "lengthUnit": "m" } }
+    ],
+    "sensors": [
+      { "id": "LIDAR_TOP", "rendererId": 1, "label": "LIDAR TOP", "modality": "lidar", "frameId": "ego", "color": "#00E89D" },
+      { "id": "RADAR_FRONT", "rendererId": 10, "label": "RADAR FRONT", "modality": "radar", "frameId": "ego", "color": "#FF6B6B" },
+      { "id": "RADAR_FRONT_LEFT", "rendererId": 11, "label": "RADAR FL", "modality": "radar", "frameId": "ego", "color": "#FF9F43" },
+      { "id": "RADAR_FRONT_RIGHT", "rendererId": 12, "label": "RADAR FR", "modality": "radar", "frameId": "ego", "color": "#FECA57" },
+      { "id": "RADAR_BACK_LEFT", "rendererId": 13, "label": "RADAR BL", "modality": "radar", "frameId": "ego", "color": "#FF6348" },
+      { "id": "RADAR_BACK_RIGHT", "rendererId": 14, "label": "RADAR BR", "modality": "radar", "frameId": "ego", "color": "#EE5A24" },
+      { "id": "CAM_BACK_LEFT", "rendererId": 4, "label": "BACK LEFT", "modality": "camera", "frameId": "ego", "color": "#4DA8FF", "image": { "width": 1600, "height": 900, "model": "pinhole", "view": "rear-left", "povLabel": "BL", "aliases": ["CAM_BACK_LEFT"] } },
+      { "id": "CAM_FRONT_LEFT", "rendererId": 1, "label": "FRONT LEFT", "modality": "camera", "frameId": "ego", "color": "#00E89D", "image": { "width": 1600, "height": 900, "model": "pinhole", "view": "front-left", "povLabel": "FL", "aliases": ["CAM_FRONT_LEFT"] } },
+      { "id": "CAM_FRONT", "rendererId": 2, "label": "FRONT", "modality": "camera", "frameId": "ego", "color": "#FFFFFF", "image": { "width": 1600, "height": 900, "model": "pinhole", "view": "front", "povLabel": "FRONT", "aliases": ["CAM_FRONT"] } },
+      { "id": "CAM_FRONT_RIGHT", "rendererId": 3, "label": "FRONT RIGHT", "modality": "camera", "frameId": "ego", "color": "#00C9DB", "image": { "width": 1600, "height": 900, "model": "pinhole", "view": "front-right", "povLabel": "FR", "aliases": ["CAM_FRONT_RIGHT"] } },
+      { "id": "CAM_BACK_RIGHT", "rendererId": 6, "label": "BACK RIGHT", "modality": "camera", "frameId": "ego", "color": "#B490FF", "image": { "width": 1600, "height": 900, "model": "pinhole", "view": "rear-right", "povLabel": "BR", "aliases": ["CAM_BACK_RIGHT"] } },
+      { "id": "CAM_BACK", "rendererId": 5, "label": "BACK", "modality": "camera", "frameId": "ego", "color": "#00C9DB", "image": { "width": 1600, "height": 900, "model": "pinhole", "view": "rear", "povLabel": "BACK", "aliases": ["CAM_BACK"] } }
+    ],
+    "taxonomies": [
+      {
+        "id": "objects",
+        "role": "objects",
+        "classes": [
+          { "id": "unknown", "rendererId": 0, "label": "Unknown", "color": "#6B7280" },
+          { "id": "car", "rendererId": 1, "label": "Car", "color": "#FF9E00", "modelHint": "vehicle" },
+          { "id": "truck", "rendererId": 5, "label": "Truck", "color": "#E67700", "modelHint": "vehicle" },
+          { "id": "bus", "rendererId": 6, "label": "Bus", "color": "#FFD600", "modelHint": "vehicle" },
+          { "id": "construction", "rendererId": 7, "label": "Construction", "color": "#CC7A00", "modelHint": "vehicle" },
+          { "id": "emergency", "rendererId": 8, "label": "Emergency", "color": "#FF4444", "modelHint": "vehicle" },
+          { "id": "trailer", "rendererId": 9, "label": "Trailer", "color": "#D4A574", "modelHint": "vehicle" },
+          { "id": "pedestrian", "rendererId": 2, "label": "Pedestrian", "color": "#CCFF00", "modelHint": "pedestrian" },
+          { "id": "motorcycle", "rendererId": 10, "label": "Motorcycle", "color": "#FF2D55", "modelHint": "motorcycle" },
+          { "id": "bicycle", "rendererId": 11, "label": "Bicycle", "color": "#FF6B9D", "modelHint": "bicycle" },
+          { "id": "barrier", "rendererId": 12, "label": "Barrier", "color": "#8B9DC3", "modelHint": "barrier" },
+          { "id": "traffic-cone", "rendererId": 13, "label": "Traffic Cone", "color": "#FF44FF", "modelHint": "cone" },
+          { "id": "animal", "rendererId": 14, "label": "Animal", "color": "#00CED1" }
+        ]
+      },
+      {
+        "id": "lidar-semantics",
+        "role": "lidar-semantics",
+        "classes": [
+          { "id": "seg-noise", "rendererId": 0, "label": "noise", "color": "#000000" },
+          { "id": "seg-animal", "rendererId": 1, "label": "animal", "color": "#704A00" },
+          { "id": "seg-adult", "rendererId": 2, "label": "adult", "color": "#D9541A" },
+          { "id": "seg-child", "rendererId": 3, "label": "child", "color": "#D98C33" },
+          { "id": "seg-construction-worker", "rendererId": 4, "label": "constr. worker", "color": "#FF9900" },
+          { "id": "seg-personal-mobility", "rendererId": 5, "label": "pers. mobility", "color": "#CC5254" },
+          { "id": "seg-police", "rendererId": 6, "label": "police", "color": "#0087CC" },
+          { "id": "seg-stroller", "rendererId": 7, "label": "stroller", "color": "#94661C" },
+          { "id": "seg-wheelchair", "rendererId": 8, "label": "wheelchair", "color": "#6B4512" },
+          { "id": "seg-barrier", "rendererId": 9, "label": "barrier", "color": "#787878" },
+          { "id": "seg-debris", "rendererId": 10, "label": "debris", "color": "#423300" },
+          { "id": "seg-pushable", "rendererId": 11, "label": "pushable", "color": "#6340A6" },
+          { "id": "seg-traffic-cone", "rendererId": 12, "label": "traffic cone", "color": "#FF9440" },
+          { "id": "seg-bike-rack", "rendererId": 13, "label": "bike rack", "color": "#DEDE00" },
+          { "id": "seg-bicycle", "rendererId": 14, "label": "bicycle", "color": "#FF0000" },
+          { "id": "seg-bus-bendy", "rendererId": 15, "label": "bus (bendy)", "color": "#0000E6" },
+          { "id": "seg-bus-rigid", "rendererId": 16, "label": "bus (rigid)", "color": "#0000B3" },
+          { "id": "seg-car", "rendererId": 17, "label": "car", "color": "#FF9E00" },
+          { "id": "seg-construction", "rendererId": 18, "label": "construction", "color": "#ED9121" },
+          { "id": "seg-ambulance", "rendererId": 19, "label": "ambulance", "color": "#D91A1A" },
+          { "id": "seg-police-car", "rendererId": 20, "label": "police car", "color": "#00008C" },
+          { "id": "seg-motorcycle", "rendererId": 21, "label": "motorcycle", "color": "#0075DB" },
+          { "id": "seg-trailer", "rendererId": 22, "label": "trailer", "color": "#805900" },
+          { "id": "seg-truck", "rendererId": 23, "label": "truck", "color": "#9900FF" },
+          { "id": "seg-driveable", "rendererId": 24, "label": "driveable", "color": "#A1A1C7" },
+          { "id": "seg-other-flat", "rendererId": 25, "label": "other flat", "color": "#8C6B59" },
+          { "id": "seg-sidewalk", "rendererId": 26, "label": "sidewalk", "color": "#78789E" },
+          { "id": "seg-terrain", "rendererId": 27, "label": "terrain", "color": "#668C42" },
+          { "id": "seg-manmade", "rendererId": 28, "label": "manmade", "color": "#595959" },
+          { "id": "seg-other-static", "rendererId": 29, "label": "other static", "color": "#333333" },
+          { "id": "seg-vegetation", "rendererId": 30, "label": "vegetation", "color": "#00AD1F" },
+          { "id": "seg-ego", "rendererId": 31, "label": "ego", "color": "#A30000" }
+        ],
+        "palette": [
+          [0, 0, 0], [0.44, 0.29, 0], [0.85, 0.33, 0.1], [0.85, 0.55, 0.2], [1, 0.6, 0], [0.8, 0.32, 0.33],
+          [0, 0.53, 0.8], [0.58, 0.4, 0.11], [0.42, 0.27, 0.07], [0.47, 0.47, 0.47], [0.26, 0.2, 0], [0.39, 0.25, 0.65],
+          [1, 0.58, 0.25], [0.87, 0.87, 0], [1, 0, 0], [0, 0, 0.9], [0, 0, 0.7], [1, 0.62, 0],
+          [0.93, 0.57, 0.13], [0.85, 0.1, 0.1], [0, 0, 0.55], [0, 0.46, 0.86], [0.5, 0.35, 0], [0.6, 0, 1],
+          [0.63, 0.63, 0.78], [0.55, 0.42, 0.35], [0.47, 0.47, 0.62], [0.4, 0.55, 0.26], [0.35, 0.35, 0.35],
+          [0.2, 0.2, 0.2], [0, 0.68, 0.12], [0.64, 0, 0]
+        ]
+      }
+    ],
+    "pointAttributes": [
+      { "id": "x", "storage": "float32", "unit": "m" },
+      { "id": "y", "storage": "float32", "unit": "m" },
+      { "id": "z", "storage": "float32", "unit": "m" },
+      { "id": "intensity", "storage": "float32", "range": [0, 255] }
+    ],
+    "pointLayout": {
+      "interleavedAttributes": ["x", "y", "z", "intensity"],
+      "colorModes": ["distance", "intensity", "segment", "panoptic", "camera"]
+    }
+  },
+  "pipelines": {
+    "timeline": { "nodes": [{ "id": "makeTimeline", "op": "timeline.from_records", "version": 1, "inputs": { "rows": "sampleRows.rows" } }], "result": "makeTimeline.frames" },
+    "egoPoses": { "nodes": [{ "id": "normalize", "op": "geometry.relative_poses", "version": 1, "inputs": { "rows": "egoPoseRows.rows" } }], "result": "normalize.poses" },
+    "pointClouds": { "nodes": [{ "id": "select", "op": "records.select", "version": 1, "inputs": { "rows": "lidarFrames.records" }, "params": { "attributes": ["x", "y", "z", "intensity"] } }], "result": "select.rows" },
+    "radarPointClouds": { "nodes": [{ "id": "select", "op": "records.select", "version": 1, "inputs": { "rows": "radarFrames.records" } }], "result": "select.rows" },
+    "cameraImages": { "nodes": [{ "id": "bind", "op": "image.bind_camera_frame", "version": 1, "inputs": { "images": "cameraFrames.frames", "sampleData": "sampleDataRows.rows", "calibration": "calibratedSensorRows.rows" } }], "result": "bind.frames" },
+    "boxes3d": { "nodes": [{ "id": "normalize", "op": "geometry.normalize_boxes3d", "version": 1, "inputs": { "annotations": "annotationRows.rows", "categories": "categoryRows.rows" } }], "result": "normalize.boxes" },
+    "boxes2d": { "nodes": [{ "id": "normalize", "op": "geometry.normalize_boxes2d", "version": 1, "inputs": { "boxes3d": "boxes3d.result", "cameras": "cameraImages.result" } }], "result": "normalize.boxes" },
+    "boxAssociations": { "nodes": [{ "id": "join", "op": "relations.token_join", "version": 1, "inputs": { "boxes2d": "boxes2d.result", "boxes3d": "boxes3d.result" } }], "result": "join.associations" },
+    "trajectories": { "nodes": [{ "id": "derive", "op": "tracks.derive_trajectories", "version": 1, "inputs": { "boxes": "boxes3d.result", "instances": "instanceRows.rows" } }], "result": "derive.trajectories" },
+    "lidarSegmentation": { "nodes": [{ "id": "attach", "op": "labels.attach_by_point_index", "version": 1, "inputs": { "labels": "lidarSegmentationRows.records", "points": "pointClouds.result" } }], "result": "attach.labels" },
+    "segmentMetadata": { "nodes": [{ "id": "select", "op": "records.select", "version": 1, "inputs": { "rows": "sampleRows.rows" } }], "result": "select.rows" }
+  },
+  "outputs": {
+    "timeline": "timeline.result",
+    "egoPoses": "egoPoses.result",
+    "pointClouds": "pointClouds.result",
+    "radarPointClouds": "radarPointClouds.result",
+    "cameraImages": "cameraImages.result",
+    "boxes3d": "boxes3d.result",
+    "boxes2d": "boxes2d.result",
+    "boxAssociations": "boxAssociations.result",
+    "trajectories": "trajectories.result",
+    "lidarSegmentation": "lidarSegmentation.result",
+    "segmentMetadata": "segmentMetadata.result"
+  },
+  "validation": {
+    "sampleFrames": ["first", "middle", "last"],
+    "assertions": [
+      { "kind": "timestamps-strictly-increasing", "output": "timeline" },
+      { "kind": "finite-ratio", "output": "pointClouds", "minimum": 0.9999 },
+      { "kind": "box-dimensions-positive", "output": "boxes3d" }
+    ],
+    "humanReview": ["orientation", "handedness", "scale", "box-alignment", "camera-projection", "temporal-synchronization"]
+  }
+}

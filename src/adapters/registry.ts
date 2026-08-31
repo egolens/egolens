@@ -9,10 +9,8 @@
  */
 
 import type { DatasetManifest } from '../types/dataset'
-import { waymoManifest } from './waymo/manifest'
-import { nuScenesManifest } from './nuscenes/manifest'
-import { argoverse2Manifest } from './argoverse2/manifest'
 import { LegacyDatasetAdapter } from './legacy'
+import { bundledRecipeAdapters } from './recipes'
 import type { DatasetAdapter } from './types'
 
 // ---------------------------------------------------------------------------
@@ -20,11 +18,7 @@ import type { DatasetAdapter } from './types'
 // ---------------------------------------------------------------------------
 
 /** Ordered list of adapter strategies. First match wins during detection. */
-const adapters: DatasetAdapter[] = [
-  new LegacyDatasetAdapter(waymoManifest),
-  new LegacyDatasetAdapter(nuScenesManifest),
-  new LegacyDatasetAdapter(argoverse2Manifest),
-]
+const adapters: DatasetAdapter[] = [...bundledRecipeAdapters]
 
 // ---------------------------------------------------------------------------
 // Active manifest singleton

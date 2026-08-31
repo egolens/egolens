@@ -98,7 +98,7 @@ function topologicalNodes(
 
 function validateScene(recipe: EgoLensAdapterRecipeV1, diagnostics: AdapterDiagnostic[]): void {
   const frameIds = new Set<string>()
-  const rendererIds = new Set<number>()
+  const rendererIds = new Set<string>()
   for (const frame of recipe.scene.coordinateFrames) {
     if (frameIds.has(frame.id)) diagnostics.push(diagnostic('DUPLICATE_FRAME_ID', `Coordinate frame "${frame.id}" is duplicated.`, '/scene/coordinateFrames'))
     frameIds.add(frame.id)
@@ -115,9 +115,11 @@ function validateScene(recipe: EgoLensAdapterRecipeV1, diagnostics: AdapterDiagn
   const sensorIds = new Set<string>()
   for (const sensor of recipe.scene.sensors) {
     if (sensorIds.has(sensor.id)) diagnostics.push(diagnostic('DUPLICATE_SENSOR_ID', `Sensor "${sensor.id}" is duplicated.`, '/scene/sensors'))
-    if (rendererIds.has(sensor.rendererId)) diagnostics.push(diagnostic('DUPLICATE_RENDERER_ID', `Renderer sensor id ${sensor.rendererId} is duplicated.`, '/scene/sensors'))
+    const rendererNamespace = sensor.modality === 'camera' ? 'camera' : 'point'
+    const rendererKey = `${rendererNamespace}:${sensor.rendererId}`
+    if (rendererIds.has(rendererKey)) diagnostics.push(diagnostic('DUPLICATE_RENDERER_ID', `Renderer sensor id ${sensor.rendererId} is duplicated in the ${rendererNamespace} namespace.`, '/scene/sensors'))
     sensorIds.add(sensor.id)
-    rendererIds.add(sensor.rendererId)
+    rendererIds.add(rendererKey)
     if (!frameIds.has(sensor.frameId)) diagnostics.push(diagnostic('SENSOR_FRAME_MISSING', `Sensor "${sensor.id}" references unknown frame "${sensor.frameId}".`, '/scene/sensors'))
     if (sensor.modality === 'camera' && !sensor.image) diagnostics.push(diagnostic('CAMERA_IMAGE_MODEL_MISSING', `Camera "${sensor.id}" requires image geometry.`, '/scene/sensors'))
     if (sensor.modality !== 'camera' && sensor.image) diagnostics.push(diagnostic('NON_CAMERA_IMAGE_MODEL', `Only camera sensors may declare image geometry.`, '/scene/sensors'))
