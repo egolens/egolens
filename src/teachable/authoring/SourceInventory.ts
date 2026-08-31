@@ -1,3 +1,6 @@
+import type { ByteSourceReadOptionsV1, ByteSourceV1 } from '../source/ByteSource'
+import { LocalFileByteSourceV1 } from '../source/ByteSource'
+
 export const MAX_SOURCE_INVENTORY_ENTRIES_V1 = 20_000
 
 export interface SourceInventoryEntryV1 {
@@ -42,7 +45,7 @@ function createSessionId(): string {
 export class SourceInventoryV1 {
   readonly sessionId: string
   readonly truncated: boolean
-  #files: Map<string, File>
+  #source: LocalFileByteSourceV1
   #entries: readonly SourceInventoryEntryV1[]
   #revoked = false
 
@@ -58,11 +61,11 @@ export class SourceInventoryV1 {
     if (sorted.length > MAX_SOURCE_INVENTORY_ENTRIES_V1) {
       throw new Error(`Source inventory exceeds ${MAX_SOURCE_INVENTORY_ENTRIES_V1} files.`)
     }
-    this.#files = new Map()
+    const normalizedFiles = new Map<string, File>()
     const entries: SourceInventoryEntryV1[] = []
     for (const [path, file] of sorted) {
-      if (this.#files.has(path)) throw new Error(`Duplicate inventory path: ${path}`)
-      this.#files.set(path, file)
+      if (normalizedFiles.has(path)) throw new Error(`Duplicate inventory path: ${path}`)
+      normalizedFiles.set(path, file)
       entries.push(Object.freeze({
         path,
         size: file.size,
@@ -71,6 +74,7 @@ export class SourceInventoryV1 {
         extension: extensionOf(path),
       }))
     }
+    this.#source = new LocalFileByteSourceV1(normalizedFiles)
     this.#entries = Object.freeze(entries)
   }
 
@@ -98,18 +102,24 @@ export class SourceInventoryV1 {
     return this.#entries.find((entry) => entry.path === normalized) ?? null
   }
 
-  /** Internal command-layer access; callers still need an exact allowlisted path. */
-  resolveAuthorizedFile(path: string): File {
+  /** Capability used by readers after inventory matching; File never crosses it. */
+  resolveAuthorizedSource(): ByteSourceV1 {
+    this.#assertActive()
+    return this.#source
+  }
+
+  readAuthorizedBytes(path: string, options?: ByteSourceReadOptionsV1): Promise<ArrayBuffer> {
     this.#assertActive()
     const normalized = normalizeLogicalPath(path)
-    const file = this.#files.get(normalized)
-    if (!file) throw new Error(`Inventory path is not authorized: ${normalized}`)
-    return file
+    if (!this.#entries.some((entry) => entry.path === normalized)) {
+      throw new Error(`Inventory path is not authorized: ${normalized}`)
+    }
+    return this.#source.read(normalized, options)
   }
 
   revoke(): void {
     this.#revoked = true
-    this.#files.clear()
+    this.#source.revoke()
   }
 
   #assertActive(): void {

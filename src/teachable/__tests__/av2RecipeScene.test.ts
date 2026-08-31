@@ -5,7 +5,8 @@ import { loadAV2LogMetadata, type AV2LogDatabase } from '../../adapters/argovers
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import { compileRecipeV1 } from '../recipe/compiler'
 import { bindAV2RecipeSceneV1 } from '../runtime/AV2RecipeScene'
-import { bindRecipeSceneV1 } from '../runtime/bindRecipeScene'
+import { bindRecipeSceneV1, prepareFeatherTimelineRuntimeV1 } from '../runtime/bindRecipeScene'
+import { MappedByteSourceV1 } from '../source/ByteSource'
 import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 
@@ -62,7 +63,11 @@ function fixture() {
 describe('Argoverse 2 recipe-backed NormalizedSceneV1', () => {
   it('binds string sensor identities and capabilities from actual outputs', () => {
     const { database, files, compiledRecipe } = fixture()
-    const { scene, diagnostics } = bindAV2RecipeSceneV1({ compiledRecipe, database, files })
+    const { scene, diagnostics } = bindAV2RecipeSceneV1({
+      compiledRecipe,
+      database,
+      source: new MappedByteSourceV1(files),
+    })
     expect(diagnostics).toEqual([])
     expect(scene.manifest.capabilities).toEqual(compiledRecipe.capabilities)
     expect(scene.relations.cameraCalibrations.get('ring_front_center')).toMatchObject({
@@ -76,7 +81,12 @@ describe('Argoverse 2 recipe-backed NormalizedSceneV1', () => {
   it('matches compatibility metadata structurally and numerically in a headless frame', async () => {
     const { database, files, compiledRecipe } = fixture()
     const legacy = loadAV2LogMetadata(database)
-    const { scene } = bindAV2RecipeSceneV1({ compiledRecipe, database, files })
+    const { scene, executionProfile } = await bindRecipeSceneV1({
+      compiledRecipe,
+      source: new MappedByteSourceV1(files),
+      preparation: prepareFeatherTimelineRuntimeV1(database),
+    })
+    expect(executionProfile).toBe('core/feather-timeline@1')
     const actual = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
     const legacyBox = legacy.lidarBoxByFrame.get(database.lidarTimestamps[0])![0]
     const expected: NormalizedFrameV1 = {
@@ -123,24 +133,27 @@ describe('Argoverse 2 recipe-backed NormalizedSceneV1', () => {
     const { database, files, compiledRecipe } = fixture()
     database.cameraFilesByFrame.clear()
     database.annotationsByTimestamp.clear()
-    const { scene, diagnostics } = bindAV2RecipeSceneV1({ compiledRecipe, database, files })
+    const { scene, diagnostics } = bindAV2RecipeSceneV1({
+      compiledRecipe,
+      database,
+      source: new MappedByteSourceV1(files),
+    })
     for (const capability of ['cameraImages', 'boxes3d', 'boxes2d', 'trajectories'] as const) {
       expect(scene.manifest.capabilities.has(capability)).toBe(false)
       expect(diagnostics).toContainEqual(expect.objectContaining({ jsonPointer: `/outputs/${capability}` }))
     }
   })
 
-  it('binds a learned recipe identity through the same source-family execution path', async () => {
+  it('binds a learned recipe identity through the same operator-profile execution path', async () => {
     const { database, files, compiledRecipe } = fixture()
     const learnedRecipe = structuredClone(compiledRecipe.recipe)
     Object.assign(learnedRecipe.scene, { formatId: 'learned-av2-compatible' })
     const learnedCompiled = compileRecipeV1(learnedRecipe, bundledPhase2OperatorRegistry)
 
     const { scene } = await bindRecipeSceneV1({
-      sourceFamily: 'feather-log',
       compiledRecipe: learnedCompiled,
-      database,
-      files,
+      source: new MappedByteSourceV1(files),
+      preparation: prepareFeatherTimelineRuntimeV1(database),
     })
 
     expect(scene.manifest.id).toBe('learned-av2-compatible')

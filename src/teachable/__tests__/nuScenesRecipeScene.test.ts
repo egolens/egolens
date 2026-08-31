@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { buildNuScenesDatabase, loadNuScenesSceneMetadata } from '../../adapters/nuscenes/metadata'
 import { nuScenesCompiledRecipe } from '../../adapters/recipes/bundled'
+import { MappedByteSourceV1 } from '../source/ByteSource'
 import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
+import { bindRecipeSceneV1, prepareTokenRelationsRuntimeV1 } from '../runtime/bindRecipeScene'
 import { bindNuScenesRecipeSceneV1 } from '../runtime/NuScenesRecipeScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 
@@ -75,7 +77,12 @@ async function fixture() {
 describe('nuScenes recipe-backed NormalizedSceneV1', () => {
   it('binds capabilities from real outputs and preserves string sensor identity', async () => {
     const { db, files } = await fixture()
-    const { scene, diagnostics } = bindNuScenesRecipeSceneV1({ compiledRecipe: nuScenesCompiledRecipe, database: db, sceneToken: 'scene', files })
+    const { scene, diagnostics } = bindNuScenesRecipeSceneV1({
+      compiledRecipe: nuScenesCompiledRecipe,
+      database: db,
+      sceneToken: 'scene',
+      source: new MappedByteSourceV1(files),
+    })
     expect(diagnostics).toEqual([])
     expect(scene.manifest.capabilities).toEqual(nuScenesCompiledRecipe.capabilities)
     expect(scene.relations.staticTransforms.map((relation) => relation.childFrameId)).toContain('LIDAR_TOP-frame')
@@ -86,7 +93,13 @@ describe('nuScenes recipe-backed NormalizedSceneV1', () => {
   it('matches legacy metadata structurally and numerically in a headless frame', async () => {
     const { db, files } = await fixture()
     const legacy = loadNuScenesSceneMetadata(db, 'scene')
-    const { scene } = bindNuScenesRecipeSceneV1({ compiledRecipe: nuScenesCompiledRecipe, database: db, sceneToken: 'scene', files })
+    const { scene, executionProfile } = await bindRecipeSceneV1({
+      compiledRecipe: nuScenesCompiledRecipe,
+      source: new MappedByteSourceV1(files),
+      sceneId: 'scene',
+      preparation: prepareTokenRelationsRuntimeV1(db),
+    })
+    expect(executionProfile).toBe('core/token-relations@1')
     const actual = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
     const legacyBox = legacy.lidarBoxByFrame.get(legacy.timestamps[0])![0]
     const expected: NormalizedFrameV1 = {
@@ -124,7 +137,12 @@ describe('nuScenes recipe-backed NormalizedSceneV1', () => {
   it('removes optional capabilities when their files cannot bind', async () => {
     const { db, files } = await fixture()
     files.delete('samples/RADAR_FRONT/one.pcd')
-    const { scene, diagnostics } = bindNuScenesRecipeSceneV1({ compiledRecipe: nuScenesCompiledRecipe, database: db, sceneToken: 'scene', files })
+    const { scene, diagnostics } = bindNuScenesRecipeSceneV1({
+      compiledRecipe: nuScenesCompiledRecipe,
+      database: db,
+      sceneToken: 'scene',
+      source: new MappedByteSourceV1(files),
+    })
     expect(scene.manifest.capabilities.has('radarPointClouds')).toBe(false)
     expect(diagnostics).toContainEqual(expect.objectContaining({
       stage: 'bind',

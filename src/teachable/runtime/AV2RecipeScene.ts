@@ -1,9 +1,9 @@
 import type { AV2LogDatabase } from '../../adapters/argoverse2/metadata'
 import { loadAV2LogMetadata } from '../../adapters/argoverse2/metadata'
 import type { MetadataBundle } from '../../types/dataset'
-import { resolveFileEntry } from '../../workers/fetchHelper'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
+import type { ByteSourceV1 } from '../source/ByteSource'
 import {
   decodeFeatherColumnsV1,
   interleaveFeatherNumericColumnsV1,
@@ -28,7 +28,7 @@ import type {
 export interface AV2RecipeSceneInputV1 {
   readonly compiledRecipe: CompiledRecipeV1
   readonly database: AV2LogDatabase
-  readonly files: ReadonlyMap<string, File | string>
+  readonly source: ByteSourceV1
   readonly metadataBundle?: MetadataBundle
 }
 
@@ -85,7 +85,7 @@ export function bindAV2RecipeSceneV1(input: AV2RecipeSceneInputV1): BoundAV2Reci
   const frameFiles = bundle.timestamps.map((timestamp) =>
     (bundle.vehiclePoseByFrame.get(timestamp) ?? []) as unknown as FrameSensorFile[],
   )
-  const hasFile = (filename?: string): boolean => filename !== undefined && input.files.has(filename)
+  const hasFile = (filename?: string): boolean => filename !== undefined && input.source.has(filename)
   const hasCameraCalibration = input.database.intrinsicsBySensor.size > 0 && input.database.extrinsicsBySensor.size > 0
   const evidence: Partial<Record<NormalizedCapabilityV1, boolean>> = {
     timeline: true,
@@ -174,7 +174,7 @@ export function bindAV2RecipeSceneV1(input: AV2RecipeSceneInputV1): BoundAV2Reci
       if (requested.has('pointClouds') && (!request.sensorIds || request.sensorIds.has(pointSensor.id))) {
         const lidarFile = files.find((file) => file.modality === 'lidar' && hasFile(file.filename))
         if (lidarFile) {
-          const encoded = await resolveFileEntry(input.files.get(lidarFile.filename)!)
+          const encoded = await input.source.read(lidarFile.filename, { signal: request.signal })
           throwIfAborted(request.signal)
           const decoded = interleaveFeatherNumericColumnsV1(
             decodeFeatherColumnsV1(encoded, lidarParams, request.signal),
@@ -197,7 +197,7 @@ export function bindAV2RecipeSceneV1(input: AV2RecipeSceneInputV1): BoundAV2Reci
         for (const file of files.filter((candidate) => candidate.modality === 'camera')) {
           const sensor = cameraSensorsByRendererId.get(file.sensorId)
           if (!sensor?.image || !hasFile(file.filename) || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
-          const encodedBytes = await resolveFileEntry(input.files.get(file.filename)!)
+          const encodedBytes = await input.source.read(file.filename, { signal: request.signal })
           throwIfAborted(request.signal)
           cameraImages.push({
             sensorId: sensor.id,

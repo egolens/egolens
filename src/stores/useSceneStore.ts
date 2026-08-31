@@ -86,7 +86,13 @@ import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe }
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
-import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
+import {
+  bindRecipeSceneV1,
+  prepareFeatherTimelineRuntimeV1,
+  prepareParquetColumnsRuntimeV1,
+  prepareTokenRelationsRuntimeV1,
+} from '../teachable/runtime/bindRecipeScene'
+import { MappedByteSourceV1, type ByteSourceV1 } from '../teachable/source/ByteSource'
 import {
   manageNormalizedSceneV1,
   type ManagedNormalizedSceneV1,
@@ -342,6 +348,8 @@ function activateAdapter(id: string): void {
 
 const internal = {
   parquetFiles: new Map<string, WaymoParquetFile>(),
+  /** Transport-neutral bytes passed to the recipe executor. */
+  recipeByteSource: null as ByteSourceV1 | null,
   timestamps: [] as bigint[],
   /** Reverse lookup: timestamp → frame index */
   timestampToFrame: new Map<bigint, number>(),
@@ -425,6 +433,7 @@ function resetInternal() {
   internal.normalizedScene = null
   internal.conformanceSceneFactory = null
   internal.parquetFiles.clear()
+  internal.recipeByteSource = null
   internal.timestamps = []
   internal.pendingSeekFrame = null
   internal.cameraLoadedBatchesEver.clear()
@@ -730,6 +739,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   actions: {
     loadDataset: async (sources) => {
       resetInternal()
+      internal.recipeByteSource = new MappedByteSourceV1([...sources].map(([component, source]) => {
+        const sourceName = typeof source === 'string'
+          ? source.split(/[?#]/u, 1)[0].split('/').at(-1) || `${component}.parquet`
+          : source.name
+        return [`${component}/${sourceName}`, source] as const
+      }))
       markPerformanceEvent('scene-load-start', { dataset: 'waymo' })
       set({
         status: 'loading',
@@ -1520,17 +1535,19 @@ async function loadAndCacheRowGroup(
 
 async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
   // Read the lightweight metadata tables before the managed worker path starts.
+  if (!internal.recipeByteSource) throw new Error('RECIPE_BYTE_SOURCE_MISSING: Waymo source was not initialized.')
   const binding = await bindRecipeSceneV1({
-    sourceFamily: 'parquet-components',
     compiledRecipe: waymoCompiledRecipe,
-    parquetFiles: internal.parquetFiles,
+    source: internal.recipeByteSource,
+    preparation: prepareParquetColumnsRuntimeV1(internal.parquetFiles),
   })
   const bundle = binding.metadata
   const conformanceFiles = new Map(internal.parquetFiles)
+  const conformanceSource = internal.recipeByteSource
   internal.conformanceSceneFactory = async (compiledRecipe = waymoCompiledRecipe) => (await bindRecipeSceneV1({
-    sourceFamily: 'parquet-components',
     compiledRecipe,
-    parquetFiles: conformanceFiles,
+    source: conformanceSource,
+    preparation: prepareParquetColumnsRuntimeV1(conformanceFiles),
     metadataBundle: bundle,
   })).scene
   internal.normalizedScene?.dispose()
@@ -1872,21 +1889,20 @@ async function loadTokenTableScene(
 
     // 2. Load scene metadata → MetadataBundle
     const binding = await bindRecipeSceneV1({
-      sourceFamily: 'token-tables',
       compiledRecipe: nuScenesCompiledRecipe,
-      database: internal.nuScenesDb,
-      sceneToken: scene.token,
-      files: internal.nuScenesSampleFiles,
+      source: new MappedByteSourceV1(internal.nuScenesSampleFiles),
+      sceneId: scene.token,
+      preparation: prepareTokenRelationsRuntimeV1(internal.nuScenesDb),
     })
     const bundle = binding.metadata
     const conformanceDatabase = internal.nuScenesDb
     const conformanceFiles = new Map(internal.nuScenesSampleFiles)
+    const conformanceSource = new MappedByteSourceV1(conformanceFiles)
     internal.conformanceSceneFactory = async (compiledRecipe = nuScenesCompiledRecipe) => (await bindRecipeSceneV1({
-      sourceFamily: 'token-tables',
       compiledRecipe,
-      database: conformanceDatabase,
-      sceneToken: scene.token,
-      files: conformanceFiles,
+      source: conformanceSource,
+      sceneId: scene.token,
+      preparation: prepareTokenRelationsRuntimeV1(conformanceDatabase),
       metadataBundle: bundle,
     })).scene
     internal.normalizedScene?.dispose()
@@ -2140,19 +2156,20 @@ async function loadFeatherLogScene(
 
     // 1. Load metadata → MetadataBundle
     const binding = await bindRecipeSceneV1({
-      sourceFamily: 'feather-log',
       compiledRecipe: argoverse2CompiledRecipe,
-      database: internal.av2Db,
-      files: internal.av2SampleFiles,
+      source: new MappedByteSourceV1(internal.av2SampleFiles),
+      sceneId: logId,
+      preparation: prepareFeatherTimelineRuntimeV1(internal.av2Db),
     })
     const bundle = binding.metadata
     const conformanceDatabase = internal.av2Db
     const conformanceFiles = new Map(internal.av2SampleFiles)
+    const conformanceSource = new MappedByteSourceV1(conformanceFiles)
     internal.conformanceSceneFactory = async (compiledRecipe = argoverse2CompiledRecipe) => (await bindRecipeSceneV1({
-      sourceFamily: 'feather-log',
       compiledRecipe,
-      database: conformanceDatabase,
-      files: conformanceFiles,
+      source: conformanceSource,
+      sceneId: logId,
+      preparation: prepareFeatherTimelineRuntimeV1(conformanceDatabase),
       metadataBundle: bundle,
     })).scene
     internal.normalizedScene?.dispose()

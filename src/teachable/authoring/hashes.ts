@@ -46,10 +46,16 @@ export async function datasetFingerprintV1(inventory: SourceInventoryV1, signal?
   for (const index of [...sampleIndices].sort((left, right) => left - right)) {
     if (signal?.aborted) throw new DOMException('Fingerprinting was aborted.', 'AbortError')
     const entry = entries[index]
-    const file = inventory.resolveAuthorizedFile(entry.path)
-    const head = new Uint8Array(await file.slice(0, Math.min(64, file.size)).arrayBuffer())
-    const tailStart = Math.max(0, file.size - 64)
-    const tail = new Uint8Array(await file.slice(tailStart, file.size).arrayBuffer())
+    const head = new Uint8Array(await inventory.readAuthorizedBytes(entry.path, {
+      end: Math.min(64, entry.size),
+      signal,
+    }))
+    const tailStart = Math.max(0, entry.size - 64)
+    const tail = new Uint8Array(await inventory.readAuthorizedBytes(entry.path, {
+      start: tailStart,
+      end: entry.size,
+      signal,
+    }))
     sampled.push({
       path: pathTemplate(entry.path),
       size: entry.size,
