@@ -46,7 +46,7 @@
     {
       "datasetId": "argoverse2",
       "caseId": "phase6-av2-urban-001",
-      "recipeHash": "sha256:69f373313ad47476b833a5f9f4c473e412c55a0a28dc6ae24807ad21b156863e",
+      "recipeHash": "sha256:6cc1de10672380c8672648c9a69e9dc65ee97b207cb621a5c7a348c4393a5eda",
       "coverage": {
         "requiredCapabilities": [
           "boxes2d", "boxes3d", "cameraImages", "egoPoses", "pointClouds",
@@ -61,4 +61,3 @@
     }
   ]
 }
-

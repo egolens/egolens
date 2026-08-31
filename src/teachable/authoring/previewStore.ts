@@ -4,6 +4,8 @@ export interface AuthoringTimelinePreviewV1 {
   readonly frameCount: number
   readonly sampledFrames: readonly number[]
   readonly sampledTimestampsMicros: readonly string[]
+  /** Visible per-sample output counts produced by the shared scene path. */
+  readonly capabilitySamples?: Readonly<Record<string, readonly number[]>>
 }
 
 let preview: AuthoringTimelinePreviewV1 | null = null

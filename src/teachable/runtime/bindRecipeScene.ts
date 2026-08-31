@@ -1,8 +1,7 @@
-import type { AV2LogDatabase } from '../../adapters/argoverse2/metadata'
 import type { NuScenesDatabase } from '../../adapters/nuscenes/metadata'
 import type { WaymoParquetFile } from '../../utils/parquet'
-import { bindAV2RecipeSceneV1 } from './AV2RecipeScene'
 import { bindNuScenesRecipeSceneV1 } from './NuScenesRecipeScene'
+import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import {
   RecipeExecutorV1,
   type BoundRecipeSceneV1,
@@ -11,6 +10,8 @@ import {
   type RecipeRuntimeProviderV1,
 } from './RecipeExecutor'
 import { bindWaymoRecipeSceneV1 } from './WaymoRecipeScene'
+import { ExecutableGraphKernelV1 } from './GraphKernel'
+import { assembleGraphSceneV1 } from './GraphSceneAssembler'
 
 const preparationBrand = Symbol('RecipeRuntimePreparationV1')
 
@@ -34,14 +35,6 @@ class TokenRelationsPreparationV1 implements RecipeRuntimePreparationV1 {
   }
 }
 
-class FeatherTimelinePreparationV1 implements RecipeRuntimePreparationV1 {
-  readonly [preparationBrand] = true as const
-  readonly database: AV2LogDatabase
-  constructor(database: AV2LogDatabase) {
-    this.database = database
-  }
-}
-
 export function prepareParquetColumnsRuntimeV1(
   parquetFiles: ReadonlyMap<string, WaymoParquetFile>,
 ): RecipeRuntimePreparationV1 {
@@ -52,12 +45,6 @@ export function prepareTokenRelationsRuntimeV1(
   database: NuScenesDatabase,
 ): RecipeRuntimePreparationV1 {
   return new TokenRelationsPreparationV1(database)
-}
-
-export function prepareFeatherTimelineRuntimeV1(
-  database: AV2LogDatabase,
-): RecipeRuntimePreparationV1 {
-  return new FeatherTimelinePreparationV1(database)
 }
 
 function assertParquetPreparation(
@@ -75,16 +62,6 @@ function assertTokenPreparation(
   profile: string,
 ): TokenRelationsPreparationV1 {
   if (!(preparation instanceof TokenRelationsPreparationV1)) {
-    throw new Error(`RECIPE_RUNTIME_PREPARATION_INVALID: ${profile}`)
-  }
-  return preparation
-}
-
-function assertFeatherPreparation(
-  preparation: object | undefined,
-  profile: string,
-): FeatherTimelinePreparationV1 {
-  if (!(preparation instanceof FeatherTimelinePreparationV1)) {
     throw new Error(`RECIPE_RUNTIME_PREPARATION_INVALID: ${profile}`)
   }
   return preparation
@@ -167,14 +144,31 @@ const featherTimelineProvider: RecipeRuntimeProviderV1 = {
     'timeline.sort@1',
     'tracks.derive_trajectories@1',
   ],
-  execute(input): RecipeProviderResultV1 {
-    const prepared = assertFeatherPreparation(input.preparation, this.id)
-    return bindAV2RecipeSceneV1({
+  async execute(input): Promise<RecipeProviderResultV1> {
+    const inventory = input.inventoryEntries
+      ?? input.inventory?.snapshot().entries.map((entry) => ({ path: entry.path, size: entry.size }))
+    if (!inventory) throw new Error('RECIPE_SOURCE_INVENTORY_REQUIRED: core/feather-timeline@1')
+    const graph = await new ExecutableGraphKernelV1(bundledPhase2OperatorRegistry).execute({
       compiledRecipe: input.compiledRecipe,
-      database: prepared.database,
       source: input.source,
-      metadataBundle: input.metadataBundle,
+      inventory,
     })
+    return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+  },
+}
+
+const jsonTimelineProvider: RecipeRuntimeProviderV1 = {
+  id: 'core/executable-graph@1',
+  readers: ['json.records@1'],
+  operators: ['timeline.sort@1'],
+  async execute(input): Promise<RecipeProviderResultV1> {
+    const inventory = input.inventoryEntries
+      ?? input.inventory?.snapshot().entries.map((entry) => ({ path: entry.path, size: entry.size }))
+    if (!inventory) throw new Error('RECIPE_SOURCE_INVENTORY_REQUIRED: core/executable-graph@1')
+    const graph = await new ExecutableGraphKernelV1(bundledPhase2OperatorRegistry).execute({
+      compiledRecipe: input.compiledRecipe, source: input.source, inventory,
+    })
+    return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
   },
 }
 
@@ -182,11 +176,12 @@ export const coreRecipeExecutorV1 = new RecipeExecutorV1([
   parquetRangeImageProvider,
   tokenRelationsProvider,
   featherTimelineProvider,
+  jsonTimelineProvider,
 ])
 
 /** Common production, local-import, and conformance binding entry point. */
 export async function bindRecipeSceneV1(
-  input: RecipeExecutionInputV1 & { readonly preparation: RecipeRuntimePreparationV1 },
+  input: RecipeExecutionInputV1,
 ): Promise<BoundRecipeSceneV1> {
   return await coreRecipeExecutorV1.execute(input)
 }

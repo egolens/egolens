@@ -1,8 +1,8 @@
 # Spec 014 — Teachable Lens Phase 10 original-data generalization ladder
 
-**Status**: in progress (transport/runtime preflight 10.P1 implemented;
-full-graph execution, remote/share proofs, and four-dataset original-drop
-evidence pending) · **Date**: 2026-08-30
+**Status**: in progress (transport/runtime preflight 10.P1 and executable graph
+kernel/Argoverse 2 migration 10.P2 implemented; nuScenes/Waymo graph migration,
+remote/share proofs, and four-dataset original-drop evidence pending) · **Date**: 2026-08-30
 
 **Relationship to earlier specs**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 10. It retains
@@ -93,6 +93,20 @@ hash, share descriptor/URL, local↔remote parity, security, performance, and
 fresh-profile evidence remain pending. No held-out rung source is opened by
 this checkpoint.
 
+**Implementation checkpoint — 10.P2:** the core operator registry now carries
+an executable ABI over typed graph values, and one deterministic topological
+kernel owns source selection, node evaluation, cancellation, lifecycle, and
+resource accounting. A generic graph-output assembler produces
+`NormalizedSceneV1` plus the temporary renderer compatibility projection.
+Argoverse 2 production, local import, browser authoring preview, and isolated
+conformance now execute the declared Feather/image sources and all eight
+pipelines without `AV2LogDatabase`, `AV2RecipeScene`, a provider-specific scene
+body, or a fallback. Its optional capability evidence, numeric frame surface,
+idempotent disposal, cancellation, and lazy point/image reads are covered by
+the Phase 9/Spec 012 suite. Waymo and nuScenes remain on their passing 10.P1
+providers until 10.P4 and 10.P3 respectively. No held-out rung source was
+opened by this checkpoint.
+
 #### Normative preflight implementation phases
 
 The remaining preflight is implemented in the following order. These are
@@ -105,7 +119,7 @@ permit skipping an earlier exit gate.
 | Sub-phase | Scope | Exit gate |
 |---|---|---|
 | **10.P1 — shared entry and local byte seam** | Introduce the common recipe-execution entry point, exact versioned reader/operator-profile selection, and transport-neutral bounded local `ByteSourceV1`; route production and isolated conformance binding through that entry. | **Complete.** No `sourceFamily` input remains, local bytes can cross the reader boundary without exposing `File`, and Waymo, nuScenes, and Argoverse 2 retain structural/numeric parity through the shared entry point. Provider-specific preparation and scene bodies are explicitly still transitional. |
-| **10.P2 — executable graph kernel and Argoverse 2 migration** | Add the executable core-operator ABI, typed graph values, deterministic topological evaluation, lifecycle/cancellation/resource accounting, and generic `NormalizedSceneV1` assembly. Move the Argoverse 2 recipe first because it exercises Feather, image, timeline join, calibration, boxes, and trajectories with the smallest shipped graph. Production, authoring preview, local import, and isolated conformance must use that graph path. | The finalized Argoverse 2 recipe executes from its declared sources and nodes without a prepared `AV2LogDatabase`, `AV2RecipeScene`, provider-specific scene body, or legacy fallback; its full Phase 9 capability/parity surface and applicable Spec 012 lifecycle/performance cases pass. Waymo and nuScenes parity remains unchanged. |
+| **10.P2 — executable graph kernel and Argoverse 2 migration** | Add the executable core-operator ABI, typed graph values, deterministic topological evaluation, lifecycle/cancellation/resource accounting, and generic `NormalizedSceneV1` assembly. Move the Argoverse 2 recipe first because it exercises Feather, image, timeline join, calibration, boxes, and trajectories with the smallest shipped graph. Production, authoring preview, local import, and isolated conformance must use that graph path. | **Complete.** The finalized Argoverse 2 recipe executes from its declared sources and nodes without a prepared `AV2LogDatabase`, `AV2RecipeScene`, provider-specific scene body, or legacy fallback; its full Phase 9 capability/parity surface and applicable Spec 012 lifecycle/performance cases pass. Waymo and nuScenes parity remains unchanged. |
 | **10.P3 — nuScenes graph migration** | Extend the same public graph/value surface only as required by the already shipped nuScenes recipe, including JSON records, token relations, interleaved/PCD point records, NPZ labels, cameras, calibration, boxes, and trajectories. Use raw bound sources rather than a prepared token-table database. | The finalized nuScenes recipe executes end to end through the same graph runtime in production, authoring preview, local import, and isolated conformance, with no prepared `NuScenesDatabase`, `NuScenesRecipeScene`, provider-specific scene body, or legacy fallback. Full nuScenes Phase 9 parity and applicable Spec 012 gates pass; Argoverse 2 and Waymo do not regress. |
 | **10.P4 — Waymo graph migration and legacy removal** | Extend the same runtime for the shipped Parquet/range-image graph and its complete optional perception surface, then remove the remaining prepared Parquet/provider scene path and the timeline-only authoring-preview path. Delete obsolete runtime-profile routing once all three recipes execute by their graph. | The finalized Waymo recipe and both previously migrated recipes use one node-by-node executor and generic scene assembler across production, authoring preview, local import, and isolated conformance. No dataset name, `formatId`, bundled identity, filename, transport, prepared database/map, or dataset-specific scene class selects or supplies an alternate runtime. All three Phase 9 parity surfaces and applicable Spec 012 gates pass. This closes the local **One generic recipe executor** requirement below. |
 | **10.P5 — source identity, catalog, and remote transport** | Implement canonical `sourceManifestHash`, the closed transport-only `SourceCatalogV1` schema and hash, catalog generation/validation, and `RemoteByteSourceV1` over the same reader contract. Add range/chunk verification, bounded full-object fallback, cancellation, retry, byte budgets, cache identity, URL/root confinement, redirect, CORS, credential, and tamper handling. | Byte-identical local and hosted fixtures produce the same `sourceManifestHash`; every shipped recipe binds through both transports without reader/operator changes. All specified transport-negative tests pass, and no remote failure can fall back to local, bundled, or dataset-specific discovery. |

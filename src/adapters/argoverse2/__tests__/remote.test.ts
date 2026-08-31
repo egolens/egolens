@@ -4,7 +4,7 @@
  * Tests cover:
  * - Manifest validation (fetchAV2Manifest)
  * - Frame discovery from manifest (discoverAV2FramesFromManifest)
- * - URL loader (loadAV2FromUrl) — metadata fetch + DB construction
+ * - URL loader (loadAV2FromUrl) — content-blind inventory construction
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -14,6 +14,7 @@ import {
   parseS3Url,
   parseS3ListXml,
   fetchAV2ThumbnailUrl,
+  loadAV2FromUrl,
   type AV2Manifest,
 } from '../remote'
 import { DataLoadError } from '../../../utils/errors'
@@ -73,6 +74,33 @@ const SENSOR_NAME_TO_ID: Record<string, number> = {
 }
 
 const RING_CAMERAS = ['ring_front_left', 'ring_front_center', 'ring_front_right'] as const
+
+describe('loadAV2FromUrl graph inventory', () => {
+  it('builds unchanged manifest paths without parsing metadata payloads', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200 })
+    const result = await loadAV2FromUrl('https://data.example/log/', SAMPLE_MANIFEST)
+    expect(result.logId).toBe('test-log-001')
+    expect(result.fileEntries).toContainEqual([
+      'calibration/intrinsics.feather', 'https://data.example/log/calibration/intrinsics.feather',
+    ])
+    expect(result.fileEntries).toContainEqual([
+      'sensors/lidar/315966265659927216.feather', 'https://data.example/log/sensors/lidar/315966265659927216.feather',
+    ])
+    expect(result.fileEntries).toContainEqual([
+      'annotations.feather', 'https://data.example/log/annotations.feather',
+    ])
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://data.example/log/annotations.feather',
+      expect.objectContaining({ method: 'HEAD', signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('omits an unavailable optional annotation source', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 })
+    const result = await loadAV2FromUrl('https://data.example/log/', SAMPLE_MANIFEST)
+    expect(result.fileEntries.some(([path]) => path === 'annotations.feather')).toBe(false)
+  })
+})
 
 // ---------------------------------------------------------------------------
 // fetchAV2Manifest

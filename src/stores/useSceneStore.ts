@@ -46,10 +46,6 @@ import type {
   NuScenesCameraImageDescriptor,
 } from '../workers/nuScenesCameraWorker'
 import {
-  buildAV2LogDatabase,
-  type AV2LogDatabase,
-} from '../adapters/argoverse2/metadata'
-import {
   fetchAV2Manifest,
   loadAV2FromUrl,
   isAV2ParentUrl,
@@ -88,7 +84,6 @@ import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColum
 import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
 import {
   bindRecipeSceneV1,
-  prepareFeatherTimelineRuntimeV1,
   prepareParquetColumnsRuntimeV1,
   prepareTokenRelationsRuntimeV1,
 } from '../teachable/runtime/bindRecipeScene'
@@ -417,8 +412,8 @@ const internal = {
    */
   pendingSeekFrame: null as number | null,
   // -- Argoverse 2-specific state --
-  /** Parsed AV2 log database */
-  av2Db: null as AV2LogDatabase | null,
+  /** Active AV2 log identity; graph inputs live exclusively in av2SampleFiles. */
+  av2LogId: null as string | null,
   /** AV2 sensor data files keyed by relative path (File for local, string URL for remote) */
   av2SampleFiles: null as Map<string, File | string> | null,
   /** Discovered AV2 logs from parent URL (multi-log mode) */
@@ -647,9 +642,7 @@ async function loadLocalSegments(
     internal.av2SampleFiles = sampleFiles
     activateAdapter('argoverse2')
 
-    // Build log database from Feather files
-    set({ status: 'loading', loadStep: 'parsing' as LoadStep, loadProgress: 0 })
-    internal.av2Db = await buildAV2LogDatabase(sampleFiles, logId)
+    internal.av2LogId = logId
 
     // AV2 has a single "scene" per log — use log ID as segment name
     set({ availableSegments: [logId], loadProgress: 0.1 })
@@ -664,7 +657,7 @@ async function loadLocalSegments(
   internal.nuScenesDb = null
   internal.nuScenesSampleFiles = null
   internal.nuScenesDiscoveredScenes = null
-  internal.av2Db = null
+  internal.av2LogId = null
   internal.av2SampleFiles = null
   internal.av2DiscoveredLogs = null
   internal.waymoBaseUrl = null
@@ -1074,7 +1067,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // If the dataset type changed, visibleSensors IDs may be stale — validate them.
       if (internal.datasetId === 'nuscenes' && (internal.nuScenesDb || internal.nuScenesDiscoveredScenes)) {
         activateAdapter('nuscenes')
-      } else if (internal.datasetId === 'argoverse2' && internal.av2Db) {
+      } else if (internal.datasetId === 'argoverse2' && internal.av2LogId) {
         activateAdapter('argoverse2')
       }
 
@@ -1114,14 +1107,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
       if (internal.datasetId === 'argoverse2') {
         // Multi-log mode: if switching to a different log, load it from URL first
-        if (internal.av2DiscoveredLogs && (!internal.av2Db || internal.av2Db.logId !== segmentId)) {
+        if (internal.av2DiscoveredLogs && internal.av2LogId !== segmentId) {
           const logEntry = internal.av2DiscoveredLogs.find(l => l.logId === segmentId)
           if (!logEntry) throw new Error(`AV2 log not found: ${segmentId}`)
 
           set({ status: 'loading', loadStep: 'opening' as LoadStep, loadProgress: 0, error: null })
 
           const manifest = await fetchAV2Manifest(logEntry.logUrl)
-          const { db, fileEntries } = await loadAV2FromUrl(logEntry.logUrl, manifest, (p) => {
+          const { logId, fileEntries } = await loadAV2FromUrl(logEntry.logUrl, manifest, (p) => {
             set({ loadProgress: p * 0.2 })
           })
 
@@ -1130,11 +1123,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             sampleFiles.set(filename, url)
           }
 
-          internal.av2Db = db
+          internal.av2LogId = logId
           internal.av2SampleFiles = sampleFiles
         }
 
-        if (internal.av2Db) {
+        if (internal.av2LogId) {
           await loadFeatherLogScene(segmentId, set, get)
           syncSegmentToUrl(segmentId, get().playbackWindow)
           return
@@ -1231,7 +1224,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
                 console.log(`[loadFromUrl] AV2 direct scene: ${direct.logUrl}`)
                 internal.datasetId = 'argoverse2'
                 internal.av2DiscoveredLogs = [direct]
-                internal.av2Db = null
+                internal.av2LogId = null
                 internal.av2SampleFiles = null
                 internal.nuScenesDb = null
                 internal.nuScenesSampleFiles = null
@@ -1260,7 +1253,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             // Store discovered logs for later selectSegment calls
             internal.datasetId = 'argoverse2'
             internal.av2DiscoveredLogs = logs
-            internal.av2Db = null
+            internal.av2LogId = null
             internal.av2SampleFiles = null
             internal.nuScenesDb = null
             internal.nuScenesSampleFiles = null
@@ -1289,8 +1282,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }
           set({ loadProgress: 0.05 })
 
-          // 2. Fetch metadata + build database
-          const { db, fileEntries } = await loadAV2FromUrl(baseUrl, manifest, (p) => {
+          // 2. Discover the unchanged URL-backed source inventory
+          const { logId, fileEntries } = await loadAV2FromUrl(baseUrl, manifest, (p) => {
             set({ loadProgress: 0.05 + p * 0.15 }) // 0.05 → 0.20
           })
 
@@ -1300,9 +1293,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             sampleFiles.set(filename, url)
           }
 
-          // 4. Initialize AV2 state (same as local mode)
+          // 4. Initialize AV2 graph-source state (same as local mode)
           internal.datasetId = 'argoverse2'
-          internal.av2Db = db
+          internal.av2LogId = logId
           internal.av2SampleFiles = sampleFiles
           internal.nuScenesDb = null
           internal.nuScenesSampleFiles = null
@@ -1310,10 +1303,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           activateAdapter('argoverse2')
 
           // AV2 has a single "scene" per log
-          set({ availableSegments: [db.logId], loadProgress: 0.2 })
+          set({ availableSegments: [logId], loadProgress: 0.2 })
 
           // 5. Load scene (metadata → batches → workers → pipeline)
-          await get().actions.selectSegment(db.logId)
+          await get().actions.selectSegment(logId)
         } catch (e) {
           failLoad(set, e, 'loadFromUrl:AV2')
         }
@@ -1409,7 +1402,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           internal.nuScenesDb = null
           internal.nuScenesSampleFiles = null
           internal.nuScenesDiscoveredScenes = null
-          internal.av2Db = null
+          internal.av2LogId = null
           internal.av2SampleFiles = null
           internal.av2DiscoveredLogs = null
           activateAdapter('waymo')
@@ -2137,8 +2130,8 @@ async function loadFeatherLogScene(
   set: (partial: Partial<SceneState>) => void,
   get: () => SceneState,
 ) {
-  if (!internal.av2Db || !internal.av2SampleFiles) {
-    throw new Error('AV2 database not loaded')
+  if (!internal.av2LogId || !internal.av2SampleFiles) {
+    throw new Error('AV2 graph source not loaded')
   }
 
   set({
@@ -2155,22 +2148,24 @@ async function loadFeatherLogScene(
     memLog.snap('av2:scene-start', { note: logId })
 
     // 1. Load metadata → MetadataBundle
+    const inventoryEntries = [...internal.av2SampleFiles].map(([path, value]) => ({
+      path,
+      size: typeof value === 'string' ? null : value.size,
+    }))
     const binding = await bindRecipeSceneV1({
       compiledRecipe: argoverse2CompiledRecipe,
       source: new MappedByteSourceV1(internal.av2SampleFiles),
       sceneId: logId,
-      preparation: prepareFeatherTimelineRuntimeV1(internal.av2Db),
+      inventoryEntries,
     })
     const bundle = binding.metadata
-    const conformanceDatabase = internal.av2Db
     const conformanceFiles = new Map(internal.av2SampleFiles)
     const conformanceSource = new MappedByteSourceV1(conformanceFiles)
     internal.conformanceSceneFactory = async (compiledRecipe = argoverse2CompiledRecipe) => (await bindRecipeSceneV1({
       compiledRecipe,
       source: conformanceSource,
       sceneId: logId,
-      preparation: prepareFeatherTimelineRuntimeV1(conformanceDatabase),
-      metadataBundle: bundle,
+      inventoryEntries,
     })).scene
     internal.normalizedScene?.dispose()
     internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
@@ -2759,9 +2754,16 @@ export function getSegmentSplits(): Map<string, AV2Split> | null {
  * instead of silently showing no boxes. Null when no AV2 log is loaded.
  */
 export function getLoadedAV2HasAnnotations(): boolean | null {
-  const db = internal.av2Db
-  if (!db) return null
-  return db.annotationsByTimestamp.size > 0
+  if (internal.datasetId !== 'argoverse2' || !internal.av2LogId) return null
+  return internal.lidarBoxByFrame.size > 0
+}
+
+function loadedAV2FrontThumbnail(): string | null {
+  if (!internal.av2SampleFiles || internal.timestamps.length === 0) return null
+  const files = internal.vehiclePoseByFrame.get(internal.timestamps[0]) ?? []
+  const front = files.find((entry) => entry.modality === 'camera' && entry.sensorId === 4)
+  const backing = front ? internal.av2SampleFiles.get(String(front.filename)) : undefined
+  return typeof backing === 'string' ? backing : null
 }
 
 export function getThumbnailResolver(): ((segmentId: string) => Promise<string | null> | string | null) | null {
@@ -2773,14 +2775,9 @@ export function getThumbnailResolver(): ((segmentId: string) => Promise<string |
       const logMap = new Map(internal.av2DiscoveredLogs.map(l => [l.logId, l]))
 
       return async (segmentId: string) => {
-        // If this is the currently loaded log, try the db first
-        if (internal.av2Db && internal.av2Db.logId === segmentId) {
-          const frame0Cams = internal.av2Db.cameraFilesByFrame.get(0)
-          const front = frame0Cams?.find(c => c.cameraId === 4) // RING_FRONT_CENTER = 4
-          if (front && internal.av2SampleFiles) {
-            const entry = internal.av2SampleFiles.get(front.filename)
-            if (typeof entry === 'string') return entry
-          }
+        if (internal.av2LogId === segmentId) {
+          const thumbnail = loadedAV2FrontThumbnail()
+          if (thumbnail) return thumbnail
         }
 
         const log = logMap.get(segmentId)
@@ -2794,18 +2791,7 @@ export function getThumbnailResolver(): ((segmentId: string) => Promise<string |
       }
     }
 
-    // Single-log mode: db is already loaded
-    if (internal.av2Db) {
-      const db = internal.av2Db
-      const sampleFiles = internal.av2SampleFiles
-      return (_segmentId: string) => {
-        const frame0Cams = db.cameraFilesByFrame.get(0)
-        const front = frame0Cams?.find(c => c.cameraId === 4) // RING_FRONT_CENTER = 4
-        if (!front || !sampleFiles) return null
-        const entry = sampleFiles.get(front.filename)
-        return typeof entry === 'string' ? entry : null
-      }
-    }
+    if (internal.av2LogId) return () => loadedAV2FrontThumbnail()
   }
 
   // Sharded nuScenes: the index carries a pre-resized thumbnail per scene

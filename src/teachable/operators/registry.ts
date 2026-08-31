@@ -4,6 +4,7 @@ import { ExtensionOperatorError } from '../extensions/protocol'
 import type { EgoLensOperatorPackageManifest, ExtensionOperatorResourceLimits } from '../extensions/packageManifest'
 import { assertValidOperatorPackageManifest } from '../extensions/packageManifest'
 import type { OperatorDependencyV1 } from '../recipe/types'
+import type { CoreOperatorExecutionContextV1 } from '../runtime/GraphValues'
 
 export type OperatorJsonSchema = Readonly<Record<string, unknown>>
 
@@ -24,9 +25,17 @@ interface OperatorDescriptorBase {
   readonly validateParams?: (params: unknown) => readonly OperatorParameterValidationError[]
 }
 
+export type CoreOperatorImplementationV1 = (
+  inputs: Readonly<Record<string, unknown>>,
+  params: Readonly<Record<string, unknown>>,
+  context: CoreOperatorExecutionContextV1,
+) => Promise<Readonly<Record<string, unknown>>> | Readonly<Record<string, unknown>>
+
 export interface CoreOperatorDescriptor extends OperatorDescriptorBase {
   readonly provider: 'core'
   readonly tier: 1 | 2
+  /** Trusted implementation selected only through this exact versioned descriptor. */
+  readonly execute?: CoreOperatorImplementationV1
 }
 
 export interface ExtensionOperatorDescriptor extends OperatorDescriptorBase {
@@ -167,6 +176,27 @@ export class OperatorRegistry {
     const output = await this.#extensionExecutor.execute(operator, inputs, params, options)
     const outputErrors = this.validateOutput(name, dependency, output)
     if (outputErrors.length > 0) throw new ExtensionOperatorError('OPERATOR_OUTPUT_INVALID', outputErrors.map(formatValidationError).join('; '))
+    return output
+  }
+
+  async executeCore(
+    name: string,
+    dependency: OperatorDependencyV1,
+    inputs: Readonly<Record<string, unknown>>,
+    params: Readonly<Record<string, unknown>>,
+    context: CoreOperatorExecutionContextV1,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const operator = this.resolve(name, dependency)
+    if (!operator || operator.provider !== 'core' || !operator.execute) {
+      throw new Error(`CORE_OPERATOR_IMPLEMENTATION_MISSING: ${name}@${dependency.major}`)
+    }
+    context.throwIfAborted()
+    const output = await operator.execute(inputs, params, context)
+    context.throwIfAborted()
+    const outputErrors = this.validateOutput(name, dependency, output)
+    if (outputErrors.length > 0) {
+      throw new Error(`CORE_OPERATOR_OUTPUT_INVALID: ${name}@${dependency.major}: ${outputErrors.map(formatValidationError).join('; ')}`)
+    }
     return output
   }
 

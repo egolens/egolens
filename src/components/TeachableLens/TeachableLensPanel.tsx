@@ -106,6 +106,9 @@ export default function TeachableLensPanel({
             <div style={{ marginTop: 8, fontSize: 12, color: colors.textSecondary }}>
               {preview.frameCount} timeline frames · sampled {preview.sampledFrames.join(', ')} · timestamps {preview.sampledTimestampsMicros.join(', ')} µs
             </div>
+            {preview.capabilitySamples && <div style={{ marginTop: 8, fontSize: 11, color: colors.textDim, lineHeight: 1.6 }}>
+              {Object.entries(preview.capabilitySamples).map(([capability, counts]) => `${capability}: [${counts.join(', ')}]`).join(' · ')}
+            </div>}
           </div>
         )}
 
