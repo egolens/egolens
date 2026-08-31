@@ -1,9 +1,8 @@
 /**
  * Argoverse 2 Remote Loading — URL-based data loading for AV2 logs.
  *
- * Entry point: `loadAV2FromUrl(baseUrl)` fetches metadata feather files,
- * builds an AV2LogDatabase, and constructs URL-based fileEntries for
- * worker pools.
+ * Entry point: `loadAV2FromUrl(baseUrl)` discovers the unchanged source
+ * inventory and constructs URL-backed entries for the shared graph runtime.
  *
  * Frame discovery strategy (in order):
  *   1. manifest.json — fast, single request, full camera matching
@@ -18,8 +17,6 @@
 
 import { DataLoadError, classifyFetchError, classifyHttpError } from '../../utils/errors'
 import {
-  buildAV2LogDatabase,
-  type AV2LogDatabase,
   type AV2Manifest,
   type AV2ManifestFrame,
 } from './metadata'
@@ -190,11 +187,8 @@ export function parseS3ListXml(xml: string): S3ListPage {
 /**
  * Discover AV2 frames by listing S3 objects under sensors/lidar/ and sensors/cameras/.
  *
- * Builds the same data structure as discoverAV2FramesFromManifest (manifest) or
- * the local file-key scanning path — so buildAV2LogDatabase works identically.
- *
- * Returns a synthetic file key map for buildAV2LogDatabase to scan,
- * plus the discovered logId.
+ * Returns the unchanged relative-path inventory and discovered log identity;
+ * payload parsing remains inside the shared recipe graph.
  */
 export async function discoverAV2FramesFromS3(
   baseUrl: string,
@@ -639,12 +633,14 @@ export async function fetchAV2ThumbnailUrl(logUrl: string): Promise<string | nul
 // Buffer fetch helper
 // ---------------------------------------------------------------------------
 
-async function fetchBuffer(url: string): Promise<ArrayBuffer> {
+async function sourceObjectExists(url: string): Promise<boolean> {
   const res = await fetch(url, {
+    method: 'HEAD',
     signal: AbortSignal.timeout(30_000),
   })
+  if (res.status === 404 || res.status === 403) return false
   if (!res.ok) throw classifyHttpError(res.status, url)
-  return res.arrayBuffer()
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -652,9 +648,8 @@ async function fetchBuffer(url: string): Promise<ArrayBuffer> {
 // ---------------------------------------------------------------------------
 
 export interface AV2UrlLoadResult {
-  /** Parsed AV2 log database (same type as local mode) */
-  db: AV2LogDatabase
-  /** URL-based file entries for worker pools: [relative_filename, full_url][] */
+  readonly logId: string
+  /** URL-based unchanged source inventory: [relative_filename, full_url][]. */
   fileEntries: [string, string][]
 }
 
@@ -665,8 +660,7 @@ export interface AV2UrlLoadResult {
  *   1. If manifest provided → use manifest for frame discovery
  *   2. If manifest is null → use S3 ListObjectsV2 to discover file keys
  *
- * Then fetches metadata feather files, builds AV2LogDatabase,
- * and constructs URL-based file entries for workers.
+ * The returned inventory is parsed only by the executable recipe graph.
  *
  * @param baseUrl - Base URL with trailing slash (e.g. "https://s3.../log_id/")
  * @param manifest - Pre-fetched manifest.json, or null for S3 listing fallback
@@ -690,63 +684,34 @@ export async function loadAV2FromUrl(
     onProgress?.(0.05)
   }
 
-  // 1. Fetch metadata feather files in parallel
-  const [extrinsicsBuf, intrinsicsBuf, posesBuf, annotationsBuf] = await Promise.all([
-    fetchBuffer(`${baseUrl}calibration/egovehicle_SE3_sensor.feather`),
-    fetchBuffer(`${baseUrl}calibration/intrinsics.feather`),
-    fetchBuffer(`${baseUrl}city_SE3_egovehicle.feather`),
-    fetchBuffer(`${baseUrl}annotations.feather`).catch(() => null), // optional
-  ])
-  onProgress?.(0.1)
-
-  // 2. Build metadata map (same keys as local mode, but ArrayBuffer values)
-  const metadataFiles = new Map<string, File | ArrayBuffer>()
-  metadataFiles.set('calibration/egovehicle_SE3_sensor.feather', extrinsicsBuf)
-  metadataFiles.set('calibration/intrinsics.feather', intrinsicsBuf)
-  metadataFiles.set('city_SE3_egovehicle.feather', posesBuf)
-  if (annotationsBuf) {
-    metadataFiles.set('annotations.feather', annotationsBuf)
-  }
-
-  // For S3 fallback: inject discovered file keys into the metadata map
-  // (as dummy values — buildAV2LogDatabase only scans the keys for frame discovery)
-  if (s3FileKeys) {
-    for (const key of s3FileKeys) {
-      if (!metadataFiles.has(key)) {
-        metadataFiles.set(key, new ArrayBuffer(0)) // placeholder — only key is scanned
-      }
-    }
-  }
-  onProgress?.(0.15)
-
-  // 3. Build database
-  //    - manifest mode: uses manifest for frame discovery
-  //    - S3 fallback: uses file key scanning (local-mode logic in buildAV2LogDatabase)
-  const db = await buildAV2LogDatabase(metadataFiles, logId, manifest ?? undefined)
-  onProgress?.(0.2)
-
-  // 4. Build URL-based file entries for workers (deduplicating as we go)
   const seen = new Set<string>()
   const fileEntries: [string, string][] = []
-
-  // LiDAR files
-  for (const ts of db.lidarTimestamps) {
-    const filename = `sensors/lidar/${ts}.feather`
+  const add = (filename: string): void => {
     if (!seen.has(filename)) {
       seen.add(filename)
       fileEntries.push([filename, `${baseUrl}${filename}`])
     }
   }
 
-  // Camera files
-  for (const [, images] of db.cameraFilesByFrame) {
-    for (const { filename } of images) {
-      if (!seen.has(filename)) {
-        seen.add(filename)
-        fileEntries.push([filename, `${baseUrl}${filename}`])
+  add('calibration/egovehicle_SE3_sensor.feather')
+  add('calibration/intrinsics.feather')
+  add('city_SE3_egovehicle.feather')
+  const hasAnnotations = s3FileKeys?.includes('annotations.feather')
+    ?? await sourceObjectExists(`${baseUrl}annotations.feather`).catch(() => false)
+  if (hasAnnotations) add('annotations.feather')
+
+  if (manifest) {
+    for (const frame of manifest.frames) {
+      add(`sensors/lidar/${frame.timestamp_ns}.feather`)
+      for (const [camera, timestamp] of Object.entries(frame.cameras)) {
+        add(`sensors/cameras/${camera}/${timestamp}.jpg`)
       }
     }
+  } else {
+    for (const key of s3FileKeys ?? []) {
+      if (/^(?:sensors\/(?:lidar|cameras)\/|calibration\/|annotations\.feather$|city_SE3_egovehicle\.feather$)/u.test(key)) add(key)
+    }
   }
-
-  return { db, fileEntries }
+  onProgress?.(0.2)
+  return { logId, fileEntries }
 }

@@ -13,7 +13,7 @@ import { inspectSourceInventoryV1 } from '../authoring/inspection'
 import { semanticDiffV1 } from '../authoring/semanticDiff'
 import { registerTeachableWebMcpToolsV1 } from '../authoring/webMcp'
 import { OperatorRegistry, type CoreOperatorDescriptor } from '../operators/registry'
-import { BrowserTimelinePreviewRuntimeV1 } from '../authoring/BrowserTimelinePreviewRuntime'
+import { BrowserGraphPreviewRuntimeV1 } from '../authoring/BrowserGraphPreviewRuntime'
 import { authoringPreviewStoreV1 } from '../authoring/previewStore'
 import { sourceSelectorMatchesV1 } from '../authoring/sourceSelectors'
 import { nuScenesCompiledRecipe, waymoCompiledRecipe } from '../../adapters/recipes/bundled'
@@ -212,11 +212,11 @@ describe('Phase 8 diff, capability gap, and Site tools', () => {
       result: 'sortTimeline.frames',
     }
     const authoring = new TeachableAuthoringSessionV1(
-      new InventoryBindingEvaluatorV1(new BrowserTimelinePreviewRuntimeV1()),
+      new InventoryBindingEvaluatorV1(new BrowserGraphPreviewRuntimeV1()),
     )
     authoring.start(inventory())
     const result = await authoring.applyRevision(timeline)
-    expect(result).toMatchObject({ ok: true, observableEffect: 'Rendered a 2-frame timeline preview.' })
+    expect(result).toMatchObject({ ok: true, observableEffect: 'Rendered 2 validation frames from the executable graph.' })
     expect(authoringPreviewStoreV1.getSnapshot()).toMatchObject({ frameCount: 2, sampledFrames: [0, 1] })
   })
 

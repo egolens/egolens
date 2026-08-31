@@ -114,7 +114,8 @@
       "reader": "image.encoded_bytes",
       "files": {
         "glob": "sensors/cameras/**/*.jpg",
-        "order": "numeric-path"
+        "order": "numeric-path",
+        "minCount": 0
       },
       "params": {
         "mimeType": "image/jpeg"
@@ -169,7 +170,9 @@
     "annotations": {
       "reader": "feather.columns",
       "files": {
-        "exact": "annotations.feather"
+        "exact": "annotations.feather",
+        "minCount": 0,
+        "maxCount": 1
       },
       "columns": [
         "timestamp_ns",
@@ -766,7 +769,9 @@
           "params": {
             "timestampField": "timestamp_ns",
             "mode": "nearest",
-            "maxDeltaNs": 1000000
+            "maxDeltaNs": 1000000,
+            "quaternionFields": ["qw", "qx", "qy", "qz"],
+            "translationFields": ["tx_m", "ty_m", "tz_m"]
           }
         }
       ],
@@ -807,7 +812,11 @@
           },
           "params": {
             "timestampFrom": "numeric-path",
-            "maxDeltaNs": 50000000
+            "maxDeltaNs": 50000000,
+            "sensorField": "sensor_name",
+            "intrinsicFields": ["fx_px", "fy_px", "cx_px", "cy_px", "k1", "k2", "k3", "width_px", "height_px"],
+            "extrinsicQuaternionFields": ["qw", "qx", "qy", "qz"],
+            "extrinsicTranslationFields": ["tx_m", "ty_m", "tz_m"]
           }
         }
       ],
@@ -824,7 +833,13 @@
           },
           "params": {
             "quaternionOrder": "wxyz",
-            "frameId": "ego"
+            "frameId": "ego",
+            "timestampField": "timestamp_ns",
+            "classField": "category",
+            "objectIdField": "track_uuid",
+            "quaternionFields": ["qw", "qx", "qy", "qz"],
+            "centerFields": ["tx_m", "ty_m", "tz_m"],
+            "dimensionFields": ["length_m", "width_m", "height_m"]
           }
         }
       ],

@@ -5,6 +5,7 @@ import { registerBuiltInExtensionPackagesV1 } from '../extensions/registeredPack
 import { assertValidInterleavedRecordsParamsV1 } from './binaryReaders'
 import { assertValidFeatherColumnsParamsV1 } from './featherColumns'
 import { assertValidParquetColumnsParamsV1 } from './parquetColumns'
+import { coreGraphOperatorImplementationsV1 } from './coreGraphOperators'
 
 const objectContract: OperatorJsonSchema = {
   type: 'object',
@@ -179,6 +180,13 @@ function recordContract(fields: readonly string[]): OperatorJsonSchema {
   }
 }
 
+function fieldNames(count: number): OperatorJsonSchema {
+  return {
+    type: 'array', minItems: count, maxItems: count,
+    items: { type: 'string', minLength: 1, maxLength: 256 },
+  }
+}
+
 const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['geometry.normalize_boxes2d', {
     oneOf: [
@@ -201,6 +209,12 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   }, closedParams({
     quaternionOrder: { const: 'wxyz' },
     frameId: { type: 'string', minLength: 1, maxLength: 96 },
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+    classField: { type: 'string', minLength: 1, maxLength: 256 },
+    objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
+    quaternionFields: fieldNames(4),
+    centerFields: fieldNames(3),
+    dimensionFields: fieldNames(3),
   }, ['frameId']), recordContract(['boxes'])],
   ['image.bind_camera_frame', {
     oneOf: [
@@ -214,6 +228,10 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
       closedParams({
         timestampFrom: { const: 'numeric-path' },
         maxDeltaNs: positiveLimit,
+        sensorField: { type: 'string', minLength: 1, maxLength: 256 },
+        intrinsicFields: fieldNames(9),
+        extrinsicQuaternionFields: fieldNames(4),
+        extrinsicTranslationFields: fieldNames(3),
       }, ['timestampFrom', 'maxDeltaNs']),
       closedParams({ encoding: { const: 'jpeg' } }, ['encoding']),
     ],
@@ -245,7 +263,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['records.select', recordContract(['rows']), closedParams({
     fields: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } },
     frameId: { type: 'string', minLength: 1, maxLength: 96 },
-  }, ['fields']), recordContract(['records'])],
+  }, ['fields']), { oneOf: [recordContract(['records']), recordContract(['pointClouds'])] }],
   ['relations.token_join', recordContract(['sampleData', 'poses']), closedParams({
     leftKey: { type: 'string', minLength: 1, maxLength: 256 },
     rightKey: { type: 'string', minLength: 1, maxLength: 256 },
@@ -265,9 +283,11 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         mode: { const: 'nearest' },
         timestampField: { type: 'string', minLength: 1, maxLength: 256 },
         maxDeltaNs: positiveLimit,
+        quaternionFields: fieldNames(4),
+        translationFields: fieldNames(3),
       }, ['mode', 'timestampField', 'maxDeltaNs']),
     ],
-  }, recordContract(['pointClouds'])],
+  }, { oneOf: [recordContract(['pointClouds']), recordContract(['poses'])] }],
   ['timeline.sort', {
     oneOf: [recordContract(['samples']), recordContract(['rows']), recordContract(['lidar'])],
   }, {
@@ -292,6 +312,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   outputContract: outputContract as OperatorJsonSchema,
   execution: 'worker',
   deterministic: true,
+  execute: coreGraphOperatorImplementationsV1[name as string],
 }))
 
 const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
@@ -350,15 +371,7 @@ const strictFeatherOperator: CoreOperatorDescriptor = {
   tier: 1,
   inputContract: byteInputContract,
   paramsContract: featherParamsContract,
-  outputContract: {
-    type: 'object',
-    properties: {
-      columns: { type: 'object' },
-      numRows: { type: 'integer', minimum: 0 },
-    },
-    required: ['columns', 'numRows'],
-    additionalProperties: false,
-  },
+  outputContract: recordContract(['rows']),
   validateParams: (params) => {
     try {
       assertValidFeatherColumnsParamsV1(params as never)
@@ -369,6 +382,7 @@ const strictFeatherOperator: CoreOperatorDescriptor = {
   },
   execution: 'worker',
   deterministic: true,
+  execute: coreGraphOperatorImplementationsV1['feather.columns'],
 }
 
 const strictParquetOperator: CoreOperatorDescriptor = {

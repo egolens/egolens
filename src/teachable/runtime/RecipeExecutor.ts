@@ -4,11 +4,14 @@ import type { CompiledRecipeV1 } from '../recipe/compiler'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { ByteSourceV1 } from '../source/ByteSource'
 import type { NormalizedSceneV1 } from './normalizedScene'
+import type { RecipeInventoryEntryV1 } from './GraphKernel'
 
 export interface RecipeExecutionInputV1 {
   readonly compiledRecipe: CompiledRecipeV1
   readonly source: ByteSourceV1
   readonly inventory?: SourceInventoryV1
+  /** Transport-neutral inventory supplied by production/local import paths. */
+  readonly inventoryEntries?: readonly RecipeInventoryEntryV1[]
   readonly sceneId?: string
   readonly preparation?: object
   readonly metadataBundle?: MetadataBundle
