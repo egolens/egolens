@@ -25,7 +25,7 @@ export interface ByteSourceV1 {
 
 export type ByteSourceBackingV1 = File | string | AsyncBuffer
 
-function normalizeSourcePath(path: string): string {
+export function normalizeSourcePathV1(path: string): string {
   const normalized = path.replace(/\\/gu, '/').replace(/^\.\//u, '')
   if (
     normalized.length === 0
@@ -70,7 +70,7 @@ export class MappedByteSourceV1 implements ByteSourceV1 {
 
   constructor(entries: Iterable<readonly [string, ByteSourceBackingV1]>) {
     for (const [rawPath, backing] of entries) {
-      const path = normalizeSourcePath(rawPath)
+      const path = normalizeSourcePathV1(rawPath)
       if (this.entries.has(path)) throw new Error(`SOURCE_PATH_DUPLICATE: ${path}`)
       this.entries.set(path, backing)
     }
@@ -78,7 +78,7 @@ export class MappedByteSourceV1 implements ByteSourceV1 {
 
   has(rawPath: string): boolean {
     this.assertActive()
-    return this.entries.has(normalizeSourcePath(rawPath))
+    return this.entries.has(normalizeSourcePathV1(rawPath))
   }
 
   byteLength(rawPath: string): number | null {
@@ -106,7 +106,7 @@ export class MappedByteSourceV1 implements ByteSourceV1 {
   }
 
   async asyncBuffer(rawPath: string): Promise<AsyncBuffer> {
-    const path = normalizeSourcePath(rawPath)
+    const path = normalizeSourcePathV1(rawPath)
     const backing = this.resolve(path)
     if (typeof backing === 'string') return await asyncBufferFromUrl({ url: backing })
     if (isAsyncBuffer(backing)) return backing
@@ -127,7 +127,7 @@ export class MappedByteSourceV1 implements ByteSourceV1 {
 
   private resolve(rawPath: string): ByteSourceBackingV1 {
     this.assertActive()
-    const path = normalizeSourcePath(rawPath)
+    const path = normalizeSourcePathV1(rawPath)
     const backing = this.entries.get(path)
     if (!backing) throw new Error(`SOURCE_PATH_UNAVAILABLE: ${path}`)
     return backing
@@ -146,15 +146,15 @@ export function scopedByteSourceV1(
   source: ByteSourceV1,
   paths: Iterable<string>,
 ): ByteSourceV1 {
-  const allowed = new Set([...paths].map(normalizeSourcePath))
+  const allowed = new Set([...paths].map(normalizeSourcePathV1))
   const authorize = (rawPath: string): string => {
-    const path = normalizeSourcePath(rawPath)
+    const path = normalizeSourcePathV1(rawPath)
     if (!allowed.has(path)) throw new Error(`SOURCE_PATH_UNAVAILABLE: ${path}`)
     return path
   }
   return {
     has(rawPath) {
-      const path = normalizeSourcePath(rawPath)
+      const path = normalizeSourcePathV1(rawPath)
       return allowed.has(path) && source.has(path)
     },
     byteLength(rawPath) {

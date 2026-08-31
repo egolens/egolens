@@ -11,12 +11,13 @@ import { authoringPreviewStoreV1 } from '../authoring/previewStore'
 import { SourceInventoryV1 } from '../authoring/SourceInventory'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import { compileRecipeV1 } from '../recipe/compiler'
-import { bindRecipeSceneV1 } from '../runtime/bindRecipeScene'
+import { bindRecipeSceneV1, bindRemoteRecipeSceneV1 } from '../runtime/bindRecipeScene'
 import { ExecutableGraphKernelV1 } from '../runtime/GraphKernel'
 import { assembleGraphSceneV1 } from '../runtime/GraphSceneAssembler'
 import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
 import { compareNormalizedFramesV1 } from '../runtime/parity'
 import { MappedByteSourceV1 } from '../source/ByteSource'
+import { remoteTransportFixtureV1 } from './remoteTransportFixture'
 
 const fixtureRoot = resolve(__dirname, '../../__fixtures__/mock_segment_0000')
 const components = ['vehicle_pose', 'lidar_calibration', 'camera_calibration', 'lidar_box', 'lidar'] as const
@@ -30,6 +31,7 @@ function nodeBuffer(component: string): AsyncBuffer {
 function sourceFixture() {
   const entries = components.map((component) => [`${component}/fixture.parquet`, nodeBuffer(component)] as const)
   return {
+    entries,
     source: new MappedByteSourceV1(entries),
     inventoryEntries: entries.map(([path, buffer]) => ({ path, size: buffer.byteLength })),
   }
@@ -192,5 +194,32 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
       formatId: 'waymo', frameCount: 199, sampledFrames: [0, 99, 198],
     })
     prepared.dispose()
+  })
+
+  it('binds byte-identical local and catalog-backed remote bytes without graph changes', async () => {
+    const fixture = sourceFixture()
+    const local = await bindRecipeSceneV1({
+      compiledRecipe: waymoCompiledRecipe,
+      source: fixture.source,
+      inventoryEntries: fixture.inventoryEntries,
+    })
+    const hosted = await remoteTransportFixtureV1(fixture.entries)
+    const remote = await bindRemoteRecipeSceneV1({
+      compiledRecipe: waymoCompiledRecipe,
+      remote: hosted.remote,
+    })
+    expect(remote.sourceManifestHash).toBe(hosted.sourceManifestHash)
+    expect(remote.scene.manifest).toEqual(local.scene.manifest)
+    expect(remote.metadata).toEqual(local.metadata)
+    const capabilities = local.scene.manifest.capabilities
+    const [localFrame, remoteFrame] = await Promise.all([
+      local.scene.loadFrame(0, { capabilities }),
+      remote.scene.loadFrame(0, { capabilities }),
+    ])
+    expect(compareNormalizedFramesV1(localFrame, remoteFrame)).toEqual([])
+    expect(hosted.requests.some((request) => request.range !== null)).toBe(true)
+    local.scene.dispose()
+    remote.scene.dispose()
+    await hosted.dispose()
   })
 })
