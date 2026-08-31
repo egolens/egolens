@@ -23,10 +23,14 @@ jobs:
         run: npx vitest run
       - name: Oracle receipt cryptography tests
         run: npm run test:oracle-receipts
+      - name: Adapter Amnesia trust-boundary tests
+        run: npm run test:adapter-amnesia
       - name: Lint (errors block, warnings reported)
         run: npx eslint src
       - name: Build (includes type-check)
         run: npm run build
+      - name: Build isolated Adapter Amnesia author workspace
+        run: npm run build:amnesia-author
       - name: Bundle size report
         run: |
           {

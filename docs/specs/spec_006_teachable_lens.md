@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: in-progress (Phases 2–8 shipped; next planned work is Phase 9) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phases 2–9 shipped; next planned work is Phase 10) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 
@@ -1455,6 +1455,21 @@ to the conformance harness.
 **Exit gate:** Codex-authored recipes reproduce every currently exposed feature
 for all three datasets under structural, numeric, and perceptual parity checks.
 
+**Shipped:** the trusted capture hook now has a fail-closed Adapter Amnesia
+mode. It accepts an external recipe only through the public v1 schema,
+compiler, core operator registry, and `NormalizedSceneV1` binding seam; no
+candidate recipe falls back to the active bundled recipe. The isolated scene
+also supplies the exact frames shown to perceptual capture, so visual parity
+cannot be borrowed from the production scene while numeric observations come
+from the candidate.
+
+One public authoring attestation binds the exact candidate commit, semantic
+recipe hashes, five public WebMCP tools, three allowed mounts, denied resources,
+disabled network egress, and lack of interactive judge access. The protected
+one-shot judge reuses the immutable Phase 6 bundles, binds every signed receipt
+to that attestation, recipe hash, runtime ID, and exact PR HEAD, retains only
+public receipts/gate output, and destroys oracle inputs plus detailed reports.
+
 #### Phase 10 — Run the held-out generalization test
 
 Only after self-hosting passes, add Mystery A/B. Mystery A proves unknown-format
@@ -1610,13 +1625,13 @@ schedule. Delivery is gated by evidence rather than a clock.
 
 ### Self-hosting
 
-- [ ] Waymo, nuScenes, and Argoverse 2 can each load through a bundled v1 recipe
+- [x] Waymo, nuScenes, and Argoverse 2 can each load through a bundled v1 recipe
       and the shared recipe runtime.
-- [ ] Each reproduces every feature EgoLens currently exposes for that dataset,
+- [x] Each reproduces every feature EgoLens currently exposes for that dataset,
       not merely LiDAR and timeline.
-- [ ] Adapter Amnesia prevents Codex from reading or invoking the hidden built-in
+- [x] Adapter Amnesia prevents Codex from reading or invoking the hidden built-in
       recipe/adapter while preserving a hidden oracle for comparison.
-- [ ] Structural, numeric, and perceptual parity reports are saved as test
+- [x] Structural, numeric, and perceptual parity reports are saved as test
       artifacts.
 
 ### WebMCP and human collaboration

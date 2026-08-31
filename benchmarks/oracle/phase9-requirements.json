@@ -1,0 +1,64 @@
+{
+  "kind": "egolens-adapter-amnesia-gate-requirements",
+  "schemaVersion": 1,
+  "review": {
+    "selectedBy": "Codex",
+    "approvedBy": "happyhj",
+    "approvedAt": "2026-08-30"
+  },
+  "targets": [
+    {
+      "datasetId": "waymo",
+      "caseId": "phase6-waymo-rich-001",
+      "recipeHash": "sha256:cece3398540e055698c399f2c703c464e8878c7381c1efc0371d9d68e2b6d742",
+      "coverage": {
+        "requiredCapabilities": [
+          "boxes2d", "boxes3d", "cameraImages", "cameraSegmentation",
+          "egoPoses", "lidarSegmentation", "pointClouds", "segmentMetadata",
+          "timeline", "trajectories"
+        ],
+        "frameIndices": [0, 29, 79, 129, 197],
+        "completeTimeline": false,
+        "perceptualReferenceIds": [
+          "front-camera-frame-29", "front-camera-segmentation-frame-129",
+          "viewport-frame-0", "viewport-lidar-segmentation-frame-79"
+        ]
+      }
+    },
+    {
+      "datasetId": "nuscenes",
+      "caseId": "phase6-nuscenes-urban-vru-001",
+      "recipeHash": "sha256:0f379bf75d877268541306b9a325cffd55a5d465ec8a8541c30ab824ef48cd00",
+      "coverage": {
+        "requiredCapabilities": [
+          "boxes2d", "boxes3d", "cameraImages", "egoPoses",
+          "lidarSegmentation", "pointClouds", "radarPointClouds",
+          "segmentMetadata", "timeline", "trajectories"
+        ],
+        "frameIndices": [0, 19, 39],
+        "completeTimeline": false,
+        "perceptualReferenceIds": [
+          "front-camera-frame-19", "viewport-frame-0",
+          "viewport-lidar-segmentation-frame-39"
+        ]
+      }
+    },
+    {
+      "datasetId": "argoverse2",
+      "caseId": "phase6-av2-urban-001",
+      "recipeHash": "sha256:69f373313ad47476b833a5f9f4c473e412c55a0a28dc6ae24807ad21b156863e",
+      "coverage": {
+        "requiredCapabilities": [
+          "boxes2d", "boxes3d", "cameraImages", "egoPoses", "pointClouds",
+          "segmentMetadata", "timeline", "trajectories"
+        ],
+        "frameIndices": [0, 78, 156],
+        "completeTimeline": false,
+        "perceptualReferenceIds": [
+          "front-camera-frame-78", "viewport-boxes-frame-156", "viewport-frame-0"
+        ]
+      }
+    }
+  ]
+}
+

@@ -1,6 +1,6 @@
 # Spec 013 — Teachable Lens hidden-oracle retention
 
-**Status**: in-progress (Phase 6 protected exact-head receipts pass for all three datasets; Phase 9 retention gate pending) · **Date**: 2026-08-30
+**Status**: complete (Phase 6 promotion and Phase 9 Adapter Amnesia exact-head retention gates implemented for all three datasets) · **Date**: 2026-08-30
 
 **Relationship to earlier specs**: this is the normative addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phases 6 and 9 and
@@ -217,10 +217,10 @@ judge-tool commit; it must not check out, install, or execute the candidate PR.
 
 ## Phase 9 gate additions
 
-- [ ] Adapter Amnesia produces candidate artifacts only through public recipe,
+- [x] Adapter Amnesia produces candidate artifacts only through public recipe,
       operator, and normalized-scene contracts.
-- [ ] Oracle bundles are mounted only in the trusted judge workspace.
-- [ ] The authoring agent receives no oracle values or executable built-in
+- [x] Oracle bundles are mounted only in the trusted judge workspace.
+- [x] The authoring agent receives no oracle values or executable built-in
       adapter and cannot invoke the judge as an interactive probing tool.
-- [ ] Signed receipts and trusted detailed reports cover every exposed feature
+- [x] Signed receipts and trusted detailed reports cover every exposed feature
       at structural, numeric, and perceptual levels.

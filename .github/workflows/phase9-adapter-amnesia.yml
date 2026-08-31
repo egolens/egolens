@@ -1,0 +1,162 @@
+name: Phase 9 Adapter Amnesia evidence
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase9-amnesia-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/spec-006-phase-9' &&
+      contains(github.event.pull_request.labels.*.name, 'phase9-amnesia-evidence')
+    runs-on: ubuntu-latest
+    environment: phase6-oracle-judge
+    env:
+      EXPECTED_CANDIDATE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      EXPECTED_PRODUCER_COMMIT: ${{ vars.PHASE6_ORACLE_EXPECTED_PRODUCER_COMMIT }}
+      JUDGE_TOOL_COMMIT: ${{ vars.PHASE9_AMNESIA_JUDGE_TOOL_COMMIT }}
+      JUDGE_KEY_ID: ${{ vars.PHASE6_ORACLE_KEY_ID }}
+      JUDGE_VERSION: spec013-phase9-v1
+      EVIDENCE_PARTS: ${{ vars.PHASE9_AMNESIA_EVIDENCE_PARTS }}
+      EVIDENCE_ARCHIVE_SHA256: ${{ vars.PHASE9_AMNESIA_EVIDENCE_ARCHIVE_SHA256 }}
+    steps:
+      - name: Check out the immutable trusted judge
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${JUDGE_TOOL_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          git init .
+          git remote add origin https://github.com/${GITHUB_REPOSITORY}.git
+          git fetch --depth=1 origin "${JUDGE_TOOL_COMMIT}"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "${JUDGE_TOOL_COMMIT}"
+
+      - name: Materialize protected one-shot inputs
+        shell: bash
+        env:
+          JUDGE_PRIVATE_KEY: ${{ secrets.PHASE6_ORACLE_JUDGE_PRIVATE_KEY }}
+          EVIDENCE_01: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_01 }}
+          EVIDENCE_02: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_02 }}
+          EVIDENCE_03: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_03 }}
+          EVIDENCE_04: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_04 }}
+          EVIDENCE_05: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_05 }}
+          EVIDENCE_06: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_06 }}
+          EVIDENCE_07: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_07 }}
+          EVIDENCE_08: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_08 }}
+          EVIDENCE_09: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_09 }}
+          EVIDENCE_10: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_10 }}
+          EVIDENCE_11: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_11 }}
+          EVIDENCE_12: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_12 }}
+          EVIDENCE_13: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_13 }}
+          EVIDENCE_14: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_14 }}
+          EVIDENCE_15: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_15 }}
+          EVIDENCE_16: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_16 }}
+          EVIDENCE_17: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_17 }}
+          EVIDENCE_18: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_18 }}
+          EVIDENCE_19: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_19 }}
+          EVIDENCE_20: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_20 }}
+          EVIDENCE_21: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_21 }}
+          EVIDENCE_22: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_22 }}
+          EVIDENCE_23: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_23 }}
+          EVIDENCE_24: ${{ secrets.PHASE9_AMNESIA_EVIDENCE_24 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
+          mkdir -p "${evidence_dir}/receipts" "${evidence_dir}/trusted-reports"
+          test "${EVIDENCE_PARTS}" -ge 1
+          test "${EVIDENCE_PARTS}" -le 24
+          encoded=''
+          for number in $(seq 1 "${EVIDENCE_PARTS}"); do
+            printf -v index '%02d' "${number}"
+            variable="EVIDENCE_${index}"
+            part="${!variable:-}"
+            test -n "${part}"
+            encoded+="${part}"
+          done
+          printf '%s' "${encoded}" | base64 --decode > "${evidence_dir}/archive.json.gz"
+          actual_hash="sha256-$(sha256sum "${evidence_dir}/archive.json.gz" | awk '{print $1}')"
+          test "${actual_hash}" = "${EVIDENCE_ARCHIVE_SHA256}"
+          gzip -d -c "${evidence_dir}/archive.json.gz" > "${evidence_dir}/archive.json"
+          jq -e '.schemaVersion == 1 and (.datasets | keys | sort == ["argoverse2", "nuscenes", "waymo"])' \
+            "${evidence_dir}/archive.json" >/dev/null
+          jq -c '.attestation' "${evidence_dir}/archive.json" > "${evidence_dir}/attestation.json"
+          for dataset in waymo nuscenes argoverse2; do
+            jq -c --arg dataset "${dataset}" '.datasets[$dataset].oracle' \
+              "${evidence_dir}/archive.json" > "${evidence_dir}/${dataset}.oracle.json"
+            jq -c --arg dataset "${dataset}" '.datasets[$dataset].candidate' \
+              "${evidence_dir}/archive.json" > "${evidence_dir}/${dataset}.candidate.json"
+          done
+          test -n "${JUDGE_PRIVATE_KEY}"
+          printf '%s\n' "${JUDGE_PRIVATE_KEY}" > "${evidence_dir}/judge-private.pem"
+
+      - name: Judge and sign each held-out adapter once
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
+          for dataset in waymo nuscenes argoverse2; do
+            node scripts/phase9-oracle-judge.mjs \
+              --oracle "${evidence_dir}/${dataset}.oracle.json" \
+              --candidate "${evidence_dir}/${dataset}.candidate.json" \
+              --attestation "${evidence_dir}/attestation.json" \
+              --private-key "${evidence_dir}/judge-private.pem" \
+              --key-id "${JUDGE_KEY_ID}" \
+              --judge-version "${JUDGE_VERSION}" \
+              --expected-candidate-commit "${EXPECTED_CANDIDATE_COMMIT}" \
+              --output "${evidence_dir}/receipts/${dataset}.json" \
+              --trusted-report "${evidence_dir}/trusted-reports/${dataset}.json"
+          done
+
+      - name: Enforce exact three-dataset self-hosting coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
+          node scripts/phase9-oracle-receipt-gate.mjs \
+            --receipt "${evidence_dir}/receipts/waymo.json" \
+            --receipt "${evidence_dir}/receipts/nuscenes.json" \
+            --receipt "${evidence_dir}/receipts/argoverse2.json" \
+            --requirements benchmarks/oracle/phase9-requirements.json \
+            --attestation "${evidence_dir}/attestation.json" \
+            --public-key benchmarks/oracle/keys/phase6-2026-08-public.pem \
+            --key-id "${JUDGE_KEY_ID}" \
+            --expected-generator-commit "${EXPECTED_PRODUCER_COMMIT}" \
+            --expected-candidate-commit "${EXPECTED_CANDIDATE_COMMIT}" \
+            --output "${evidence_dir}/receipts/gate.json"
+          cp "${evidence_dir}/attestation.json" "${evidence_dir}/receipts/attestation.json"
+          {
+            echo '## Phase 9 Adapter Amnesia gate'
+            echo
+            jq -r '"Passed: **\(.passed)**\n\nCandidate commit: `\(.expectedCandidateCommit)`\n\nAttestation: `\(.amnesiaAttestationHash)`\n\n" + (.checks | map("- \(.datasetId)/\(.caseId): `\(.receiptHash)`") | join("\n"))' \
+              "${evidence_dir}/receipts/gate.json"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Destroy hidden inputs and trusted reports
+        if: always()
+        shell: bash
+        run: |
+          evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
+          rm -f "${evidence_dir}/archive.json.gz" "${evidence_dir}/archive.json" "${evidence_dir}/judge-private.pem"
+          rm -rf "${evidence_dir}/trusted-reports"
+          for dataset in waymo nuscenes argoverse2; do
+            rm -f "${evidence_dir}/${dataset}.oracle.json" "${evidence_dir}/${dataset}.candidate.json"
+          done
+
+      - name: Retain public signed evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: phase9-adapter-amnesia-receipts-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/phase9-amnesia-evidence/receipts
+          if-no-files-found: warn
+          retention-days: 90
+

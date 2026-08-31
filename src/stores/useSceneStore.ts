@@ -85,6 +85,7 @@ import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
 import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe } from '../adapters/recipes/bundled'
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
+import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
 import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
 import {
   manageNormalizedSceneV1,
@@ -399,7 +400,7 @@ const internal = {
   /** Phase 6 authoritative scene: sole owner of workers and transferred frame/image buffers. */
   normalizedScene: null as ManagedNormalizedSceneV1 | null,
   /** One-shot recipe scene factory used only by the isolated conformance capture hook. */
-  conformanceSceneFactory: null as (() => Promise<NormalizedSceneV1>) | null,
+  conformanceSceneFactory: null as ((compiledRecipe?: CompiledRecipeV1) => Promise<NormalizedSceneV1>) | null,
   /**
    * Seek requested before its frame was cached (cold load). loadFrame drops
    * cache misses so it never fights the prefetch queue, which would silently
@@ -1526,9 +1527,9 @@ async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => 
   })
   const bundle = binding.metadata
   const conformanceFiles = new Map(internal.parquetFiles)
-  internal.conformanceSceneFactory = async () => (await bindRecipeSceneV1({
+  internal.conformanceSceneFactory = async (compiledRecipe = waymoCompiledRecipe) => (await bindRecipeSceneV1({
     sourceFamily: 'parquet-components',
-    compiledRecipe: waymoCompiledRecipe,
+    compiledRecipe,
     parquetFiles: conformanceFiles,
     metadataBundle: bundle,
   })).scene
@@ -1880,9 +1881,9 @@ async function loadTokenTableScene(
     const bundle = binding.metadata
     const conformanceDatabase = internal.nuScenesDb
     const conformanceFiles = new Map(internal.nuScenesSampleFiles)
-    internal.conformanceSceneFactory = async () => (await bindRecipeSceneV1({
+    internal.conformanceSceneFactory = async (compiledRecipe = nuScenesCompiledRecipe) => (await bindRecipeSceneV1({
       sourceFamily: 'token-tables',
-      compiledRecipe: nuScenesCompiledRecipe,
+      compiledRecipe,
       database: conformanceDatabase,
       sceneToken: scene.token,
       files: conformanceFiles,
@@ -2147,9 +2148,9 @@ async function loadFeatherLogScene(
     const bundle = binding.metadata
     const conformanceDatabase = internal.av2Db
     const conformanceFiles = new Map(internal.av2SampleFiles)
-    internal.conformanceSceneFactory = async () => (await bindRecipeSceneV1({
+    internal.conformanceSceneFactory = async (compiledRecipe = argoverse2CompiledRecipe) => (await bindRecipeSceneV1({
       sourceFamily: 'feather-log',
-      compiledRecipe: argoverse2CompiledRecipe,
+      compiledRecipe,
       database: conformanceDatabase,
       files: conformanceFiles,
       metadataBundle: bundle,
@@ -2660,10 +2661,36 @@ export function getActiveConformanceDescriptor(): {
   }
 }
 
-export async function createActiveConformanceScene(): Promise<NormalizedSceneV1> {
+export async function createActiveConformanceScene(
+  compiledRecipe?: CompiledRecipeV1,
+): Promise<NormalizedSceneV1> {
   const factory = internal.conformanceSceneFactory
   if (!factory) throw new Error('No active conformance scene is available.')
-  return factory()
+  return factory(compiledRecipe)
+}
+
+/**
+ * Present one frame produced by an isolated conformance scene in the ordinary
+ * renderer. This is deliberately outside Zustand's production cache owner:
+ * Adapter Amnesia owns and disposes the scene, while the store receives only
+ * the public normalized-frame projection needed for perceptual capture.
+ */
+export async function presentConformanceFrame(
+  scene: NormalizedSceneV1,
+  index: number,
+): Promise<number> {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= scene.index.timestampsMicros.length) {
+    throw new RangeError(`Conformance frame ${index} is out of range.`)
+  }
+  const frame = await scene.loadFrame(index, {
+    capabilities: new Set(scene.manifest.capabilities),
+  })
+  const rendererTimestamp = internal.timestamps[index] ?? frame.timestampMicros
+  useSceneStore.setState({
+    currentFrameIndex: index,
+    currentFrame: bridgeNormalizedFrame(frame, scene.manifest, rendererTimestamp),
+  })
+  return index
 }
 
 export function getObjectTrajectories() {
