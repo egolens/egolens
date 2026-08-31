@@ -1,32 +1,24 @@
 import { createHash } from 'node:crypto'
 import UPNG from 'upng-js'
 
-const GRID_SIZE = 32
-const COLOR_STEP = 4
-
 function exactArrayBuffer(bytes) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
 }
 
-/**
- * Hash a stable low-frequency raster signature instead of raw compositor PNG
- * bytes. The box filter removes isolated GPU rounding noise while preserving
- * camera content, overlays, viewport geometry, and broad colour changes.
- */
-export function perceptualRasterSha256V1(pngBytes) {
+function perceptualRasterSha256(pngBytes, { version, gridSize, colorStep, integerAverage }) {
   const decoded = UPNG.decode(exactArrayBuffer(pngBytes))
   const frames = UPNG.toRGBA8(decoded)
   if (frames.length !== 1) throw new Error('Perceptual references must be single-frame PNGs.')
   const rgba = new Uint8Array(frames[0])
-  const signature = Buffer.alloc(GRID_SIZE * GRID_SIZE * 3)
+  const signature = Buffer.alloc(gridSize * gridSize * 3)
   let output = 0
 
-  for (let gridY = 0; gridY < GRID_SIZE; gridY += 1) {
-    const y0 = Math.floor(gridY * decoded.height / GRID_SIZE)
-    const y1 = Math.max(y0 + 1, Math.floor((gridY + 1) * decoded.height / GRID_SIZE))
-    for (let gridX = 0; gridX < GRID_SIZE; gridX += 1) {
-      const x0 = Math.floor(gridX * decoded.width / GRID_SIZE)
-      const x1 = Math.max(x0 + 1, Math.floor((gridX + 1) * decoded.width / GRID_SIZE))
+  for (let gridY = 0; gridY < gridSize; gridY += 1) {
+    const y0 = Math.floor(gridY * decoded.height / gridSize)
+    const y1 = Math.max(y0 + 1, Math.floor((gridY + 1) * decoded.height / gridSize))
+    for (let gridX = 0; gridX < gridSize; gridX += 1) {
+      const x0 = Math.floor(gridX * decoded.width / gridSize)
+      const x1 = Math.max(x0 + 1, Math.floor((gridX + 1) * decoded.width / gridSize))
       const sums = [0, 0, 0]
       let count = 0
       for (let y = y0; y < Math.min(y1, decoded.height); y += 1) {
@@ -38,13 +30,37 @@ export function perceptualRasterSha256V1(pngBytes) {
           count += 1
         }
       }
-      for (const sum of sums) signature[output++] = Math.round((sum / count) / COLOR_STEP)
+      for (const sum of sums) {
+        const average = sum / count
+        signature[output++] = Math.round((integerAverage ? Math.round(average) : average) / colorStep)
+      }
     }
   }
 
   const digest = createHash('sha256')
-    .update(`egolens-perceptual-raster-v1\0${decoded.width}x${decoded.height}\0`)
+    .update(`egolens-perceptual-raster-${version}\0${decoded.width}x${decoded.height}\0`)
     .update(signature)
     .digest('hex')
   return `sha256-${digest}`
+}
+
+/**
+ * Phase 6 receipt-compatible signature. Do not change this algorithm: the
+ * protected oracle corpus is immutable and compares these hashes exactly.
+ */
+export function perceptualRasterSha256V1(pngBytes) {
+  return perceptualRasterSha256(pngBytes, {
+    version: 'v1', gridSize: 32, colorStep: 4, integerAverage: false,
+  })
+}
+
+/**
+ * Transport-parity signature for Phase 10. The wider spatial average and
+ * two-stage channel quantization ignore sparse ±1 compositor rounding while
+ * retaining viewport geometry, camera content, and broad overlay changes.
+ */
+export function perceptualRasterSha256V2(pngBytes) {
+  return perceptualRasterSha256(pngBytes, {
+    version: 'v2', gridSize: 16, colorStep: 4, integerAverage: true,
+  })
 }

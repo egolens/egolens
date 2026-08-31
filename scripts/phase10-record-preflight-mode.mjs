@@ -137,6 +137,17 @@ if (!captured || captured.artifactHash !== conformance.artifactHash
   || captured.generatorCommit !== options['expected-commit']) {
   throw new Error('Capture benchmark is not bound to the conformance artifact')
 }
+const perceptualParity = captured.perceptualParity
+const expectedPerceptualIds = [...(conformance.coverage?.perceptualReferenceIds ?? [])].sort()
+if (perceptualParity?.algorithm !== 'egolens-perceptual-raster-v2'
+  || !Array.isArray(perceptualParity.references)
+  || JSON.stringify(perceptualParity.references.map((entry) => entry.id).sort())
+    !== JSON.stringify(expectedPerceptualIds)
+  || perceptualParity.references.some((entry) => !/^sha256-[0-9a-f]{64}$/u.test(entry.sha256)
+    || !Number.isSafeInteger(entry.width) || entry.width <= 0
+    || !Number.isSafeInteger(entry.height) || entry.height <= 0)) {
+  throw new Error('Capture benchmark lacks the reviewed Phase 10 perceptual parity surface')
+}
 const observedIdentity = captured.identity
 if (!observedIdentity || identityKeys.slice(2).some((key) => observedIdentity[key] !== identity[key])) {
   throw new Error('Capture runtime identity does not match the preflight identity file')
@@ -165,7 +176,8 @@ const payload = {
   capabilityHash: phase10HashV1(capabilities),
   structuralHash: phase10HashV1(conformance.structural),
   numericHash: phase10HashV1(conformance.numeric),
-  perceptualHash: phase10HashV1(conformance.perceptual),
+  perceptualAlgorithm: perceptualParity.algorithm,
+  perceptualHash: phase10HashV1(perceptualParity),
   presentationHash: phase10HashV1(presentation),
   performanceHash: phase10HashV1(performance),
   lifecycleHash: phase10HashV1(lifecycle),

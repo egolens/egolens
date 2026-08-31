@@ -140,7 +140,8 @@ function modeEvidence(datasetId, mode, shared) {
     recipeHash: shared.recipeHash, formatFingerprint: shared.formatFingerprint,
     operatorSetFingerprint: shared.operatorSetFingerprint,
     capabilityHash: shared.capabilityHash, structuralHash: shared.structuralHash,
-    numericHash: shared.numericHash, perceptualHash: shared.perceptualHash,
+    numericHash: shared.numericHash,
+    perceptualAlgorithm: 'egolens-perceptual-raster-v2', perceptualHash: shared.perceptualHash,
     presentationHash: shared.presentationHash,
     performanceHash: hash(`${datasetId}-${mode}-performance`),
     lifecycleHash: hash(`${datasetId}-${mode}-lifecycle`),
@@ -522,6 +523,7 @@ test('preflight record and dataset assembler prove actual runtime identity and t
       generatorCommit: COMMIT, runtimeId: conformance.provenance.runtimeId, recipeHash: shared.recipeHash,
       identity: Object.fromEntries(Object.entries(identity).filter(([key]) => key !== 'datasetId' && key !== 'caseId')),
       presentation: initialPresentation,
+      perceptualParity: { algorithm: 'egolens-perceptual-raster-v2', references: [] },
     }
     const capturePath = path.join(directory, `${mode}-capture.json`)
     const performancePath = path.join(directory, `${mode}-performance.json`)

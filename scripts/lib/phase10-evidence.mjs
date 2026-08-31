@@ -479,7 +479,10 @@ export function validateDatasetBaselineEvidenceV1(dataset, candidateCommit) {
   if (new Set([dataset.local.browserRunHash, dataset.remote.browserRunHash, dataset.share.browserRunHash]).size !== 3) {
     throw new Error(`${dataset.datasetId}: preflight modes reused a browser process`)
   }
-  for (const key of ['capabilityHash', 'structuralHash', 'numericHash', 'perceptualHash', 'presentationHash']) {
+  for (const key of [
+    'capabilityHash', 'structuralHash', 'numericHash', 'perceptualAlgorithm',
+    'perceptualHash', 'presentationHash',
+  ]) {
     if (dataset.local[key] !== dataset.remote[key] || dataset.local[key] !== dataset.share[key]) {
       throw new Error(`${dataset.datasetId}: ${key} parity failed`)
     }

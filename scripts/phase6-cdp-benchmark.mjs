@@ -9,7 +9,7 @@ import {
   createFreshProcessWorkspaceV1,
   validateFreshProcessEvidenceSetV1,
 } from './lib/fresh-process-evidence.mjs'
-import { perceptualRasterSha256V1 } from './lib/perceptual-raster.mjs'
+import { perceptualRasterSha256V1, perceptualRasterSha256V2 } from './lib/perceptual-raster.mjs'
 
 const CHROME = process.env.EGOLENS_CHROME
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -325,6 +325,7 @@ async function captureConformanceArtifact(client, pageSession) {
 
   if (perceptualOutputDirectory) await mkdir(perceptualOutputDirectory, { recursive: true })
   const references = []
+  const parityReferences = []
   for (const capture of conformanceConfig.perceptualCaptures) {
     if (!capture?.id || !Number.isSafeInteger(capture.frameIndex) || !capture.selector) {
       throw new Error('Each perceptual capture requires id, frameIndex, and selector')
@@ -372,6 +373,10 @@ async function captureConformanceArtifact(client, pageSession) {
       height: Math.round(clip.height),
     }
     references.push(reference)
+    parityReferences.push({
+      ...reference,
+      sha256: perceptualRasterSha256V2(bytes),
+    })
     if (perceptualOutputDirectory) {
       await writeFile(path.join(perceptualOutputDirectory, `${capture.id}.png`), bytes, { flag: 'wx' })
     }
@@ -405,6 +410,10 @@ async function captureConformanceArtifact(client, pageSession) {
     recipeHash: descriptor.recipeHash,
     identity: descriptor.preflightIdentity,
     presentation,
+    perceptualParity: {
+      algorithm: 'egolens-perceptual-raster-v2',
+      references: parityReferences,
+    },
   }
 }
 

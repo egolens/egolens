@@ -108,6 +108,13 @@ npm run phase10:record-mode -- \
   --output "$PUBLIC/$MODE-observation.json"
 ```
 
+Each capture retains the immutable Phase 6 `egolens-perceptual-raster-v1`
+signature for hidden-oracle compatibility and separately records
+`egolens-perceptual-raster-v2` for transport parity. V2 averages a wider raster
+cell before quantization so sparse ±1 compositor rounding cannot masquerade as
+a File-vs-HTTP visual difference; the recorder rejects any other algorithm or
+reference-ID set.
+
 Assemble local/remote/share observations independently for all three datasets.
 The assembler requires equal source, recipe, format, operator, capability,
 structural, numeric, perceptual, and presentation hashes:

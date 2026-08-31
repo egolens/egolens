@@ -96,7 +96,7 @@
       "required": [
         "mode", "noAgent", "emptyProfile", "sourceManifestHash", "catalogHash",
         "shareDescriptorHash", "recipeHash", "formatFingerprint", "operatorSetFingerprint",
-        "capabilityHash", "structuralHash", "numericHash", "perceptualHash",
+        "capabilityHash", "structuralHash", "numericHash", "perceptualAlgorithm", "perceptualHash",
         "presentationHash", "performanceHash", "lifecycleHash", "browserRunHash",
         "paused", "passed"
       ],
@@ -113,6 +113,7 @@
         "capabilityHash": { "$ref": "#/$defs/hash" },
         "structuralHash": { "$ref": "#/$defs/hash" },
         "numericHash": { "$ref": "#/$defs/hash" },
+        "perceptualAlgorithm": { "const": "egolens-perceptual-raster-v2" },
         "perceptualHash": { "$ref": "#/$defs/hash" },
         "presentationHash": { "$ref": "#/$defs/hash" },
         "performanceHash": { "$ref": "#/$defs/hash" },
