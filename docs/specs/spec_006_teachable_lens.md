@@ -1,6 +1,6 @@
 # Spec 006 — Teachable Lens: portable full-scene adapter recipes
 
-**Status**: in-progress (Phases 2–9 shipped; next planned work is Phase 10) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
+**Status**: in-progress (Phases 2–9 shipped; Phase 10 original-data generalization ladder → spec 014) · **Date**: 2026-08-30 · **Estimated effort**: staged weekend foundation
 
 ## Decision
 
@@ -749,6 +749,12 @@ templates, file sizes, and bounded per-file samples selected by the engine. It
 is local provenance, not telemetry, and is excluded from automatic matching
 across scenes.
 
+It is also not a source-authorization or content-integrity boundary.
+[`spec_014_teachable_lens_phase10_generalization_ladder.md`](spec_014_teachable_lens_phase10_generalization_ladder.md)
+adds a separate full-content `sourceManifestHash` for local↔remote source
+equivalence and share-link authorization; that hash does not change the
+matching purpose or bounded cost of `datasetFingerprint`.
+
 ### `operatorSetFingerprint`
 
 Hash of the exact operator names, major versions, providers, and extension
@@ -1472,9 +1478,12 @@ public receipts/gate output, and destroys oracle inputs plus detailed reports.
 
 #### Phase 10 — Run the held-out generalization test
 
-Only after self-hosting passes, add Mystery A/B. Mystery A proves unknown-format
-authoring and human correction; Mystery B proves fingerprint-based reuse in a
-fresh browser session without an agent call.
+Only after self-hosting and the transport/runtime preflight pass, run the
+original-data generalization ladder in
+[`spec_014_teachable_lens_phase10_generalization_ladder.md`](spec_014_teachable_lens_phase10_generalization_ladder.md).
+Mystery A proves unknown-format authoring and human correction; Mystery B proves
+persisted-local, imported-local, and remote-share reuse in fresh browser
+processes without an agent call.
 
 ## Proposed code organization
 
