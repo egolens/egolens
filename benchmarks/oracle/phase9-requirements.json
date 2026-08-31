@@ -28,7 +28,7 @@
     {
       "datasetId": "nuscenes",
       "caseId": "phase6-nuscenes-urban-vru-001",
-      "recipeHash": "sha256:0f379bf75d877268541306b9a325cffd55a5d465ec8a8541c30ab824ef48cd00",
+      "recipeHash": "sha256:244268a28844062f768b2d434020fd32e8753380141d6dd0f85f3b525acd7b9a",
       "coverage": {
         "requiredCapabilities": [
           "boxes2d", "boxes3d", "cameraImages", "egoPoses",

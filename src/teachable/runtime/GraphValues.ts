@@ -1,4 +1,10 @@
 import type { FeatherColumnsParamsV1, DecodedFeatherColumnsV1 } from '../operators/featherColumns'
+import type {
+  DecodedNumericRecordsV1,
+  InterleavedRecordsParamsV1,
+  NpzUint16ParamsV1,
+  PcdRecordsParamsV1,
+} from '../operators/binaryReaders'
 import type { ByteSourceV1 } from '../source/ByteSource'
 import type {
   NormalizedBox3dV1,
@@ -73,7 +79,7 @@ export interface CoreOperatorExecutionContextV1 {
   readonly source: ByteSourceV1
   readonly resources: GraphResourceAccountV1
   throwIfAborted(): void
-  read(path: string): Promise<ArrayBuffer>
+  read(path: string, signal?: AbortSignal): Promise<ArrayBuffer>
 }
 
 export interface GraphTableCollectionV1 {
@@ -91,6 +97,23 @@ export interface GraphJsonCollectionV1 {
   readonly context: CoreOperatorExecutionContextV1
 }
 
+export type GraphBinaryDecoderV1 =
+  | { readonly kind: 'interleaved'; readonly params: InterleavedRecordsParamsV1 }
+  | { readonly kind: 'pcd'; readonly params: PcdRecordsParamsV1 }
+  | { readonly kind: 'npz-uint16'; readonly params: NpzUint16ParamsV1 }
+
+export type GraphDecodedBinaryV1 = DecodedNumericRecordsV1 | Uint16Array
+
+/** Lazy, bounded source collection. Files are decoded only for requested frames. */
+export interface GraphBinaryCollectionV1 {
+  readonly kind: 'binary-collection'
+  readonly files: readonly GraphSourceFileV1[]
+  readonly decoder: GraphBinaryDecoderV1
+  readonly context: CoreOperatorExecutionContextV1
+  readonly cache: Map<string, Promise<GraphDecodedBinaryV1>>
+  readonly retainedReleases: Map<string, () => void>
+}
+
 export interface GraphEncodedCollectionV1 {
   readonly kind: 'encoded-collection'
   readonly files: readonly GraphSourceFileV1[]
@@ -101,6 +124,8 @@ export interface GraphEncodedCollectionV1 {
 export interface GraphTimelineFrameV1 {
   readonly timestamp: bigint
   readonly path?: string
+  readonly key?: string
+  readonly group?: string
 }
 
 export interface GraphTimelineV1 {
@@ -113,6 +138,9 @@ export interface GraphPoseTimelineV1 {
   readonly kind: 'pose-timeline'
   readonly worldOriginInverse: Float64Array | null
   readonly worldFromEgoByTimestamp: ReadonlyMap<bigint, Float64Array>
+  /** Absolute poses keyed by the recipe-declared frame identity. The assembler
+   * chooses a scene-local origin only after selecting a segment. */
+  readonly absoluteWorldFromEgoByFrameKey?: ReadonlyMap<string, Float64Array>
 }
 
 export interface GraphPointCloudPlanV1 {
@@ -122,16 +150,41 @@ export interface GraphPointCloudPlanV1 {
   readonly frameId: string
 }
 
+export interface GraphBinaryPointCloudBindingV1 {
+  readonly frameKey: string
+  readonly recordKey: string
+  readonly timestamp: bigint
+  readonly path: string
+  readonly sensorId: string
+  readonly frameId: string
+  readonly egoFromSensor: Float64Array | null
+}
+
+export interface GraphBinaryPointCloudPlanV1 {
+  readonly kind: 'binary-point-cloud-plan'
+  readonly records: GraphBinaryCollectionV1
+  readonly bindings: readonly GraphBinaryPointCloudBindingV1[]
+}
+
+export interface GraphCameraBindingV1 {
+  readonly frameKey: string
+  readonly timestamp: bigint
+  readonly path: string
+  readonly sensorId: string
+}
+
 export interface GraphCameraPlanV1 {
   readonly kind: 'camera-plan'
   readonly encoded: GraphEncodedCollectionV1
   readonly calibrations: ReadonlyMap<string, NormalizedCameraCalibrationV1>
   readonly maxDelta: bigint
+  readonly bindings?: readonly GraphCameraBindingV1[]
 }
 
 export interface GraphBoxesV1 {
   readonly kind: 'boxes3d'
   readonly byTimestamp: ReadonlyMap<bigint, readonly NormalizedBox3dV1[]>
+  readonly byFrameKey?: ReadonlyMap<string, readonly NormalizedBox3dV1[]>
 }
 
 export interface GraphProjectedBoxesV1 {
@@ -145,6 +198,34 @@ export interface GraphTrajectoriesV1 {
   readonly tracks: ReadonlyMap<string, readonly NormalizedTrackPointV1[]>
 }
 
+export interface GraphTrajectoryPlanV1 {
+  readonly kind: 'trajectory-plan'
+  readonly boxes: GraphBoxesV1
+}
+
+export interface GraphSegmentationPlanV1 {
+  readonly kind: 'segmentation-plan'
+  readonly pointClouds: GraphBinaryPointCloudPlanV1
+  readonly semantic?: GraphBinaryCollectionV1
+  readonly panoptic?: GraphBinaryCollectionV1
+  readonly semanticPathByRecordKey: ReadonlyMap<string, string>
+  readonly panopticPathByRecordKey: ReadonlyMap<string, string>
+  readonly taxonomyId: string
+  readonly panopticDivisor: number
+}
+
+export interface GraphSegmentDescriptorV1 {
+  readonly groupId: string
+  readonly id: string
+  readonly label?: string
+  readonly metadata?: Readonly<Record<string, string | number | boolean | null>>
+}
+
+export interface GraphSegmentIndexV1 {
+  readonly kind: 'segment-index'
+  readonly segments: readonly GraphSegmentDescriptorV1[]
+}
+
 export interface GraphRecordsV1 {
   readonly kind: 'records'
   readonly rows: readonly Readonly<Record<string, unknown>>[]
@@ -154,11 +235,16 @@ export type GraphTypedValueV1 =
   | GraphTableCollectionV1
   | GraphJsonCollectionV1
   | GraphEncodedCollectionV1
+  | GraphBinaryCollectionV1
   | GraphTimelineV1
   | GraphPoseTimelineV1
   | GraphPointCloudPlanV1
+  | GraphBinaryPointCloudPlanV1
   | GraphCameraPlanV1
   | GraphBoxesV1
   | GraphProjectedBoxesV1
   | GraphTrajectoriesV1
+  | GraphTrajectoryPlanV1
+  | GraphSegmentationPlanV1
+  | GraphSegmentIndexV1
   | GraphRecordsV1

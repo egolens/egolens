@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { buildNuScenesDatabase, loadNuScenesSceneMetadata } from '../../adapters/nuscenes/metadata'
 import { nuScenesCompiledRecipe } from '../../adapters/recipes/bundled'
+import { BrowserGraphPreviewRuntimeV1 } from '../authoring/BrowserGraphPreviewRuntime'
+import { SourceInventoryV1 } from '../authoring/SourceInventory'
+import { authoringPreviewStoreV1 } from '../authoring/previewStore'
+import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
+import { compileRecipeV1 } from '../recipe/compiler'
+import { bindRecipeSceneV1 } from '../runtime/bindRecipeScene'
+import { ExecutableGraphKernelV1 } from '../runtime/GraphKernel'
+import { assembleGraphSceneV1 } from '../runtime/GraphSceneAssembler'
 import { MappedByteSourceV1 } from '../source/ByteSource'
-import type { NormalizedFrameV1 } from '../runtime/normalizedScene'
-import { bindRecipeSceneV1, prepareTokenRelationsRuntimeV1 } from '../runtime/bindRecipeScene'
-import { bindNuScenesRecipeSceneV1 } from '../runtime/NuScenesRecipeScene'
-import { compareNormalizedFramesV1 } from '../runtime/parity'
 
 function lidarFile(points: readonly (readonly number[])[]): File {
   const buffer = new ArrayBuffer(points.length * 20)
   const view = new DataView(buffer)
-  points.forEach((point, row) => point.forEach((value, column) => view.setFloat32(row * 20 + column * 4, value, true)))
+  points.forEach((point, row) => point.forEach((value, column) => {
+    view.setFloat32(row * 20 + column * 4, value, true)
+  }))
   return new File([buffer], 'lidar.pcd.bin')
 }
 
@@ -35,9 +40,15 @@ function radarFile(): File {
   return new File([buffer], 'radar.pcd')
 }
 
-async function fixture() {
+function fixture(options: { radar?: boolean; camera?: boolean; annotations?: boolean } = {}) {
+  const radar = options.radar ?? true
+  const camera = options.camera ?? true
+  const annotations = options.annotations ?? true
   const tables: Record<string, unknown[]> = {
-    'scene.json': [{ token: 'scene', log_token: 'log', nbr_samples: 1, first_sample_token: 'sample', last_sample_token: 'sample', name: 'scene-0001', description: 'clear' }],
+    'scene.json': [{
+      token: 'scene', log_token: 'log', nbr_samples: 1, first_sample_token: 'sample',
+      last_sample_token: 'sample', name: 'scene-0001', description: 'clear',
+    }],
     'sample.json': [{ token: 'sample', timestamp: 1_000_000, prev: '', next: '', scene_token: 'scene' }],
     'sensor.json': [
       { token: 'lidar-sensor', channel: 'LIDAR_TOP', modality: 'lidar' },
@@ -59,95 +70,181 @@ async function fixture() {
     ],
     'category.json': [{ token: 'category', name: 'vehicle.car', description: 'car', index: 17 }],
     'instance.json': [{ token: 'instance', category_token: 'category', nbr_annotations: 1, first_annotation_token: 'annotation', last_annotation_token: 'annotation' }],
-    'sample_annotation.json': [{ token: 'annotation', sample_token: 'sample', instance_token: 'instance', visibility_token: '4', attribute_tokens: [], translation: [10, 0, 1], size: [2, 4, 2], rotation: [1, 0, 0, 0], prev: '', next: '', num_lidar_pts: 2, num_radar_pts: 1 }],
+    'sample_annotation.json': annotations ? [{
+      token: 'annotation', sample_token: 'sample', instance_token: 'instance', visibility_token: '4',
+      attribute_tokens: [], translation: [10, 0, 1], size: [2, 4, 2], rotation: [1, 0, 0, 0],
+      prev: '', next: '', num_lidar_pts: 2, num_radar_pts: 1,
+    }] : [],
     'log.json': [{ token: 'log', logfile: 'n015-2018-07-24-11-22-45+0800', vehicle: 'car', date_captured: '2018-07-24', location: 'singapore-onenorth' }],
     'lidarseg.json': [{ token: 'seg', sample_data_token: 'lidar-data', filename: 'lidarseg/v1.0-mini/one.bin' }],
     'panoptic.json': [],
   }
-  const db = await buildNuScenesDatabase(new Map(Object.entries(tables).map(([name, rows]) => [name, JSON.stringify(rows)])))
-  const files = new Map<string, File | string>([
-    ['samples/LIDAR_TOP/one.pcd.bin', lidarFile([[1, 2, 3, 0.5, 9], [-1, -2, -3, 0.75, 10]])],
-    ['samples/RADAR_FRONT/one.pcd', radarFile()],
-    ['samples/CAM_FRONT/one.jpg', new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'one.jpg')],
-    ['lidarseg/v1.0-mini/one.bin', new File([new Uint8Array([17, 24])], 'one.bin')],
-  ])
-  return { db, files }
+  const files = new Map<string, File | string>()
+  for (const [name, rows] of Object.entries(tables)) {
+    const path = `v1.0-mini/${name}`
+    files.set(path, new File([JSON.stringify(rows)], name, { type: 'application/json' }))
+  }
+  files.set('samples/LIDAR_TOP/one.pcd.bin', lidarFile([[1, 2, 3, 0.5, 9], [-1, -2, -3, 0.75, 10]]))
+  if (radar) files.set('samples/RADAR_FRONT/one.pcd', radarFile())
+  if (camera) files.set('samples/CAM_FRONT/one.jpg', new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'one.jpg'))
+  files.set('lidarseg/v1.0-mini/one.bin', new File([new Uint8Array([17, 24])], 'one.bin'))
+  return {
+    compiledRecipe: nuScenesCompiledRecipe,
+    files,
+    inventoryEntries: [...files].map(([path, value]) => ({
+      path,
+      size: typeof value === 'string' ? null : value.size,
+    })),
+  }
 }
 
-describe('nuScenes recipe-backed NormalizedSceneV1', () => {
-  it('binds capabilities from real outputs and preserves string sensor identity', async () => {
-    const { db, files } = await fixture()
-    const { scene, diagnostics } = bindNuScenesRecipeSceneV1({
-      compiledRecipe: nuScenesCompiledRecipe,
-      database: db,
-      sceneToken: 'scene',
-      source: new MappedByteSourceV1(files),
+describe('nuScenes executable recipe graph', () => {
+  it('accounts for relational metadata eagerly and binary frame payloads lazily', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture()
+    const graph = await new ExecutableGraphKernelV1(bundledPhase2OperatorRegistry).execute({
+      compiledRecipe, source: new MappedByteSourceV1(files), inventory: inventoryEntries,
     })
+    expect(graph.resources.nodesExecuted).toBe(27)
+    expect(graph.resources.sourceBytesRead).toBeGreaterThan(0)
+    const beforeFrameRead = graph.resources.sourceBytesRead
+    const { scene } = assembleGraphSceneV1({ compiledRecipe, graph, sceneId: 'scene-0001' })
+    await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
+    expect(graph.resources.sourceBytesRead).toBeGreaterThan(beforeFrameRead)
+    expect(graph.resources.allocationBytes).toBeGreaterThan(0)
+    scene.dispose()
+    scene.dispose()
+    expect(graph.abortController.signal.aborted).toBe(true)
+    expect(graph.resources.allocationBytes).toBe(0)
+  })
+
+  it('executes the full normalized capability surface without prepared provider state', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture()
+    const { scene, diagnostics, executionProfile, metadata, availableSegments } = await bindRecipeSceneV1({
+      compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
+    })
+    expect(executionProfile).toBe('core/relational-graph@1')
     expect(diagnostics).toEqual([])
-    expect(scene.manifest.capabilities).toEqual(nuScenesCompiledRecipe.capabilities)
+    expect(scene.manifest.capabilities).toEqual(compiledRecipe.capabilities)
+    expect(availableSegments).toEqual([expect.objectContaining({ groupId: 'scene', id: 'scene-0001' })])
+    expect(scene.index.segments[0]).toMatchObject({ id: 'scene-0001', frameCount: 1 })
     expect(scene.relations.staticTransforms.map((relation) => relation.childFrameId)).toContain('LIDAR_TOP-frame')
     expect(scene.relations.cameraCalibrations.has('CAM_FRONT_LEFT')).toBe(true)
     expect(scene.relations.cameraCalibrations.has('LIDAR_TOP')).toBe(false)
+    expect(metadata.timestamps).toEqual([1_000_000n])
+    expect(metadata.segmentMeta).toMatchObject({
+      segmentId: 'scene-0001', location: 'Singapore Onenorth', timeOfDay: 'Day', weather: 'clear', objectCounts: { 1: 1 },
+    })
+
+    const frame = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
+    expect(frame.timestampMicros).toBe(1_000_000n)
+    expect(frame.worldFromEgo).toEqual(new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]))
+    expect(frame.pointClouds[0]).toMatchObject({
+      sensorId: 'LIDAR_TOP', frameId: 'ego', pointCount: 2, stride: 4,
+      attributes: ['x', 'y', 'z', 'intensity'],
+    })
+    expect(frame.pointClouds[0].values).toEqual(new Float32Array([11, 22, 33, 0.5, 9, 18, 27, 0.75]))
+    expect(frame.pointClouds[0].semanticLabels).toEqual(new Uint8Array([17, 24]))
+    expect(frame.radarPointClouds[0].values).toEqual(new Float32Array([1, 2, 3, 4, 5, 6, 7]))
+    expect(frame.cameraImages).toMatchObject([{ sensorId: 'CAM_FRONT', timestampMicros: 1_000_000n }])
+    expect(frame.boxes3d).toMatchObject([{ id: 'instance', classId: 'car', center: [10, 0, 1], dimensions: [4, 2, 2] }])
+    expect(frame.boxes2d.length).toBeGreaterThan(0)
+    expect(frame.lidarSegmentation).toMatchObject([{ sensorId: 'LIDAR_TOP', taxonomyId: 'nuscenes-lidar-semantics' }])
+    expect(scene.relations.trajectories.get('instance')).toHaveLength(1)
   })
 
-  it('matches legacy metadata structurally and numerically in a headless frame', async () => {
-    const { db, files } = await fixture()
-    const legacy = loadNuScenesSceneMetadata(db, 'scene')
-    const { scene, executionProfile } = await bindRecipeSceneV1({
-      compiledRecipe: nuScenesCompiledRecipe,
-      source: new MappedByteSourceV1(files),
-      sceneId: 'scene',
-      preparation: prepareTokenRelationsRuntimeV1(db),
+  it('derives optional capabilities from selected graph evidence', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture({ radar: false, annotations: false })
+    const { scene, diagnostics } = await bindRecipeSceneV1({
+      compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
     })
-    expect(executionProfile).toBe('core/token-relations@1')
-    const actual = await scene.loadFrame(0, { capabilities: scene.manifest.capabilities })
-    const legacyBox = legacy.lidarBoxByFrame.get(legacy.timestamps[0])![0]
-    const expected: NormalizedFrameV1 = {
-      ...actual,
-      timestampMicros: legacy.timestamps[0],
-      worldFromEgo: new Float64Array(legacy.poseByFrameIndex.get(0)!),
-      pointClouds: [{
-        ...actual.pointClouds[0],
-        values: new Float32Array([11, 22, 33, 0.5, 9, 18, 27, 0.75]),
-        pointCount: 2,
-        stride: 4,
-        attributes: ['x', 'y', 'z', 'intensity'],
-      }],
-      radarPointClouds: [{
-        ...actual.radarPointClouds[0],
-        values: new Float32Array([1, 2, 3, 4, 5, 6, 7]),
-      }],
-      boxes3d: [{
-        ...actual.boxes3d[0],
-        center: [
-          legacyBox['[LiDARBoxComponent].box.center.x'] as number,
-          legacyBox['[LiDARBoxComponent].box.center.y'] as number,
-          legacyBox['[LiDARBoxComponent].box.center.z'] as number,
-        ],
-        dimensions: [4, 2, 2],
-      }],
+    for (const capability of ['radarPointClouds', 'boxes3d', 'boxes2d', 'trajectories'] as const) {
+      expect(scene.manifest.capabilities.has(capability)).toBe(false)
+      expect(diagnostics).toContainEqual(expect.objectContaining({ jsonPointer: `/outputs/${capability}` }))
     }
-    expect(compareNormalizedFramesV1(expected, actual)).toEqual([])
-    expect(actual.cameraImages.map((image) => image.sensorId)).toEqual(['CAM_FRONT'])
-    expect(actual.boxes2d.length).toBeGreaterThan(0)
-    expect(actual.lidarSegmentation[0].sensorId).toBe('LIDAR_TOP')
-    expect([...actual.pointClouds[0].semanticLabels!]).toEqual([17, 24])
+
+    const withoutCamera = fixture({ camera: false })
+    const cameraBinding = await bindRecipeSceneV1({
+      compiledRecipe: withoutCamera.compiledRecipe,
+      source: new MappedByteSourceV1(withoutCamera.files),
+      inventoryEntries: withoutCamera.inventoryEntries,
+      sceneId: 'scene-0001',
+    })
+    expect(cameraBinding.scene.manifest.capabilities.has('boxes3d')).toBe(true)
+    for (const capability of ['cameraImages', 'boxes2d'] as const) {
+      expect(cameraBinding.scene.manifest.capabilities.has(capability)).toBe(false)
+      expect(cameraBinding.diagnostics).toContainEqual(expect.objectContaining({ jsonPointer: `/outputs/${capability}` }))
+    }
   })
 
-  it('removes optional capabilities when their files cannot bind', async () => {
-    const { db, files } = await fixture()
-    files.delete('samples/RADAR_FRONT/one.pcd')
-    const { scene, diagnostics } = bindNuScenesRecipeSceneV1({
-      compiledRecipe: nuScenesCompiledRecipe,
-      database: db,
-      sceneToken: 'scene',
-      source: new MappedByteSourceV1(files),
+  it('fails closed with the bound path when required relational input is missing or malformed', async () => {
+    const missing = fixture()
+    missing.files.delete('v1.0-mini/ego_pose.json')
+    await expect(bindRecipeSceneV1({
+      compiledRecipe: missing.compiledRecipe,
+      source: new MappedByteSourceV1(missing.files),
+      inventoryEntries: [...missing.files].map(([path, value]) => ({
+        path, size: typeof value === 'string' ? null : value.size,
+      })),
+    })).rejects.toThrow(/egoPoses matched 0/u)
+
+    const malformed = fixture()
+    malformed.files.set('v1.0-mini/scene.json', new File(['{ invalid'], 'scene.json'))
+    await expect(bindRecipeSceneV1({
+      compiledRecipe: malformed.compiledRecipe,
+      source: new MappedByteSourceV1(malformed.files),
+      inventoryEntries: malformed.inventoryEntries,
+    })).rejects.toThrow(/GRAPH_JSON_DECODE_FAILED: v1\.0-mini\/scene\.json/u)
+  })
+
+  it('binds learned identities through the same relational graph profile', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture()
+    const learned = structuredClone(compiledRecipe.recipe)
+    learned.scene.formatId = 'learned-nuscenes-compatible'
+    const { scene, executionProfile } = await bindRecipeSceneV1({
+      compiledRecipe: compileRecipeV1(learned, bundledPhase2OperatorRegistry),
+      source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
     })
-    expect(scene.manifest.capabilities.has('radarPointClouds')).toBe(false)
-    expect(diagnostics).toContainEqual(expect.objectContaining({
-      stage: 'bind',
-      code: 'OPTIONAL_OUTPUT_UNBOUND',
-      jsonPointer: '/outputs/radarPointClouds',
-    }))
+    expect(executionProfile).toBe('core/relational-graph@1')
+    expect(scene.manifest.id).toBe('learned-nuscenes-compatible')
+    await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).resolves.toMatchObject({
+      index: 0, timestampMicros: 1_000_000n,
+    })
+  })
+
+  it('runs browser authoring preview through the same graph and assembler', async () => {
+    authoringPreviewStoreV1.clear()
+    const { compiledRecipe, files } = fixture()
+    const inventory = new SourceInventoryV1(
+      [...files].map(([path, value]) => [path, value] as [string, File]),
+      { sessionId: 'nuscenes-graph-preview' },
+    )
+    const prepared = await new BrowserGraphPreviewRuntimeV1().preparePreview(
+      compiledRecipe,
+      inventory.resolveAuthorizedSource(),
+      inventory,
+    )
+    expect(prepared.validationSummary).toMatchObject({ passed: true, frameCount: 1, sampleFrames: [0] })
+    expect(prepared.capabilities).toEqual(compiledRecipe.capabilities)
+    prepared.commit()
+    expect(authoringPreviewStoreV1.getSnapshot()).toMatchObject({
+      formatId: 'nuscenes', frameCount: 1, sampledFrames: [0],
+      capabilitySamples: { pointClouds: [2], cameraImages: [1], boxes3d: [1], lidarSegmentation: [1] },
+    })
+    prepared.dispose()
+  })
+
+  it('cancels graph-backed reads and disposes idempotently', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture()
+    const { scene } = await bindRecipeSceneV1({
+      compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
+    })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(scene.loadFrame(0, {
+      capabilities: scene.manifest.capabilities, signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+    scene.dispose()
+    scene.dispose()
+    await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).rejects.toThrow(/disposed/u)
   })
 })

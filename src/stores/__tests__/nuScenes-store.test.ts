@@ -1,11 +1,11 @@
 /**
  * Integration tests for nuScenes store loading pipeline.
  *
- * Verifies the full flow: loadFromFiles → buildNuScenesDatabase → selectSegment
- * → loadNuScenesScene → applyMetadataBundle → workers → frame cache.
+ * Verifies the full flow: loadFromFiles → recipe graph → selectSegment
+ * → graph scene assembly → applyMetadataBundle → workers → frame cache.
  *
  * Workers are mocked to return synthetic point cloud / camera data.
- * The nuScenes JSON metadata is synthetic (same factory as nuscenes-metadata.test.ts).
+ * The nuScenes JSON metadata is synthetic and retains the original table shape.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
@@ -80,7 +80,11 @@ vi.mock('../../workers/workerPool', () => ({
 // Imports (AFTER vi.mock)
 // ---------------------------------------------------------------------------
 
-import { useSceneStore } from '../useSceneStore'
+import {
+  createActiveConformanceScene,
+  getActiveConformanceDescriptor,
+  useSceneStore,
+} from '../useSceneStore'
 import { getManifest } from '../../adapters/registry'
 
 // ---------------------------------------------------------------------------
@@ -177,6 +181,33 @@ function createSyntheticNuScenesSegments(): Map<string, Map<string, File>> {
   return new Map([['__nuscenes__', allFiles]])
 }
 
+function installClassicRemoteFetch(files: ReadonlyMap<string, File>, baseUrl: string) {
+  const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
+  const calls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+    calls.push(`${method} ${url}`)
+    if (url === `${base}index.json`) return new Response(null, { status: 404 })
+    const prefix = `${base}v1.0-mini/`
+    if (!url.startsWith(prefix)) return new Response(null, { status: 404 })
+    const name = url.slice(prefix.length)
+    const file = files.get(name)
+    if (!file) return new Response(null, { status: 404 })
+    if (method === 'HEAD') {
+      return new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'content-length': String(file.size) },
+      })
+    }
+    return new Response(await file.arrayBuffer(), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }))
+  return calls
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -191,6 +222,7 @@ const actions = () => state().actions
 describe('nuScenes store integration', () => {
   afterEach(() => {
     actions().reset()
+    vi.unstubAllGlobals()
   })
 
   describe('loadFromFiles with nuScenes sentinel', () => {
@@ -415,6 +447,42 @@ describe('nuScenes store integration', () => {
       const meta = state().segmentMetas.get('scene-0001')
       expect(meta).toBeDefined()
       expect(meta!.segmentId).toBe('scene-0001')
+    }, 10000)
+  })
+
+  describe('isolated conformance', () => {
+    it('re-executes the same raw-source graph without prepared database state', async () => {
+      await actions().loadFromFiles(createSyntheticNuScenesSegments())
+
+      expect(getActiveConformanceDescriptor()).toMatchObject({
+        datasetId: 'nuscenes', frameCount: 2,
+      })
+      const scene = await createActiveConformanceScene()
+      expect(scene.index.timestampsMicros).toEqual([1_000_000n, 1_500_000n])
+      expect(scene.index.segments).toMatchObject([{ id: 'scene-0001', frameCount: 2 }])
+      scene.dispose()
+    }, 10000)
+  })
+
+  describe('classic URL source', () => {
+    it('discovers and loads scenes through the same cached raw-source graph', async () => {
+      const files = createSyntheticNuScenesSegments().get('__nuscenes__')!
+      const baseUrl = 'https://example.test/nuscenes'
+      const calls = installClassicRemoteFetch(files, baseUrl)
+      vi.stubGlobal('window', {
+        location: { search: '', pathname: '/', origin: 'https://app.example.test' },
+        history: { pushState: vi.fn(), replaceState: vi.fn() },
+      })
+      vi.stubGlobal('localStorage', {
+        getItem: vi.fn(() => null), setItem: vi.fn(), removeItem: vi.fn(), clear: vi.fn(),
+      })
+
+      await actions().loadFromUrl('nuscenes', baseUrl)
+
+      expect(state()).toMatchObject({
+        status: 'ready', currentSegment: 'scene-0001', availableSegments: ['scene-0001', 'scene-0002'],
+      })
+      expect(calls.filter((call) => call === `GET ${baseUrl}/v1.0-mini/sample.json`)).toHaveLength(1)
     }, 10000)
   })
 })

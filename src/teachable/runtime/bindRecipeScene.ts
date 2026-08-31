@@ -1,6 +1,4 @@
-import type { NuScenesDatabase } from '../../adapters/nuscenes/metadata'
 import type { WaymoParquetFile } from '../../utils/parquet'
-import { bindNuScenesRecipeSceneV1 } from './NuScenesRecipeScene'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import {
   RecipeExecutorV1,
@@ -27,24 +25,10 @@ class ParquetColumnsPreparationV1 implements RecipeRuntimePreparationV1 {
   }
 }
 
-class TokenRelationsPreparationV1 implements RecipeRuntimePreparationV1 {
-  readonly [preparationBrand] = true as const
-  readonly database: NuScenesDatabase
-  constructor(database: NuScenesDatabase) {
-    this.database = database
-  }
-}
-
 export function prepareParquetColumnsRuntimeV1(
   parquetFiles: ReadonlyMap<string, WaymoParquetFile>,
 ): RecipeRuntimePreparationV1 {
   return new ParquetColumnsPreparationV1(parquetFiles)
-}
-
-export function prepareTokenRelationsRuntimeV1(
-  database: NuScenesDatabase,
-): RecipeRuntimePreparationV1 {
-  return new TokenRelationsPreparationV1(database)
 }
 
 function assertParquetPreparation(
@@ -52,16 +36,6 @@ function assertParquetPreparation(
   profile: string,
 ): ParquetColumnsPreparationV1 {
   if (!(preparation instanceof ParquetColumnsPreparationV1)) {
-    throw new Error(`RECIPE_RUNTIME_PREPARATION_INVALID: ${profile}`)
-  }
-  return preparation
-}
-
-function assertTokenPreparation(
-  preparation: object | undefined,
-  profile: string,
-): TokenRelationsPreparationV1 {
-  if (!(preparation instanceof TokenRelationsPreparationV1)) {
     throw new Error(`RECIPE_RUNTIME_PREPARATION_INVALID: ${profile}`)
   }
   return preparation
@@ -94,8 +68,8 @@ const parquetRangeImageProvider: RecipeRuntimeProviderV1 = {
   },
 }
 
-const tokenRelationsProvider: RecipeRuntimeProviderV1 = {
-  id: 'core/token-relations@1',
+const relationalGraphProvider: RecipeRuntimeProviderV1 = {
+  id: 'core/relational-graph@1',
   readers: [
     'archive.npz_array@1',
     'binary.interleaved_records@1',
@@ -114,21 +88,21 @@ const tokenRelationsProvider: RecipeRuntimeProviderV1 = {
     'timeline.sort@1',
     'tracks.derive_trajectories@1',
   ],
-  execute(input): RecipeProviderResultV1 {
-    const prepared = assertTokenPreparation(input.preparation, this.id)
-    const selected = prepared.database.scenes.find((scene) =>
-      scene.token === input.sceneId || scene.name === input.sceneId)
-      ?? (input.sceneId === undefined && prepared.database.scenes.length === 1
-        ? prepared.database.scenes[0]
-        : undefined)
-    if (!selected) throw new Error(`RECIPE_SCENE_NOT_FOUND: ${input.sceneId ?? '(sceneId required)'}`)
-    return bindNuScenesRecipeSceneV1({
+  async execute(input): Promise<RecipeProviderResultV1> {
+    const inventory = input.inventoryEntries
+      ?? input.inventory?.snapshot().entries.map((entry) => ({ path: entry.path, size: entry.size }))
+    if (!inventory) throw new Error('RECIPE_SOURCE_INVENTORY_REQUIRED: core/relational-graph@1')
+    const graph = await new ExecutableGraphKernelV1(bundledPhase2OperatorRegistry).execute({
       compiledRecipe: input.compiledRecipe,
-      database: prepared.database,
-      sceneToken: selected.token,
       source: input.source,
-      metadataBundle: input.metadataBundle,
+      inventory,
     })
+    try {
+      return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    } catch (error) {
+      graph.dispose()
+      throw error
+    }
   },
 }
 
@@ -153,7 +127,12 @@ const featherTimelineProvider: RecipeRuntimeProviderV1 = {
       source: input.source,
       inventory,
     })
-    return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    try {
+      return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    } catch (error) {
+      graph.dispose()
+      throw error
+    }
   },
 }
 
@@ -168,13 +147,18 @@ const jsonTimelineProvider: RecipeRuntimeProviderV1 = {
     const graph = await new ExecutableGraphKernelV1(bundledPhase2OperatorRegistry).execute({
       compiledRecipe: input.compiledRecipe, source: input.source, inventory,
     })
-    return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    try {
+      return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    } catch (error) {
+      graph.dispose()
+      throw error
+    }
   },
 }
 
 export const coreRecipeExecutorV1 = new RecipeExecutorV1([
   parquetRangeImageProvider,
-  tokenRelationsProvider,
+  relationalGraphProvider,
   featherTimelineProvider,
   jsonTimelineProvider,
 ])
