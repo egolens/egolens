@@ -407,6 +407,13 @@ all of the following with the Phase 9 finalized recipe and no agent call:
 4. round-trip a share URL into an empty profile and restore the same selected
    scene/frame and presentation state.
 
+During the exact baseline replay, the Argoverse 2 graph recipe was made
+explicit about its single-root scene label and `logId` metadata so the generic
+assembler preserves the immutable Phase 6 scene contract without a
+dataset-branded branch. Its semantic recipe hash was deliberately re-reviewed
+as `sha256:fcd31b4e6a5fc0f51b487c90ca0fa1d9804809f8d1ba1befb687bd3bdcc7f568`;
+no held-out rung source was opened by this correction.
+
 The baseline must also pass the Phase 9 Adapter Amnesia gates, applicable Spec
 012 performance/lifecycle scenarios for both transports, production/isolated
 build-boundary scans, and negative tests for catalog traversal, CORS,
