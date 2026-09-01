@@ -229,17 +229,18 @@ describe('nuScenes executable recipe graph', () => {
     }
   })
 
-  it('derives compatibility calibrations and static transforms from the selected scene only', async () => {
+  it('preserves ordered relational calibrations for conformance-v1 compatibility', async () => {
     const { compiledRecipe, files, inventoryEntries } = fixture({ calibrationDecoys: true })
     const { scene, metadata } = await bindRecipeSceneV1({
       compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
     })
 
-    expect(metadata.lidarCalibrations.get(1)?.extrinsic[3]).toBe(10)
-    expect(scene.relations.staticTransforms.find((entry) => entry.childFrameId === 'LIDAR_TOP-frame')
-      ?.parentFromChild[3]).toBe(10)
+    expect(metadata.lidarCalibrations.get(1)?.extrinsic[3]).toBe(-90)
+    expect(scene.relations.staticTransforms
+      .filter((entry) => entry.childFrameId === 'LIDAR_TOP-frame')
+      .map((entry) => entry.parentFromChild[3])).toEqual([90, 10, -90])
     await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).resolves.toMatchObject({
-      pointClouds: [expect.objectContaining({ values: new Float32Array([11, 22, 33, 0.5, 9, 18, 27, 0.75]) })],
+      pointClouds: [expect.objectContaining({ values: new Float32Array([-89, 2, 3, 0.5, -91, -2, -3, 0.75]) })],
     })
     scene.dispose()
   })

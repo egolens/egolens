@@ -119,6 +119,7 @@ function selectedTimeline(
   timeline: GraphTimelineV1,
   segmentIndex: GraphSegmentIndexV1 | null,
   requestedId?: string,
+  segmentIdentity?: GraphRecordsV1['segmentIdentity'],
 ): { readonly frames: readonly GraphTimelineFrameV1[]; readonly segment: GraphSegmentDescriptorV1 } {
   const descriptors = segmentIndex?.segments ?? []
   let segment = requestedId
@@ -126,7 +127,13 @@ function selectedTimeline(
     : descriptors[0]
   if (!segment) {
     const groupId = requestedId ?? timeline.frames[0]?.group ?? 'segment'
-    segment = { groupId, id: requestedId ?? groupId }
+    const id = requestedId ?? groupId
+    segment = {
+      groupId,
+      id,
+      ...(segmentIdentity?.labelFromSceneId ? { label: id } : {}),
+      ...(segmentIdentity?.metadataKey ? { metadata: { [segmentIdentity.metadataKey]: id } } : {}),
+    }
   }
   const hasGroups = timeline.frames.some((frame) => frame.group !== undefined)
   const frames = hasGroups ? timeline.frames.filter((frame) => frame.group === segment.groupId) : timeline.frames
@@ -172,10 +179,11 @@ async function loadBinaryPointCloud(
   plan: GraphBinaryPointCloudPlanV1,
   segmentation: GraphSegmentationPlanV1 | null,
   signal?: AbortSignal,
+  egoFromSensor: Float64Array | null = binding.egoFromSensor,
 ): Promise<{ readonly cloud: NormalizedPointCloudV1; readonly segmentation: NormalizedFrameV1['lidarSegmentation'] }> {
   const raw = await loadGraphBinaryV1(plan.records, binding.path, signal)
   if (raw instanceof Uint16Array) throw new Error('GRAPH_POINT_RECORDS_INVALID')
-  const decoded = transformInterleavedXyzV1(raw, binding.egoFromSensor ? [...binding.egoFromSensor] : null)
+  const decoded = transformInterleavedXyzV1(raw, egoFromSensor ? [...egoFromSensor] : null)
   let semanticLabels: Uint8Array | undefined
   let panopticLabels: Uint16Array | undefined
   const semanticPath = segmentation?.semanticPathByRecordKey.get(binding.recordKey)
@@ -249,7 +257,7 @@ export function assembleGraphSceneV1(input: {
   if (!timeline) throw new Error('GRAPH_TIMELINE_OUTPUT_INVALID')
   const segmentIndex = kind<GraphSegmentIndexV1>(input.graph.outputs.get('segmentMetadata'), 'segment-index')
   const segmentRecords = kind<GraphRecordsV1>(input.graph.outputs.get('segmentMetadata'), 'records')
-  const selected = selectedTimeline(timeline, segmentIndex, input.sceneId)
+  const selected = selectedTimeline(timeline, segmentIndex, input.sceneId, segmentRecords?.segmentIdentity)
   const frames = selected.frames
   const timestamps = frames.map((frame) => frame.timestamp)
   const timestampsMicros = timestamps.map((timestamp) => micros(timestamp, timeline.unit))
@@ -349,6 +357,18 @@ export function assembleGraphSceneV1(input: {
     if (sensor?.modality !== 'camera') continue
     cameraCalibrations.set(sensor.id, { ...calibration, sensorId: sensor.id, frameId: sensor.frameId })
   }
+  const sensorTransformById = new Map<string, Float64Array>()
+  const relationalStaticTransforms: NormalizedTransformV1[] = []
+  for (const transform of cameraPlan?.sensorTransforms ?? []) {
+    const sensor = sensorForId(input.compiledRecipe, transform.sensorId)
+    if (!sensor) continue
+    sensorTransformById.set(sensor.id, transform.egoFromSensor)
+    relationalStaticTransforms.push({
+      parentFrameId: 'ego',
+      childFrameId: sensor.frameId,
+      parentFromChild: transform.egoFromSensor,
+    })
+  }
   const transformsByChild = new Map<string, NormalizedTransformV1>()
   const addPointTransforms = (
     bindings: readonly GraphBinaryPointCloudBindingV1[],
@@ -360,10 +380,6 @@ export function assembleGraphSceneV1(input: {
       transformsByChild.set(sensor.frameId, { parentFrameId: 'ego', childFrameId: sensor.frameId, parentFromChild: binding.egoFromSensor })
     }
   }
-  // Relational source trees can contain several scenes whose sensor tokens
-  // share renderer IDs but carry different calibrations. Static relations
-  // and the compatibility worker must be derived from the selected scene,
-  // exactly like loadFrame(), never from an unrelated first/last binding.
   addPointTransforms(selectedPointBindings, 'lidar')
   addPointTransforms(selectedRadarBindings, 'radar')
   for (const [rendererId, calibration] of rangeImagePlan?.calibrations ?? []) {
@@ -384,9 +400,16 @@ export function assembleGraphSceneV1(input: {
   for (const calibration of cameraCalibrations.values()) {
     transformsByChild.set(calibration.frameId, { parentFrameId: 'ego', childFrameId: calibration.frameId, parentFromChild: calibration.egoFromCamera })
   }
+  const uniqueStaticTransforms = tablePointPlan
+    ? input.compiledRecipe.recipe.scene.sensors.flatMap((sensor) => {
+      const transform = transformsByChild.get(sensor.frameId)
+      return transform ? [transform] : []
+    })
+    : [...transformsByChild.values()]
   const box2dToBox3d = new Map(boxRelations?.box2dToBox3d ?? [])
   const relations: NormalizedRelationsV1 = {
-    staticTransforms: [...transformsByChild.values()], cameraCalibrations, trajectories, box2dToBox3d,
+    staticTransforms: relationalStaticTransforms.length > 0 ? relationalStaticTransforms : uniqueStaticTransforms,
+    cameraCalibrations, trajectories, box2dToBox3d,
   }
 
   const cameraPaths = new Map<string, { timestamps: bigint[]; byTimestamp: Map<bigint, string> }>()
@@ -437,7 +460,13 @@ export function assembleGraphSceneV1(input: {
         for (const binding of bindingsForFrame(binaryPointPlan, timelineFrame)) {
           const sensor = pointSensorForBinding(binding, 'lidar')
           if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
-          const loaded = await loadBinaryPointCloud(binding, binaryPointPlan, segmentation, request.signal)
+          const loaded = await loadBinaryPointCloud(
+            binding,
+            binaryPointPlan,
+            segmentation,
+            request.signal,
+            sensorTransformById.get(sensor.id) ?? binding.egoFromSensor,
+          )
           ;(frame.pointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId: sensor.id })
           if (requested.has('lidarSegmentation')) {
             ;(frame.lidarSegmentation as NormalizedFrameV1['lidarSegmentation'][number][]).push(
@@ -494,7 +523,13 @@ export function assembleGraphSceneV1(input: {
         for (const binding of bindingsForFrame(radarPlan, timelineFrame)) {
           const sensor = pointSensorForBinding(binding, 'radar')
           if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
-          const loaded = await loadBinaryPointCloud(binding, radarPlan, null, request.signal)
+          const loaded = await loadBinaryPointCloud(
+            binding,
+            radarPlan,
+            null,
+            request.signal,
+            sensorTransformById.get(sensor.id) ?? binding.egoFromSensor,
+          )
           ;(frame.radarPointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId: sensor.id })
         }
       }
@@ -503,11 +538,15 @@ export function assembleGraphSceneV1(input: {
           for (const binding of cameraPlan.bindings.filter((entry) => entry.frameKey === timelineFrame.key)) {
             if (request.sensorIds && !request.sensorIds.has(binding.sensorId)) continue
             const calibration = cameraCalibrations.get(binding.sensorId)
-            if (!calibration) continue
+            const sensor = sensorForId(input.compiledRecipe, binding.sensorId, 'camera')
+            if (!calibration || sensor?.modality !== 'camera' || !sensor.image) continue
             const encodedBytes = await cameraPlan.encoded.context.read(binding.path, request.signal)
             ;(frame.cameraImages as NormalizedFrameV1['cameraImages'][number][]).push({
               sensorId: binding.sensorId, timestampMicros: timestampsMicros[index], encodedBytes,
-              mimeType: cameraPlan.encoded.mimeType, width: calibration.width, height: calibration.height, calibrationId: binding.sensorId,
+              mimeType: cameraPlan.encoded.mimeType,
+              width: sensor.image.width,
+              height: sensor.image.height,
+              calibrationId: binding.sensorId,
             })
           }
         } else {
@@ -517,10 +556,15 @@ export function assembleGraphSceneV1(input: {
             if (matched === null) continue
             const path = entry.byTimestamp.get(matched)!
             const calibration = cameraCalibrations.get(sensorId)!
+            const sensor = sensorForId(input.compiledRecipe, sensorId, 'camera')
+            if (sensor?.modality !== 'camera' || !sensor.image) continue
             const encodedBytes = await cameraPlan.encoded.context.read(path, request.signal)
             ;(frame.cameraImages as NormalizedFrameV1['cameraImages'][number][]).push({
               sensorId, timestampMicros: micros(matched, timeline.unit), encodedBytes,
-              mimeType: cameraPlan.encoded.mimeType, width: calibration.width, height: calibration.height, calibrationId: sensorId,
+              mimeType: cameraPlan.encoded.mimeType,
+              width: sensor.image.width,
+              height: sensor.image.height,
+              calibrationId: calibration.sensorId,
             })
           }
         }
@@ -646,8 +690,10 @@ export function assembleGraphSceneV1(input: {
     for (const binding of bindings) {
       const sensor = pointSensorForBinding(binding, modality)
       if (!sensor || lidarCalibrations.has(sensor.rendererId)) continue
+      const egoFromSensor = sensorTransformById.get(sensor.id) ?? binding.egoFromSensor
       lidarCalibrations.set(sensor.rendererId, {
-        laserName: sensor.rendererId, extrinsic: binding.egoFromSensor ? [...binding.egoFromSensor] : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        laserName: sensor.rendererId,
+        extrinsic: egoFromSensor ? [...egoFromSensor] : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         beamInclinationValues: null, beamInclinationMin: 0, beamInclinationMax: 0,
       })
     }

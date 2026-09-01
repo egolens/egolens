@@ -893,7 +893,11 @@
           "params": {
             "fields": [
               "timestamp_ns"
-            ]
+            ],
+            "segmentIdentity": {
+              "labelFromSceneId": true,
+              "metadataKey": "logId"
+            }
           }
         }
       ],
