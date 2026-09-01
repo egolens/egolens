@@ -13,6 +13,10 @@ import {
   verifyBundle,
   verifySignedReceipt,
 } from './lib/oracle-receipts.mjs'
+import {
+  phase6PerceptualClipV1,
+  transportPerceptualClipV2,
+} from './lib/perceptual-clip.mjs'
 import { perceptualRasterSha256V1, perceptualRasterSha256V2 } from './lib/perceptual-raster.mjs'
 
 const PRODUCER_COMMIT = 'a42f658e27fce118789d3648e2612f5d25b99488'
@@ -56,6 +60,32 @@ test('perceptual raster hash ignores isolated compositor rounding but catches vi
   const boundaryNoisy = Buffer.from(UPNG.encode([boundaryRgba.buffer], 64, 64, 0))
   assert.equal(perceptualRasterSha256V2(boundary), perceptualRasterSha256V2(boundaryNoisy))
   assert.notEqual(perceptualRasterSha256V2(boundary), perceptualRasterSha256V2(drift))
+})
+
+test('keeps the reviewed Phase 6 fractional clip separate from transport parity', () => {
+  const rect = {
+    left: 0.46875,
+    top: 12.25,
+    right: 343.234375,
+    bottom: 172.75,
+    width: 342.765625,
+    height: 160.5,
+  }
+  assert.deepEqual(phase6PerceptualClipV1(rect), {
+    x: 0.46875,
+    y: 12.25,
+    width: 342.765625,
+    height: 160.5,
+    scale: 1,
+  })
+  assert.deepEqual(transportPerceptualClipV2(rect), {
+    x: 1,
+    y: 13,
+    width: 342,
+    height: 159,
+    scale: 1,
+  })
+  assert.equal(Math.round(phase6PerceptualClipV1(rect).width), 343)
 })
 
 function artifact(value = 1, datasetId = 'waymo', generatorCommit = CANDIDATE_COMMIT) {

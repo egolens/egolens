@@ -9,6 +9,10 @@ import {
   createFreshProcessWorkspaceV1,
   validateFreshProcessEvidenceSetV1,
 } from './lib/fresh-process-evidence.mjs'
+import {
+  phase6PerceptualClipV1,
+  transportPerceptualClipV2,
+} from './lib/perceptual-clip.mjs'
 import { selectInitialSceneMilestones } from './lib/phase6-benchmark-summary.mjs'
 import { perceptualRasterSha256V1, perceptualRasterSha256V2 } from './lib/perceptual-raster.mjs'
 
@@ -303,23 +307,30 @@ async function exerciseFeatureToggles(client, pageSession) {
   })()`)
 }
 
-async function perceptualClip(client, pageSession, selector) {
+async function perceptualRect(client, pageSession, selector) {
   return evaluate(client, pageSession, `(() => {
     const element = document.querySelector(${JSON.stringify(selector)});
     if (!(element instanceof HTMLElement)) return null;
     const rect = element.getBoundingClientRect();
-    // Capture the deterministic inner integer-pixel rectangle. Flex layout
-    // can place an edge at N + 0.5 CSS pixels and Chromium may round the
-    // same transport-neutral view to N or N + 1 across fresh processes.
-    const x = Math.ceil(rect.left);
-    const y = Math.ceil(rect.top);
     return {
-      x, y,
-      width: Math.max(0, Math.floor(rect.right) - x),
-      height: Math.max(0, Math.floor(rect.bottom) - y),
-      scale: 1,
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
     };
   })()`)
+}
+
+async function phase6PerceptualClip(client, pageSession, selector) {
+  const rect = await perceptualRect(client, pageSession, selector)
+  return rect ? phase6PerceptualClipV1(rect) : null
+}
+
+async function transportPerceptualClip(client, pageSession, selector) {
+  const rect = await perceptualRect(client, pageSession, selector)
+  return rect ? transportPerceptualClipV2(rect) : null
 }
 
 async function capturePng(client, pageSession, clip) {
@@ -373,13 +384,16 @@ async function captureConformanceArtifact(client, pageSession) {
     if (actualFrame !== capture.frameIndex) throw new Error(`Failed to present conformance frame ${capture.frameIndex}`)
     await waitFor(client, pageSession, `[...document.images].every((image) => image.complete)`)
     await delay(settleMs)
-    const clip = await perceptualClip(client, pageSession, capture.selector)
+    const clip = await phase6PerceptualClip(client, pageSession, capture.selector)
     if (!clip || clip.width <= 0 || clip.height <= 0) {
       throw new Error(`Perceptual capture selector is missing or empty: ${capture.selector}`)
     }
     const bytes = await capturePng(client, pageSession, clip)
-    let parityBytes = bytes
-    let parityClip = clip
+    let parityClip = await transportPerceptualClip(client, pageSession, capture.selector)
+    if (!parityClip || parityClip.width <= 0 || parityClip.height <= 0) {
+      throw new Error(`Transport perceptual capture selector is missing or empty: ${capture.selector}`)
+    }
+    let parityBytes = await capturePng(client, pageSession, parityClip)
     if (capture.parityViewport !== undefined) {
       const { width, height } = capture.parityViewport
       if (!Number.isSafeInteger(width) || width <= 0
@@ -398,7 +412,7 @@ async function captureConformanceArtifact(client, pageSession) {
       if (!previousStyle) throw new Error(`Parity viewport target is missing: ${capture.selector}`)
       try {
         await delay(settleMs)
-        parityClip = await perceptualClip(client, pageSession, capture.selector)
+        parityClip = await transportPerceptualClip(client, pageSession, capture.selector)
         if (parityClip?.width !== width || parityClip?.height !== height) {
           throw new Error(`Parity viewport did not settle at ${width}x${height}: ${JSON.stringify(parityClip)}`)
         }
@@ -751,7 +765,7 @@ async function runScenario(client, browserVersion, runIndex) {
       bufferUsageReportingInterval: 1000,
     }, pageSession)
   }
-  await client.send('Page.navigate', { url: withPerf(options.url) }, pageSession)
+  await client.send('Page.navigate', { url: withPerf(options.url) }, pageSession, timeoutMs)
   await waitFor(client, pageSession, 'Boolean(globalThis.__EGOLENS_PERF__)')
   await waitFor(client, pageSession, 'globalThis.__EGOLENS_BENCHMARK_READY__ === true')
   // The pre-scene comparison point must represent a committed, naturally
