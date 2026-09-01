@@ -16,6 +16,7 @@ import {
 } from '../../stores/useSceneStore'
 import { remoteTransportFixtureV1 } from './remoteTransportFixture'
 import type { ByteSourceBackingV1 } from '../source/ByteSource'
+import { installPerformanceProbe, performanceSnapshotV1 } from '../runtime/performanceProbe'
 
 /** Counted empty-profile browser/store round trip shared by all shipped recipes. */
 export async function expectPortableShareRoundTripV1(input: {
@@ -29,6 +30,8 @@ export async function expectPortableShareRoundTripV1(input: {
   sharedVerifiedRecipeCacheV1.clear()
   useSceneStore.getState().actions.reset()
   try {
+    installPerformanceProbe(true)
+    const markCountBeforeLoad = performanceSnapshotV1().marks.length
     const recipeHash = await recipeHashV1(input.compiledRecipe.recipe)
     const recipeUrl = hosted.hostJson('recipe.json', input.compiledRecipe.recipe)
     const pointSensors = input.compiledRecipe.normalizedManifest.sensors
@@ -81,6 +84,10 @@ export async function expectPortableShareRoundTripV1(input: {
       : encodeInlineShareUrlV1(hosted.url('viewer'), descriptor)
     const resolved = await useSceneStore.getState().actions.loadPortableShare(shareUrl, true)
     expect(resolved, useSceneStore.getState().error ?? 'portable share failed').not.toBeNull()
+
+    const loadMarks = performanceSnapshotV1().marks.slice(markCountBeforeLoad)
+    expect(loadMarks.some((mark) => mark.name.startsWith('egolens:scene-load-start:'))).toBe(true)
+    expect(loadMarks.some((mark) => mark.name.startsWith('egolens:dataset-ready:'))).toBe(true)
 
     const state = useSceneStore.getState()
     expect(state.status).toBe('ready')

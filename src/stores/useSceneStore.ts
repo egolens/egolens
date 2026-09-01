@@ -763,6 +763,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     loadPortableShare: async (url, counted = false, onBeforeReady) => {
       resetInternal()
       clearUrlSource()
+      markPerformanceEvent('scene-load-start', { dataset: 'portable-share' })
       set({
         status: 'loading', error: null, errorCode: null,
         loadStep: 'opening' as LoadStep, loadProgress: 0,
