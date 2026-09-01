@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "spec": "014",
+  "snapshotAt": "2026-09-01T20:18:23Z",
+  "status": "phase10-p7-phase9-author-pending",
+  "candidate": {
+    "branch": "codex/spec014-p7-baseline-freeze",
+    "commit": "dc208e4c8ddec847344b12613cfd92aa1b5a1a72",
+    "pullRequest": 34,
+    "pullRequestUrl": "https://github.com/egolens/egolens/pull/34",
+    "preserveExactHead": true
+  },
+  "completed": {
+    "implementationPhases": [
+      "10.P1",
+      "10.P2",
+      "10.P3",
+      "10.P4",
+      "10.P5",
+      "10.P6"
+    ],
+    "p7LocalMatrix": true,
+    "phase6ProtectedJudge": {
+      "passed": true,
+      "runId": 33530950883,
+      "runUrl": "https://github.com/egolens/egolens/actions/runs/33530950883",
+      "signingKeyId": "phase6-2026-08"
+    }
+  },
+  "publicEvidence": {
+    "root": "traces/phase10-protected/p7-dc208e4/public",
+    "reports": {
+      "buildBoundary": "sha256:10a8b1248f181b01a5acbd3532e4bbb0a5ba1b8907b3128b73732c6a013cabb9",
+      "regression": "sha256:251100111b5277716c864b95a3d3e32e82afc114ecbb509c0321533a2b91d3c8",
+      "negative": "sha256:d19cbe3dde53de4d918be171eefbb8308b952063e4f2f73b2ceb7de71183717d",
+      "harness": "sha256:6bf3dc58a0ccccdb28d9b4dfbcd3c50b36c9ba1c418b98b75e5406b7d82a3e0d"
+    },
+    "datasets": {
+      "waymo": "sha256:629dba2051e578bcdc64b48b8dc5e700cc12d9dabaa95ec436b3039fe357051b",
+      "nuscenes": "sha256:7083ec059058ae34fc8a15618be855f037198785ec7fd1d2f22cbbfdd3f35220",
+      "argoverse2": "sha256:dbc1bd91ecce4f3788d1c40e730564dbec5156794efc6a94241046ab4aca5ac7"
+    },
+    "phase6Receipts": {
+      "waymo": "sha256-e706c2af1914cf6aeee19b2321fed622a8d8a50f11ce356d227d293fd5f31e13",
+      "nuscenes": "sha256-5b21a133a729c61b023773524829ca0ad118816ac1939a716cbd54e03c94ab6a",
+      "argoverse2": "sha256-fd167bd23f824322fa5c9e6d2f82137d1c01e993e6a519dabaadd6b0f55d9670"
+    }
+  },
+  "pending": [
+    "isolated Phase 9 author outputs",
+    "Phase 9 protected judge and public receipt gate",
+    "P7 baseline freeze and baseline gate",
+    "content-blind held-out case manifest freeze",
+    "A2D2 rung",
+    "KITTI Raw rung",
+    "ONCE rung",
+    "PandaSet rung",
+    "Spec 014 shipped update and final PR verification"
+  ],
+  "authorTasks": [
+    {
+      "threadId": "01a05e47-0b6f-7c90-9e68-c1f78b0c2a92",
+      "title": "Phase 9 Adapter Amnesia author — dc208e4",
+      "state": "waiting-on-desktop-approval",
+      "preferred": true,
+      "producedArtifacts": false,
+      "inspectedSource": false
+    },
+    {
+      "threadId": "01a05e9b-4a3b-73c0-847f-9c91ca983dd7",
+      "title": "Phase 9 Adapter Amnesia author — dc208e4 (headless)",
+      "state": "diagnostic-failure-eperm-then-chrome-sigabrt",
+      "preferred": false,
+      "producedArtifacts": false,
+      "inspectedSource": false
+    }
+  ],
+  "heldOut": {
+    "semanticInspectionStarted": false,
+    "contentBlindManifestFreezeStarted": false,
+    "sourceMounted": false,
+    "datasets": [
+      "A2D2",
+      "KITTI Raw",
+      "ONCE",
+      "PandaSet"
+    ]
+  },
+  "nextAction": "Resume the preferred isolated real-browser Phase 9 author task from the Mac desktop, then follow benchmarks/oracle/PHASE9_ADAPTER_AMNESIA.md without changing the candidate commit.",
+  "briefing": "docs/handoffs/spec_014_p7_dc208e4.md"
+}
