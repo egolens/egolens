@@ -9,6 +9,7 @@ import {
   createFreshProcessWorkspaceV1,
   validateFreshProcessEvidenceSetV1,
 } from './lib/fresh-process-evidence.mjs'
+import { selectInitialSceneMilestones } from './lib/phase6-benchmark-summary.mjs'
 import { perceptualRasterSha256V1, perceptualRasterSha256V2 } from './lib/perceptual-raster.mjs'
 
 const CHROME = process.env.EGOLENS_CHROME
@@ -515,11 +516,7 @@ function tracedInitialSceneFrameRate(run, initialGeneration) {
 function summarizeRun(run) {
   // Initial-load milestones come from the coordinated post-warmup snapshot so
   // later scene generations cannot be paired with the first run's start mark.
-  const initialMarks = run.snapshots.afterWarmup.app?.marks ?? []
-  const start = initialMarks.find((mark) => mark.name.startsWith('egolens:scene-load-start:'))
-  const ready = initialMarks.find((mark) => mark.name.startsWith('egolens:dataset-ready:'))
-  const first = initialMarks.find((mark) => mark.name.startsWith('egolens:first-usable-frame:'))
-  const initialGeneration = ready?.detail?.sceneGeneration ?? first?.detail?.sceneGeneration
+  const { start, ready, first, initialGeneration } = selectInitialSceneMilestones(run)
   // The app snapshot is intentionally bounded and can contain only the last
   // cross-dataset generations after a long soak. Trace events retain the full
   // run, so warm/rapid latency must select only the initially loaded scene and

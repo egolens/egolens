@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "test:oracle-receipts": "node --test scripts/oracle-receipts.node.mjs",
     "test:adapter-amnesia": "node --test scripts/amnesia-evidence.node.mjs",
-    "test:phase10-evidence": "node --test scripts/phase10-evidence.node.mjs",
+    "test:phase10-evidence": "node --test scripts/phase10-evidence.node.mjs scripts/phase6-benchmark-summary.node.mjs",
     "benchmark:phase6": "node scripts/phase6-cdp-benchmark.mjs",
     "benchmark:phase6:compare": "node scripts/phase6-compare-benchmarks.mjs",
     "oracle:judge": "node scripts/phase6-oracle-judge.mjs",
