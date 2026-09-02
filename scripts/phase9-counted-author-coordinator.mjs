@@ -1022,6 +1022,7 @@ export function buildAuthorPrompt({ datasetId, caseId, capabilities, port, contr
     'Use rendered /view and /review for the human-review controls. Finalize only after public sample validation proves the source facts and all required capabilities.',
     'If the public surface has a capability gap, use other public inspect modes and validator diagnostics to test a minimal hypothesis. If no successful public sample can establish it, stop with authoring-observability-gap and do not export.',
     'Never guess merely to obtain an export. The hidden judge is one-shot and unavailable here.',
+    'Every recipe you submit must declare provenance.author as "codex" and provenance.createdAt; the counted export is rejected otherwise.',
     'When the recipe is valid, finalize, complete rendered review, and call /export exactly once. The broker chooses the output path.',
   ].join('\n')
 }

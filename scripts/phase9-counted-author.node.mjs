@@ -293,6 +293,7 @@ test('author prompt exposes public capabilities and no protected path or expecte
   assert.match(prompt, /Public required capabilities:/u)
   assert.match(prompt, /General public knowledge/u)
   assert.match(prompt, /A rejected revision retains no candidate: correct the complete recipe and submit it again/u)
+  assert.match(prompt, /provenance\.author as "codex"/u)
   assert.doesNotMatch(prompt, /\/Users\/|\/private\/tmp\/|expected.*hash/iu)
   const args = controllerExecArguments({ controlRoot: '/private/tmp/control', prompt })
   for (const feature of ['memories', 'external_agent_memory_import', 'shell_snapshot', 'web_search_request']) {
