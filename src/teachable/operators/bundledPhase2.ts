@@ -285,8 +285,9 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         intrinsicMatrixField: { type: 'string', minLength: 1, maxLength: 256 },
         quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
         translationField: { type: 'string', minLength: 1, maxLength: 256 },
-        rotationForm: { enum: ['quaternion', 'axes'] },
+        rotationForm: { enum: ['quaternion', 'axes', 'matrix'] },
         axisFields: fieldNames(2),
+        rotationMatrixField: { type: 'string', minLength: 1, maxLength: 256 },
         frameIdSuffix: { type: 'string', minLength: 1, maxLength: 32 },
         defaultWidth: positiveLimit,
         defaultHeight: positiveLimit,
@@ -353,6 +354,12 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     maxRecords: positiveLimit,
     maxDepth: { type: 'integer', minimum: 1, maximum: 256 },
   }, ['recordPath']), recordContract(['rows'])],
+  ['records.explode', recordContract(['rows']), closedParams({
+    path: { type: 'string', minLength: 1, maxLength: 256 },
+    indexField: { type: 'string', minLength: 1, maxLength: 128 },
+    prefix: { type: 'string', maxLength: 64 },
+    keepNested: { type: 'boolean' },
+  }, ['path']), recordContract(['rows'])],
   ['records.derive', recordContract(['rows']), closedParams({
     derive: {
       type: 'array', minItems: 1, maxItems: 32,
@@ -516,8 +523,9 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
         quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
         translationField: { type: 'string', minLength: 1, maxLength: 256 },
-        rotationForm: { enum: ['quaternion', 'axes'] },
+        rotationForm: { enum: ['quaternion', 'axes', 'matrix'] },
         axisFields: fieldNames(2),
+        rotationMatrixField: { type: 'string', minLength: 1, maxLength: 256 },
       }, [
         'output', 'sampleDataCalibrationKeyField', 'calibrationKeyField', 'calibrationSensorKeyField',
         'sensorKeyField', 'sensorIdField', 'preferredSensorId', 'poseReferenceField', 'poseKeyField',
@@ -553,8 +561,9 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
         quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
         translationField: { type: 'string', minLength: 1, maxLength: 256 },
-        rotationForm: { enum: ['quaternion', 'axes'] },
+        rotationForm: { enum: ['quaternion', 'axes', 'matrix'] },
         axisFields: fieldNames(2),
+        rotationMatrixField: { type: 'string', minLength: 1, maxLength: 256 },
         outputFrame: { type: 'string', minLength: 1, maxLength: 96 },
       }, [
         'mode', 'pathField', 'frameKeyField', 'recordKeyField', 'timestampField', 'recordCalibrationKeyField',

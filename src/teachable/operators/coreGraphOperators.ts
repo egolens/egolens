@@ -68,6 +68,22 @@ function integerTimestamp(value: unknown, label: string): bigint {
   if (typeof value === 'bigint') return value
   if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value)
   if (typeof value === 'string' && /^-?\d+$/u.test(value)) return BigInt(value)
+  // Calendar timestamps ("2011-09-26 13:02:25.964238") become microseconds
+  // since the Unix epoch (UTC), keeping sub-millisecond digits exactly.
+  const calendar = typeof value === 'string'
+    ? /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})?$/u.exec(value.trim())
+    : null
+  if (calendar) {
+    const [, year, month, day, hour, minute, second, fraction = '', zone] = calendar
+    let seconds = BigInt(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)) / 1000)
+    if (zone && zone !== 'Z') {
+      const sign = zone.startsWith('-') ? -1n : 1n
+      const digits = zone.slice(1).replace(':', '')
+      seconds -= sign * (BigInt(digits.slice(0, 2)) * 3600n + BigInt(digits.slice(2)) * 60n)
+    }
+    const micros = BigInt((fraction + '000000').slice(0, 6))
+    return seconds * 1_000_000n + micros
+  }
   throw new Error(`GRAPH_TIMESTAMP_INVALID: ${label}`)
 }
 
@@ -517,6 +533,38 @@ const xmlRecords: CoreOperatorImplementationV1 = async (inputs, params, context)
   'GRAPH_XML_DECODE_FAILED',
 )
 
+/**
+ * One row per element of a nested array: a KITTI tracklet with N poses
+ * becomes N rows carrying the parent's scalar fields, the element's fields,
+ * and the element index (frame = first_frame + index is one records.derive
+ * away). Objects instead of arrays yield one row.
+ */
+const recordsExplode: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const rows = await materialize(inputs.rows)
+  const path = String(params.path).split('.').filter((segment) => segment.length > 0)
+  const indexField = typeof params.indexField === 'string' ? params.indexField : null
+  const prefix = typeof params.prefix === 'string' ? params.prefix : ''
+  const keepNested = params.keepNested === true
+  const out: Record<string, unknown>[] = []
+  for (const row of rows) {
+    let nested: unknown = row
+    for (const segment of path) nested = typeof nested === 'object' && nested !== null ? (nested as Record<string, unknown>)[segment] : undefined
+    const elements = Array.isArray(nested) ? nested : nested === undefined ? [] : [nested]
+    const parent: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(row)) {
+      if (!keepNested && key === path[0]) continue
+      parent[key] = value
+    }
+    elements.forEach((element, index) => {
+      const fields = typeof element === 'object' && element !== null && !Array.isArray(element)
+        ? Object.fromEntries(Object.entries(element as Record<string, unknown>).map(([key, value]) => [`${prefix}${key}`, value]))
+        : { [`${prefix}value`]: element }
+      out.push({ ...parent, ...fields, ...(indexField ? { [indexField]: index } : {}) })
+    })
+  }
+  return { rows: { kind: 'records', rows: out } satisfies GraphRecordsV1 }
+}
+
 const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
   const candidate = inputs.lidar ?? inputs.rows ?? inputs.samples
   const unit = String(params.timestampUnit ?? 'us') as GraphTimelineV1['unit']
@@ -746,7 +794,19 @@ const tokenJoin: CoreOperatorImplementationV1 = async (inputs, params) => {
 
 /** Sensor pose from a calibration row: unit quaternion, or two basis axes (z = x × y). */
 function calibrationPose(calibration: Readonly<Record<string, unknown>>, params: Readonly<Record<string, unknown>>): number[] {
-  const translation = finiteTuple(calibration[String(params.translationField)], 3, String(params.translationField)) as [number, number, number]
+  const translation = params.rotationForm === 'matrix' && typeof params.translationField !== 'string'
+    ? [0, 0, 0] as [number, number, number]
+    : finiteTuple(calibration[String(params.translationField)], 3, String(params.translationField)) as [number, number, number]
+  if (params.rotationForm === 'matrix') {
+    const field = String(params.rotationMatrixField)
+    const values = list(calibration[field], field).map((entry, index) => finite(entry, `${field}[${index}]`))
+    if (values.length !== 9 && values.length !== 12 && values.length !== 16) throw new Error(`GRAPH_ROTATION_MATRIX_INVALID: ${field} must hold 9, 12, or 16 row-major values`)
+    const stride = values.length === 9 ? 3 : 4
+    const r = (row: number, column: number) => values[row * stride + column]!
+    // Column-major 4×4 (ego ← sensor); a 3×4/4×4 matrix also carries its own translation.
+    const t = values.length === 9 ? translation : [r(0, 3), r(1, 3), r(2, 3)]
+    return [r(0, 0), r(1, 0), r(2, 0), 0, r(0, 1), r(1, 1), r(2, 1), 0, r(0, 2), r(1, 2), r(2, 2), 0, t[0]!, t[1]!, t[2]!, 1]
+  }
   if (params.rotationForm === 'axes') {
     const axisFields = fieldList(params, 'axisFields', [])
     if (axisFields.length !== 2) throw new Error('GRAPH_ROTATION_AXES_INVALID: axisFields needs the x-axis and y-axis field names')
@@ -997,8 +1057,12 @@ function relationalCameraPlan(
     if (String(sensor[modalityField]) !== cameraModality) continue
     const matrix = calibration[intrinsicMatrixField]
     if (!Array.isArray(matrix)) continue
-    const row0 = finiteTuple(matrix[0], 3, `${intrinsicMatrixField}[0]`)
-    const row1 = finiteTuple(matrix[1], 3, `${intrinsicMatrixField}[1]`)
+    // Nested rows ([[fx,0,cx],[0,fy,cy],[0,0,1]]) or a flat row-major 3×3 / 3×4
+    // (KITTI K_xx / P_rect_xx) both describe the pinhole intrinsics.
+    const flat = matrix.length === 9 || matrix.length === 12 ? matrix.map((entry, index) => finite(entry, `${intrinsicMatrixField}[${index}]`)) : null
+    const stride = matrix.length === 12 ? 4 : 3
+    const row0 = flat ? [flat[0]!, flat[1]!, flat[2]!] : finiteTuple(matrix[0], 3, `${intrinsicMatrixField}[0]`)
+    const row1 = flat ? [flat[stride]!, flat[stride + 1]!, flat[stride + 2]!] : finiteTuple(matrix[1], 3, `${intrinsicMatrixField}[1]`)
     const [width, height] = dimensionsByCalibration.get(key) ?? [Number(params.defaultWidth), Number(params.defaultHeight)]
     calibrations.set(sensorId, {
       sensorId, frameId: `${sensorId}${String(params.frameIdSuffix)}`, width, height,
@@ -1072,13 +1136,13 @@ const bindCameraFrame: CoreOperatorImplementationV1 = async (inputs, params) => 
   const encoded = inputs.bytes as GraphEncodedCollectionV1
   if (encoded?.kind !== 'encoded-collection') throw new Error('GRAPH_CAMERA_INPUT_INVALID')
   if (isRecords(inputs.sampleData)) return { images: relationalCameraPlan(encoded, inputs, params) }
-  if (!isTable(inputs.intrinsics) || !isTable(inputs.extrinsics)) throw new Error('GRAPH_CAMERA_INPUT_INVALID')
-  const intrinsics = await tableRows(inputs.intrinsics)
+  if (!(isTable(inputs.intrinsics) || isRecords(inputs.intrinsics)) || !(isTable(inputs.extrinsics) || isRecords(inputs.extrinsics))) throw new Error('GRAPH_CAMERA_INPUT_INVALID')
+  const intrinsics = await materialize(inputs.intrinsics)
   const sensorField = String(params.sensorField ?? 'sensor_name')
   const intrinsic = fieldList(params, 'intrinsicFields', ['fx_px', 'fy_px', 'cx_px', 'cy_px', 'k1', 'k2', 'k3', 'width_px', 'height_px'])
   const quaternion = fieldList(params, 'extrinsicQuaternionFields', ['qw', 'qx', 'qy', 'qz'])
   const translation = fieldList(params, 'extrinsicTranslationFields', ['tx_m', 'ty_m', 'tz_m'])
-  const extrinsics = new Map((await tableRows(inputs.extrinsics)).map((row) => [String(row[sensorField]), row]))
+  const extrinsics = new Map((await materialize(inputs.extrinsics)).map((row) => [String(row[sensorField]), row]))
   const calibrations = new Map<string, NormalizedCameraCalibrationV1>()
   for (const row of intrinsics) {
     const sensorId = String(row[sensorField])
@@ -1152,7 +1216,7 @@ function relationalBoxes(
 const normalizeBoxes3d: CoreOperatorImplementationV1 = async (inputs, params) => {
   if (isRecords(inputs.annotations)) return { boxes: relationalBoxes(inputs, params) }
   const candidate = inputs.rows ?? inputs.annotations
-  if (!isTable(candidate) && !isParquet(candidate)) throw new Error('GRAPH_BOX_INPUT_INVALID')
+  if (!isTable(candidate) && !isParquet(candidate) && !isRecords(candidate)) throw new Error('GRAPH_BOX_INPUT_INVALID')
   const timestampField = String(params.timestampField ?? 'timestamp_ns')
   const classField = String(params.classField ?? 'category')
   const objectIdField = String(params.objectIdField ?? 'track_uuid')
@@ -1394,6 +1458,7 @@ export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOpe
   'text.table': textTable,
   'xml.records': xmlRecords,
   'records.derive': recordsDerive,
+  'records.explode': recordsExplode,
   'timeline.sort': timelineSort,
   'geometry.relative_poses': relativePoses,
   'geometry.geodetic_poses': geodeticPoses,
