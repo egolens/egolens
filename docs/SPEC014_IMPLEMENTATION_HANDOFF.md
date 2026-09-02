@@ -564,6 +564,16 @@ Body outline (claim only what is listed in
   Resume with `~/Workspace/egolens-p7/repin-and-run-waymo.sh` (re-pins the
   verifier/judge to main, creates a fresh candidate commit, starts Waymo),
   then nuScenes and Argoverse 2 with the same candidate commit.
+- 2026-09-02 (while blocked): the Phase 9-independent P7 prerequisites are
+  done. Protected source-case manifests and catalogs for `waymo`
+  (`waymo-open-dataset-v2.0.1`, 13 files), `nuscenes` (`nuscenes-v1.0-mini`,
+  32,042 files), and `argoverse2` (`argoverse2-sensor-v2.0`, 3,039 files) were
+  generated with role `D`, order `0`, `complete-official-subtree`, and every
+  capability from `preflight-requirements.json`, bound to verifier `6e6d520`
+  (trust manifest `sha256:aba1c081…290e0fe`). Public summaries contain no
+  absolute paths. They live outside the repo under the local P7 work root
+  (`protected/<dataset>/`, `public/<dataset>/`) and must be regenerated
+  (delete first; creation is exclusive) if the verifier is re-pinned.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
