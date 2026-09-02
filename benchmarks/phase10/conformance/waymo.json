@@ -1,0 +1,70 @@
+{
+  "datasetId": "waymo",
+  "caseId": "phase6-waymo-rich-001",
+  "requiredCapabilities": [
+    "boxes2d",
+    "boxes3d",
+    "cameraImages",
+    "cameraSegmentation",
+    "egoPoses",
+    "lidarSegmentation",
+    "pointClouds",
+    "segmentMetadata",
+    "timeline",
+    "trajectories"
+  ],
+  "frameIndices": [0, 29, 79, 129, 197],
+  "sampleValuesPerBuffer": 64,
+  "perceptualCaptures": [
+    {
+      "id": "front-camera-frame-29",
+      "frameIndex": 29,
+      "selector": "[data-egolens-camera-id=\"1\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "front-camera-segmentation-frame-129",
+      "frameIndex": 129,
+      "selector": "[data-egolens-camera-id=\"1\"]",
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "box",
+        "cameraSegmentation": true,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-frame-0",
+      "frameIndex": 0,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "parityViewport": { "width": 1440, "height": 600 },
+      "presentation": {
+        "colormapMode": "distance",
+        "boxMode": "off",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    },
+    {
+      "id": "viewport-lidar-segmentation-frame-79",
+      "frameIndex": 79,
+      "selector": "[data-egolens-capture-region=\"viewport\"]",
+      "parityViewport": { "width": 1440, "height": 600 },
+      "presentation": {
+        "colormapMode": "segment",
+        "boxMode": "box",
+        "cameraSegmentation": false,
+        "activeCamera": null,
+        "controlPanelOpen": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+(version 1)
+(deny default)
+
+; Counted Phase 10 browsers execute candidate JavaScript while holding either
+; read-only access to the exact local dataset root or access to one protected
+; loopback source host.  The deny-default profile prevents those bytes from
+; leaving through ambient files, another local service, or external network.
+(allow process*)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+(allow mach*)
+(allow ipc-posix*)
+(allow iokit*)
+
+; Immutable operating-system and Chromium runtime.  No user-home or general
+; temporary subtree is readable.
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (literal "/var")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/ColorSync")
+  (subpath "/Library/Preferences")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone")
+  (subpath (param "CHROME_ROOT")))
+
+; For local-directory mode these parameters name the exact protected source.
+; Remote/share mode points them at the already-private empty profile, granting
+; no additional source file capability.
+(allow file-read* file-test-existence
+  (subpath (param "SOURCE_ROOT"))
+  (subpath (param "SOURCE_REAL_ROOT")))
+
+; All mutable browser state is case-private and destroyed after every process.
+(allow file-read* file-write* file-test-existence
+  (subpath (param "BROWSER_PROFILE"))
+  (subpath (param "BROWSER_PROFILE_REAL"))
+  (subpath (param "RUNTIME_SCRATCH"))
+  (subpath (param "RUNTIME_SCRATCH_REAL")))
+
+; Chrome's macOS ProcessSingleton uses a randomized com.google.Chrome.* Unix
+; socket in the per-user Darwin temporary directory.  Only that prefix may be
+; created; unrelated entries remain unreadable and unwritable.
+(allow file-read-metadata file-test-existence
+  (subpath (param "SYSTEM_SOCKET_ROOT"))
+  (subpath (param "SYSTEM_SOCKET_REAL_ROOT")))
+(allow file-write*
+  (require-all
+    (subpath (param "SYSTEM_SOCKET_ROOT"))
+    (regex "/com\\.google\\.Chrome\\.[A-Za-z0-9]+(/.*)?$"))
+  (require-all
+    (subpath (param "SYSTEM_SOCKET_REAL_ROOT"))
+    (regex "/com\\.google\\.Chrome\\.[A-Za-z0-9]+(/.*)?$")))
+
+; Traversal metadata is sufficient to reach the explicit mounts without
+; granting their parents' contents.
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "CHROME_ROOT"))
+  (path-ancestors (param "SOURCE_REAL_ROOT"))
+  (path-ancestors (param "BROWSER_PROFILE_REAL"))
+  (path-ancestors (param "RUNTIME_SCRATCH_REAL")))
+
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+; Chromium chooses its CDP port itself via --remote-debugging-port=0.  It may
+; bind loopback for that endpoint, but outbound traffic is limited to the exact
+; immutable app and protected source endpoints selected by the trusted runner.
+(allow network-bind network-inbound
+  (local ip "localhost:*"))
+(allow network-outbound
+  (remote ip (param "APP_REMOTE_ENDPOINT"))
+  (remote ip (param "SOURCE_REMOTE_ENDPOINT")))
+
+; Chromium's process singleton and internal helpers use only these Unix-socket
+; roots.  No general Unix-domain socket access is admitted.
+(allow network-bind network-inbound
+  (local unix-socket (subpath (param "BROWSER_PROFILE_REAL")))
+  (local unix-socket (subpath (param "RUNTIME_SCRATCH_REAL")))
+  (local unix-socket (subpath (param "SYSTEM_SOCKET_ROOT")))
+  (local unix-socket (subpath (param "SYSTEM_SOCKET_REAL_ROOT"))))
+(allow network-outbound
+  (remote unix-socket (subpath (param "BROWSER_PROFILE_REAL")))
+  (remote unix-socket (subpath (param "RUNTIME_SCRATCH_REAL")))
+  (remote unix-socket (subpath (param "SYSTEM_SOCKET_ROOT")))
+  (remote unix-socket (subpath (param "SYSTEM_SOCKET_REAL_ROOT"))))

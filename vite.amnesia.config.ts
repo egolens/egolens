@@ -6,7 +6,7 @@ import react from '@vitejs/plugin-react'
 function sourceCommit(): string {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: __dirname,
+      cwd: import.meta.dirname,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
@@ -52,12 +52,16 @@ function enforceAmnesiaModuleBoundary(): Plugin {
 
 export default defineConfig({
   base: './',
+  // Same auto-discovery lockdown as vite.config.ts: no `.env*` loading and an
+  // inert inline PostCSS configuration.
+  envDir: false,
+  css: { postcss: { plugins: [] } },
   define: { __EGOLENS_GIT_COMMIT__: JSON.stringify(sourceCommit()) },
   plugins: [react(), enforceAmnesiaModuleBoundary()],
   build: {
     outDir: 'dist-amnesia-author',
     emptyOutDir: true,
     manifest: true,
-    rollupOptions: { input: path.resolve(__dirname, 'amnesia.html') },
+    rollupOptions: { input: path.resolve(import.meta.dirname, 'amnesia.html') },
   },
 })

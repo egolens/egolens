@@ -1,0 +1,62 @@
+(version 1)
+(deny default)
+
+; Reviewed Phase 10 test boundary. Candidate modules execute only from a fresh
+; detached exact-commit worktree. The verifier checkout, dependency closure,
+; candidate source, and Node runtime are read-only; only the fresh run root is
+; writable. Tests may exercise loopback transports but have no external
+; network or access to operator homes, credentials, datasets, or evidence.
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+(allow mach*)
+(allow ipc-posix*)
+(allow iokit*)
+
+; sandbox-exec may start the one reviewed Node runner. Candidate modules cannot
+; re-exec Node, a shell, or setsid; Vitest's thread pool may execute only the
+; exact dependency-closure-bound esbuild helper.
+(deny process-exec (literal (param "NODE_BINARY")))
+(with-filter (process-path "/usr/bin/sandbox-exec")
+  (allow process-exec file-read* file-map-executable
+    (literal (param "NODE_BINARY"))))
+(allow process-exec file-read* file-map-executable
+  (literal (param "ESBUILD_BINARY")))
+
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/ColorSync")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone")
+  (subpath (param "NODE_RUNTIME_ROOT"))
+  (subpath (param "VERIFIER_ROOT"))
+  (subpath (param "CANDIDATE_STAGE_ROOT")))
+
+(allow file-read* file-write* file-test-existence file-map-executable
+  (subpath (param "WRITE_ROOT")))
+
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "NODE_RUNTIME_ROOT"))
+  (path-ancestors (param "VERIFIER_ROOT"))
+  (path-ancestors (param "CANDIDATE_STAGE_ROOT"))
+  (path-ancestors (param "WRITE_ROOT")))
+
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+(allow network-bind network-inbound (local ip "localhost:*"))
+(allow network-outbound (remote ip "localhost:*"))

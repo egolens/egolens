@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-source-case-manifest-v1.schema.json",
+  "title": "EgoLens protected source case manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "verifierBinding", "release", "case", "files", "aggregate",
+    "sourceManifestHash", "manifestHash"
+  ],
+  "properties": {
+    "schema": { "const": "egolens-source-case-manifest-v1" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasetId", "releaseId", "officialSourceUrl", "officialArchiveChecksum"],
+      "properties": {
+        "datasetId": { "$ref": "#/$defs/id" },
+        "releaseId": { "$ref": "#/$defs/id" },
+        "officialSourceUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "officialArchiveChecksum": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["algorithm", "value"],
+              "properties": {
+                "algorithm": { "enum": ["md5", "sha1", "sha256", "sha512"] },
+                "value": { "type": "string", "pattern": "^[0-9a-f]+$", "minLength": 32, "maxLength": 128 }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId", "role", "reserveFor", "order", "originalForm",
+        "unchangedOriginal", "archiveExtractionOnly", "declaredCapabilities"
+      ],
+      "properties": {
+        "caseId": { "$ref": "#/$defs/id" },
+        "role": { "enum": ["D", "A", "B", "reserve"] },
+        "reserveFor": { "oneOf": [{ "type": "null" }, { "enum": ["A", "B"] }] },
+        "order": { "type": "integer", "minimum": 0 },
+        "originalForm": { "enum": ["official-archive", "extracted-official-root", "complete-official-subtree"] },
+        "unchangedOriginal": { "const": true },
+        "archiveExtractionOnly": { "type": "boolean" },
+        "declaredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "size": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "sha256": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileCount", "totalBytes"],
+      "properties": {
+        "fileCount": { "type": "integer", "minimum": 1 },
+        "totalBytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "sourceManifestHash": { "$ref": "#/$defs/hash" },
+    "manifestHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "verifierBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash", "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash", "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" }, "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" }, "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 }, "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" }, "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" }, "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    }
+  }
+}

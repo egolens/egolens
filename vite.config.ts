@@ -3,14 +3,37 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 import { createReadStream, statSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 
 function sourceCommit(): string {
+  if (/^[0-9a-f]{40}$/u.test(process.env.EGOLENS_GIT_COMMIT ?? '')) {
+    return process.env.EGOLENS_GIT_COMMIT as string
+  }
   try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: __dirname,
+    return execFileSync('/usr/bin/git', [
+      '-c', 'core.hooksPath=/dev/null', 'rev-parse', 'HEAD',
+    ], {
+      cwd: import.meta.dirname,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+function sourceTreeHash(): string {
+  if (/^sha256:[0-9a-f]{64}$/u.test(process.env.EGOLENS_SOURCE_TREE_HASH ?? '')) {
+    return process.env.EGOLENS_SOURCE_TREE_HASH as string
+  }
+  try {
+    const index = execFileSync('/usr/bin/git', [
+      '-c', 'core.hooksPath=/dev/null', 'ls-files', '--stage', '-z',
+    ], {
+      cwd: import.meta.dirname,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return `sha256:${createHash('sha256').update(index).digest('hex')}`
   } catch {
     return 'unknown'
   }
@@ -27,7 +50,7 @@ function installLocalEvidenceDataMiddleware(middlewares: Connect.Server): void {
     if (req.url !== '/api/segments') return next()
 
     const dataPath = process.env.VITE_WAYMO_DATA_PATH || './waymo_data'
-    const posePath = path.resolve(__dirname, dataPath, 'vehicle_pose')
+    const posePath = path.resolve(import.meta.dirname, dataPath, 'vehicle_pose')
     try {
       const files = readdirSync(posePath)
       const segments = files
@@ -51,10 +74,10 @@ function installLocalEvidenceDataMiddleware(middlewares: Connect.Server): void {
     const localRoots = [
       {
         prefix: '/waymo_data/',
-        root: path.resolve(__dirname, process.env.VITE_WAYMO_DATA_PATH || './waymo_data'),
+        root: path.resolve(import.meta.dirname, process.env.VITE_WAYMO_DATA_PATH || './waymo_data'),
       },
-      { prefix: '/v1.0-mini/', root: path.resolve(__dirname, './v1.0-mini') },
-      { prefix: '/argo/', root: path.resolve(__dirname, './argo') },
+      { prefix: '/v1.0-mini/', root: path.resolve(import.meta.dirname, './v1.0-mini') },
+      { prefix: '/argo/', root: path.resolve(import.meta.dirname, './argo') },
     ]
     const match = localRoots.find(({ prefix }) => pathname.startsWith(prefix))
     if (!match) return next()
@@ -183,13 +206,21 @@ export default defineConfig(() => ({
   // Served from the apex custom domain (public/CNAME), so assets live at the root.
   // GitHub Pages 301s egolens.github.io/egolens/* → egolens.org/*, keeping old links alive.
   base: '/',
+  // Reviewed-build hardening: never auto-load candidate-controlled `.env*`
+  // files and never discover/execute a candidate `postcss.config.*`. The
+  // reviewed build compares this file byte-for-byte, so these are the only
+  // env/PostCSS inputs a build can use. `@vitejs/plugin-react` already pins
+  // `babelrc: false` and `configFile: false`.
+  envDir: false as const,
+  css: { postcss: { plugins: [] } },
   define: {
     __EGOLENS_GIT_COMMIT__: JSON.stringify(sourceCommit()),
+    __EGOLENS_SOURCE_TREE_HASH__: JSON.stringify(sourceTreeHash()),
   },
   plugins: [react(), releaseR3fRetainedRoots(), serveLocalEvidenceData()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   server: {

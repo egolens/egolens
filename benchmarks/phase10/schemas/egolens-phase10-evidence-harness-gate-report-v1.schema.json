@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-phase10-evidence-harness-gate-report-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "candidateCommit", "verifierBinding", "execution", "tests", "nestedNegativeGateSkipped", "schemaHashes", "freshProcessSelfTest", "tapHash", "passed", "reportHash"],
+  "properties": {
+    "schema": { "const": "egolens-phase10-evidence-harness-gate-report-v1" },
+    "candidateCommit": { "$ref": "#/$defs/commit" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
+    "execution": { "$ref": "#/$defs/execution" },
+    "tests": { "type": "integer", "minimum": 6 },
+    "nestedNegativeGateSkipped": { "type": "boolean" },
+    "schemaHashes": { "type": "array", "minItems": 11, "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } },
+    "freshProcessSelfTest": { "const": true },
+    "tapHash": { "$ref": "#/$defs/hash" },
+    "passed": { "const": true },
+    "reportHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runner", "freshRunId", "startedAt", "finishedAt", "commandHash", "resultHash", "testManifestHash", "candidatePreSourceTreeHash", "candidatePostSourceTreeHash", "verifierPreSourceTreeHash", "verifierPostSourceTreeHash", "candidateRepositoryClean", "verifierCheckoutClean", "sandbox", "network", "externalNetworkDenied", "protectedRootsDenied", "trackedSourceWriteDenied", "detachedChildExecDenied", "residualAudit", "residualProcessCount"],
+      "properties": {
+        "runner": { "const": "egolens-phase10-reviewed-test-runner-v1" },
+        "freshRunId": { "type": "string", "format": "uuid" },
+        "startedAt": { "type": "string", "format": "date-time" }, "finishedAt": { "type": "string", "format": "date-time" },
+        "commandHash": { "$ref": "#/$defs/hash" }, "resultHash": { "$ref": "#/$defs/hash" }, "testManifestHash": { "$ref": "#/$defs/hash" },
+        "candidatePreSourceTreeHash": { "$ref": "#/$defs/hash" }, "candidatePostSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierPreSourceTreeHash": { "$ref": "#/$defs/hash" }, "verifierPostSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "candidateRepositoryClean": { "const": true }, "verifierCheckoutClean": { "const": true },
+        "sandbox": { "const": "macos-seatbelt-deny-default" }, "network": { "const": "loopback-only" },
+        "externalNetworkDenied": { "const": true }, "protectedRootsDenied": { "const": true },
+        "trackedSourceWriteDenied": { "const": true }, "detachedChildExecDenied": { "const": true },
+        "residualAudit": { "enum": ["ps-environment-scan", "process-group-nested"] },
+        "residualProcessCount": { "const": 0 }
+      }
+    },
+    "verifierBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash", "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash", "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" }, "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" }, "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 }, "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" }, "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" }, "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    }
+  }
+}

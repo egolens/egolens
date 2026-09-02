@@ -210,10 +210,18 @@ export interface GraphCameraBindingV1 {
   readonly sensorId: string
 }
 
+export interface GraphSensorTransformV1 {
+  readonly sensorId: string
+  readonly egoFromSensor: Float64Array
+}
+
 export interface GraphCameraPlanV1 {
   readonly kind: 'camera-plan'
   readonly encoded: GraphEncodedCollectionV1
   readonly calibrations: ReadonlyMap<string, NormalizedCameraCalibrationV1>
+  /** Ordered source calibration observations. Relational datasets may retain
+   * repeated sensor entries because that order is part of conformance v1. */
+  readonly sensorTransforms?: readonly GraphSensorTransformV1[]
   readonly maxDelta: bigint
   readonly bindings?: readonly GraphCameraBindingV1[]
 }
@@ -312,6 +320,12 @@ export interface GraphSegmentIndexV1 {
 export interface GraphRecordsV1 {
   readonly kind: 'records'
   readonly rows: readonly Readonly<Record<string, unknown>>[]
+  /** Optional recipe-declared template for a single source-root scene whose
+   * identity is supplied only when the graph is bound. */
+  readonly segmentIdentity?: {
+    readonly labelFromSceneId: boolean
+    readonly metadataKey?: string
+  }
 }
 
 export type GraphTypedValueV1 =

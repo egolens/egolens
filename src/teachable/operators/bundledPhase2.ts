@@ -373,6 +373,15 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         frameId: { type: 'string', minLength: 1, maxLength: 96 },
         aliases: { type: 'object', additionalProperties: { type: 'string', minLength: 1, maxLength: 256 } },
         where: { type: 'array', maxItems: 32, items: { type: 'object', properties: { field: { type: 'string' }, equals: {} }, required: ['field', 'equals'], additionalProperties: false } },
+        segmentIdentity: {
+          type: 'object',
+          properties: {
+            labelFromSceneId: { type: 'boolean' },
+            metadataKey: { type: 'string', minLength: 1, maxLength: 128 },
+          },
+          required: ['labelFromSceneId'],
+          additionalProperties: false,
+        },
       }, ['fields']),
       closedParams({
         mode: { const: 'segments' },

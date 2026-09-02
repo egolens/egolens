@@ -15,7 +15,8 @@ jobs:
   judge:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'codex/spec-006-phase-6' &&
+      (github.event.pull_request.head.ref == 'codex/spec-006-phase-6' ||
+       github.event.pull_request.head.ref == 'codex/spec014-p7-baseline-freeze') &&
       contains(github.event.pull_request.labels.*.name, 'phase6-oracle-evidence')
     runs-on: ubuntu-latest
     environment: phase6-oracle-judge

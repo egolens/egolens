@@ -1469,12 +1469,21 @@ also supplies the exact frames shown to perceptual capture, so visual parity
 cannot be borrowed from the production scene while numeric observations come
 from the candidate.
 
-One public authoring attestation binds the exact candidate commit, semantic
-recipe hashes, five public WebMCP tools, three allowed mounts, denied resources,
-disabled network egress, and lack of interactive judge access. The protected
-one-shot judge reuses the immutable Phase 6 bundles, binds every signed receipt
-to that attestation, recipe hash, runtime ID, and exact PR HEAD, retains only
-public receipts/gate output, and destroys oracle inputs plus detailed reports.
+One public authoring attestation binds the exact candidate commit, the three
+blind-authored semantic recipe hashes and source cases, five public WebMCP
+tools, and the commitment plus path-free witness of a machine-produced
+OS-boundary report. The protected full report proves the controller has no
+data-plane mounts and binds the broker's read-only author
+build, one-source-at-a-time read-only dataset, write-only output, loopback-only
+tool network, negative probes, and fresh profile/scratch lifecycle.
+The public witness never discloses source fingerprints, concrete policy hashes,
+negative-probe hashes, or canonical paths; those remain in the protected report.
+Reviewed requirements publish target and coverage but never a bundled or target recipe
+hash. The protected one-shot judge reuses the immutable Phase 6 bundles and
+accepts an author-selected hash only through structural, numeric, and
+perceptual parity, then binds every signed receipt to that attestation, recipe
+hash, runtime ID, and exact PR HEAD. It retains only public receipts/gate output
+and destroys oracle inputs plus detailed reports.
 
 #### Phase 10 — Run the held-out generalization test
 

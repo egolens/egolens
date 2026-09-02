@@ -75,7 +75,7 @@ import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe }
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
 import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
-import { bindRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
+import { bindRecipeSceneV1, bindRemoteRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
 import { bundledPhase2OperatorRegistry } from '../teachable/operators/bundledPhase2'
 import type { RecipeInventoryEntryV1 } from '../teachable/runtime/GraphKernel'
 import { decodeJsonRecordsV1 } from '../teachable/operators/jsonRecords'
@@ -93,10 +93,22 @@ import {
   type ResolvedPortableShareV1,
 } from '../teachable/share/PortableShareRuntime'
 import {
+  shareDescriptorHashV1,
   validateShareDescriptorV1,
   type ShareDescriptorV1,
   type ShareVector3V1,
 } from '../teachable/share/ShareDescriptor'
+import { formatFingerprintEntriesV1 } from '../teachable/authoring/hashes'
+import { operatorSetFingerprintV1 } from '../teachable/recipe/fingerprints'
+
+export interface PreflightRuntimeIdentityV1 {
+  readonly sourceManifestHash: string
+  readonly catalogHash: string | null
+  readonly shareDescriptorHash: string | null
+  readonly recipeHash: string
+  readonly formatFingerprint: string
+  readonly operatorSetFingerprint: string
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -168,7 +180,10 @@ export interface FrameData {
 }
 
 interface SceneActions {
-  loadDataset: (sources: Map<string, File | string>) => Promise<void>
+  loadDataset: (
+    sources: Map<string, File | string>,
+    countedRecipe?: CompiledRecipeV1,
+  ) => Promise<void>
   /** Empty-profile portable v1 share path; never consults a dataset enum. */
   loadPortableShare: (
     url: string,
@@ -200,7 +215,10 @@ interface SceneActions {
   setHoveredBox: (id: string | null, source: 'laser' | 'camera' | null) => void
   setAvailableSegments: (segments: string[]) => void
   selectSegment: (segmentId: string) => Promise<void>
-  loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
+  loadFromFiles: (
+    segments: Map<string, Map<string, File>>,
+    countedRecipe?: CompiledRecipeV1,
+  ) => Promise<void>
   /** Load dataset from a remote URL. Optional initialScene to auto-select a specific scene. */
   loadFromUrl: (dataset: string, baseUrl: string, initialScene?: string) => Promise<void>
   toggleWorldMode: () => void
@@ -215,7 +233,7 @@ interface SceneActions {
   setPointSize: (size: number) => void
   setFollowCam: (follow: boolean) => void
   setPinCamera: (pin: boolean) => void
-  reset: () => void
+  reset: (preserveLocalRecipe?: boolean) => void
 }
 
 export type LoadStep = 'opening' | 'parsing' | 'workers' | 'first-frame'
@@ -346,15 +364,75 @@ export interface SceneState {
 const WORKER_CONCURRENCY = 3
 
 function activateAdapter(id: string): void {
+  const localRecipe = internal.localCompiledRecipe
+  if (localRecipe) {
+    if (localRecipe.normalizedManifest.id !== id) {
+      throw new DataLoadError(
+        `Counted local recipe targets "${localRecipe.normalizedManifest.id}", not "${id}".`,
+        'MANIFEST',
+      )
+    }
+    setAdapter(new RecipeBackedDatasetAdapter(
+      localRecipe.recipe,
+      bundledPhase2OperatorRegistry,
+      localRecipe,
+    ))
+    return
+  }
   const adapter = getAdapterById(id)
   if (!adapter) throw new DataLoadError(`Dataset adapter "${id}" is not registered.`, 'MANIFEST')
   setAdapter(adapter)
+}
+
+function bundledCompiledRecipe(id: string): CompiledRecipeV1 {
+  if (id === 'waymo') return waymoCompiledRecipe
+  if (id === 'nuscenes') return nuScenesCompiledRecipe
+  if (id === 'argoverse2') return argoverse2CompiledRecipe
+  throw new DataLoadError(`Dataset adapter "${id}" has no bundled recipe.`, 'MANIFEST')
+}
+
+/**
+ * Counted local runs install the Phase 9 author recipe once, before source
+ * binding. Segment reloads must keep using that same compiled graph; falling
+ * back to a bundled recipe would make lifecycle evidence describe a different
+ * runtime after the first dispose/load generation.
+ */
+function activeCompiledRecipe(id: string): CompiledRecipeV1 {
+  const compiled = internal.localCompiledRecipe ?? bundledCompiledRecipe(id)
+  if (compiled.normalizedManifest.id !== id) {
+    throw new DataLoadError(
+      `Active recipe targets "${compiled.normalizedManifest.id}", not "${id}".`,
+      'MANIFEST',
+    )
+  }
+  return compiled
+}
+
+function workerReaderParams(
+  compiledRecipe: CompiledRecipeV1,
+  reader: string,
+  pathPrefix: string,
+): unknown {
+  const matches = Object.values(compiledRecipe.recipe.sources).filter((source) => {
+    const selector = source.files.exact ?? source.files.glob ?? ''
+    return source.reader === reader
+      && (selector === pathPrefix || selector.startsWith(`${pathPrefix}/`))
+  })
+  if (matches.length !== 1 || !matches[0].params) {
+    throw new DataLoadError(
+      `Active recipe must bind exactly one ${reader} source under ${pathPrefix}.`,
+      'MANIFEST',
+    )
+  }
+  return matches[0].params
 }
 
 const internal = {
   /** Transport-neutral bytes passed to the recipe executor. */
   recipeByteSource: null as ByteSourceV1 | null,
   recipeInventoryEntries: [] as RecipeInventoryEntryV1[],
+  /** Phase 9 author recipe bound to one counted local source session. */
+  localCompiledRecipe: null as CompiledRecipeV1 | null,
   timestamps: [] as bigint[],
   /** Reverse lookup: timestamp → frame index */
   timestampToFrame: new Map<bigint, number>(),
@@ -433,14 +511,20 @@ const internal = {
   waymoBaseUrl: null as string | null,
   /** Hash-bound identity used to generate subsequent portable share URLs. */
   portableShareDescriptor: null as ShareDescriptorV1 | null,
+  /** Exact identity observed by the trusted fresh-process preflight capture. */
+  preflightRuntimeIdentity: null as PreflightRuntimeIdentityV1 | null,
 }
 
-function resetInternal() {
+function resetInternal(options: { preserveLocalRecipe?: boolean } = {}) {
   internal.normalizedScene?.dispose()
   internal.normalizedScene = null
   internal.conformanceSceneFactory = null
   internal.recipeByteSource = null
   internal.recipeInventoryEntries = []
+  if (!options.preserveLocalRecipe) {
+    internal.localCompiledRecipe = null
+    internal.preflightRuntimeIdentity = null
+  }
   internal.portableShareDescriptor = null
   internal.timestamps = []
   internal.pendingSeekFrame = null
@@ -748,6 +832,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     loadPortableShare: async (url, counted = false, onBeforeReady) => {
       resetInternal()
       clearUrlSource()
+      markPerformanceEvent('scene-load-start', { dataset: 'portable-share' })
       set({
         status: 'loading', error: null, errorCode: null,
         loadStep: 'opening' as LoadStep, loadProgress: 0,
@@ -765,6 +850,33 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         ))
         internal.datasetId = manifest.id
         internal.portableShareDescriptor = resolved.descriptor
+        const inventoryEntries = resolved.catalog.manifestEntries.map((entry) => ({ path: entry.path }))
+        const [formatFingerprint, operatorSetFingerprint] = await Promise.all([
+          formatFingerprintEntriesV1(resolved.recipe.recipe, inventoryEntries),
+          operatorSetFingerprintV1(resolved.recipe.recipe.engine.requiredOperators),
+        ])
+        internal.preflightRuntimeIdentity = Object.freeze({
+          sourceManifestHash: resolved.catalog.sourceManifestHash,
+          catalogHash: resolved.catalog.catalogHash,
+          shareDescriptorHash: resolved.request.mode === 'referenced'
+            ? shareDescriptorHashV1(resolved.descriptor)
+            : null,
+          recipeHash: resolved.recipe.recipeHash,
+          formatFingerprint,
+          operatorSetFingerprint,
+        })
+        internal.conformanceSceneFactory = async (
+          compiledRecipe = resolved.recipe.compiledRecipe,
+        ) => (await bindRemoteRecipeSceneV1({
+          compiledRecipe,
+          sceneId: descriptor.view.sceneId,
+          remote: {
+            rootUrl: descriptor.source.rootUrl,
+            catalog: resolved.catalog.catalog,
+            expectedCatalogHash: descriptor.source.catalogHash,
+            expectedSourceManifestHash: descriptor.source.sourceManifestHash,
+          },
+        })).scene
         internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
           workerTimestamps: binding.metadata.timestamps,
           delegateOwnsFramePayloads: true,
@@ -850,8 +962,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
     },
 
-    loadDataset: async (sources) => {
-      resetInternal()
+    loadDataset: async (sources, countedRecipe) => {
+      if (countedRecipe) {
+        if (countedRecipe.normalizedManifest.id !== 'waymo') {
+          throw new DataLoadError('Counted component-table recipe must target waymo.', 'MANIFEST')
+        }
+        internal.localCompiledRecipe = countedRecipe
+        activateAdapter('waymo')
+      }
+      resetInternal({ preserveLocalRecipe: true })
       const recipeEntries = [...sources].map(([component, source]) => {
         const sourceName = typeof source === 'string'
           ? source.split(/[?#]/u, 1)[0].split('/').at(-1) || `${component}.parquet`
@@ -1179,7 +1298,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     selectSegment: async (segmentId: string) => {
       const prev = get()
       trackSegmentSwitch(internal.datasetId ?? segmentId)
-      prev.actions.reset()
+      prev.actions.reset(true)
 
       // After reset, UI prefs are already preserved. Just set the segment.
       // If the dataset type changed, visibleSensors IDs may be stale — validate them.
@@ -1306,10 +1425,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     setPointSize: (size: number) => set({ pointSize: size }),
     setFollowCam: (follow: boolean) => set({ followCam: follow }),
     setPinCamera: (pin: boolean) => set({ pinCamera: pin }),
-    loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
+    loadFromFiles: async (
+      segments: Map<string, Map<string, File>>,
+      countedRecipe?: CompiledRecipeV1,
+    ) => {
       // Local files — clear URL source so segment changes don't sync to URL bar
       clearUrlSource()
       const datasetHint = segments.has('__nuscenes__') ? 'nuscenes' : segments.has('__argoverse2__') ? 'argoverse2' : 'waymo'
+      if (countedRecipe && countedRecipe.normalizedManifest.id !== datasetHint) {
+        failLoad(set, new DataLoadError(
+          `Counted local recipe targets "${countedRecipe.normalizedManifest.id}", not "${datasetHint}".`,
+          'MANIFEST',
+        ), 'loadFromFiles:countedRecipe')
+        return
+      }
+      internal.localCompiledRecipe = countedRecipe ?? null
       trackDatasetLoad(datasetHint, 'local')
 
       // Local loading sets status to "loading" before it parses anything, which
@@ -1325,6 +1455,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     loadFromUrl: async (dataset: string, baseUrl: string, initialScene?: string) => {
+      internal.localCompiledRecipe = null
       // Track URL source for auto-sync on segment change
       setUrlSource(dataset, baseUrl)
 
@@ -1564,10 +1695,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       failLoad(set, new DataLoadError(`URL loading for "${dataset}" is not supported.`, 'UNKNOWN'), 'loadFromUrl')
     },
 
-    reset: () => {
+    reset: (preserveLocalRecipe = false) => {
       const prev = get()
       prev.actions.pause()
-      resetInternal()
+      resetInternal({ preserveLocalRecipe })
       set({
         status: 'idle',
         error: null,
@@ -1623,17 +1754,16 @@ export function hasPortableShareSourceV1(): boolean {
   return internal.portableShareDescriptor !== null
 }
 
-/** Rebuild a complete descriptor from the current renderer state and stable manifest IDs. */
-export function currentPortableShareDescriptorV1(cameraPose: {
+function currentStablePresentationV1(cameraPose: {
   readonly position: ShareVector3V1
   readonly target: ShareVector3V1
   readonly azimuth: number
   readonly distance: number
-}): ShareDescriptorV1 | null {
-  const base = internal.portableShareDescriptor
+}): ShareDescriptorV1['presentation'] | null {
   const scene = internal.normalizedScene
-  if (!base || !scene) return null
+  if (!scene) return null
   const state = useSceneStore.getState()
+  const base = internal.portableShareDescriptor
   const pointSensorIds = new Map(scene.manifest.sensors
     .filter((sensor) => sensor.modality !== 'camera')
     .map((sensor) => [sensor.rendererId, sensor.id]))
@@ -1643,8 +1773,75 @@ export function currentPortableShareDescriptorV1(cameraPose: {
   const visibleSensorIds = [...state.visibleSensors]
     .flatMap((rendererId) => pointSensorIds.has(rendererId) ? [pointSensorIds.get(rendererId)!] : [])
     .sort()
-  const fallbackPose = base.presentation.cameraPose
+  const fallbackPose = base?.presentation.cameraPose ?? {
+    position: [8, 8, 8] as ShareVector3V1,
+    target: [0, 0, 0] as ShareVector3V1,
+    azimuth: 0,
+    distance: Math.sqrt(192),
+  }
   const pose = cameraPose.distance > 0 ? cameraPose : fallbackPose
+  return {
+    cameraStrip: state.cameraStripVisible ?? scene.manifest.capabilities.has('cameraImages'),
+    coordinateMode: state.worldMode ? 'world' : 'ego',
+    visibleSensorIds,
+    activeCameraId: state.activeCam === null ? null : cameraIds.get(state.activeCam) ?? null,
+    colormap: state.colormapMode,
+    boxMode: state.boxMode,
+    trailLength: state.trailLength,
+    pointSize: state.pointSize,
+    pointOpacity: state.pointOpacity,
+    overlays: {
+      lidarProjection: state.showLidarOverlay,
+      keypoints3d: state.showKeypoints3D,
+      keypoints2d: state.showKeypoints2D,
+      cameraSegmentation: state.showCameraSeg,
+    },
+    playbackSpeed: state.playbackSpeed,
+    followCamera: state.followCam,
+    cameraPose: {
+      position: [...pose.position],
+      target: [...pose.target],
+      azimuth: pose.azimuth,
+      distance: pose.distance,
+    },
+    theme: state.theme,
+    accent: typeof document === 'undefined' ? base?.presentation.accent ?? null : document.documentElement.dataset.accent ?? null,
+  }
+}
+
+/** Public-safe, stable-ID presentation evidence for local, remote, and share modes. */
+export function currentPresentationEvidenceV1(cameraPose: {
+  readonly position: ShareVector3V1
+  readonly target: ShareVector3V1
+  readonly azimuth: number
+  readonly distance: number
+}): Readonly<Record<string, unknown>> | null {
+  const presentation = currentStablePresentationV1(cameraPose)
+  if (!presentation) return null
+  const state = useSceneStore.getState()
+  return {
+    view: {
+      sceneId: state.currentSegment,
+      frameIndex: state.currentFrameIndex,
+      t0: state.playbackWindow?.t0 ?? null,
+      t1: state.playbackWindow?.t1 ?? null,
+    },
+    presentation: { ...presentation, playing: state.isPlaying },
+  }
+}
+
+/** Rebuild a complete descriptor from the current renderer state and stable manifest IDs. */
+export function currentPortableShareDescriptorV1(cameraPose: {
+  readonly position: ShareVector3V1
+  readonly target: ShareVector3V1
+  readonly azimuth: number
+  readonly distance: number
+}): ShareDescriptorV1 | null {
+  const base = internal.portableShareDescriptor
+  if (!base) return null
+  const state = useSceneStore.getState()
+  const presentation = currentStablePresentationV1(cameraPose)
+  if (!presentation) return null
   return validateShareDescriptorV1({
     ...base,
     view: {
@@ -1654,33 +1851,7 @@ export function currentPortableShareDescriptorV1(cameraPose: {
         ? { t0: state.playbackWindow.t0, t1: state.playbackWindow.t1 }
         : {}),
     },
-    presentation: {
-      cameraStrip: state.cameraStripVisible ?? base.presentation.cameraStrip,
-      coordinateMode: state.worldMode ? 'world' : 'ego',
-      visibleSensorIds,
-      activeCameraId: state.activeCam === null ? null : cameraIds.get(state.activeCam) ?? null,
-      colormap: state.colormapMode,
-      boxMode: state.boxMode,
-      trailLength: state.trailLength,
-      pointSize: state.pointSize,
-      pointOpacity: state.pointOpacity,
-      overlays: {
-        lidarProjection: state.showLidarOverlay,
-        keypoints3d: state.showKeypoints3D,
-        keypoints2d: state.showKeypoints2D,
-        cameraSegmentation: state.showCameraSeg,
-      },
-      playbackSpeed: state.playbackSpeed,
-      followCamera: state.followCam,
-      cameraPose: {
-        position: [...pose.position],
-        target: [...pose.target],
-        azimuth: pose.azimuth,
-        distance: pose.distance,
-      },
-      theme: state.theme,
-      accent: typeof document === 'undefined' ? base.presentation.accent : document.documentElement.dataset.accent ?? null,
-    },
+    presentation,
   })
 }
 
@@ -1714,16 +1885,17 @@ async function loadAndCacheRowGroup(
 async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
   // Read the lightweight metadata tables before the managed worker path starts.
   if (!internal.recipeByteSource) throw new Error('RECIPE_BYTE_SOURCE_MISSING: Waymo source was not initialized.')
+  const compiledRecipe = activeCompiledRecipe('waymo')
   const binding = await bindRecipeSceneV1({
-    compiledRecipe: waymoCompiledRecipe,
+    compiledRecipe,
     source: internal.recipeByteSource,
     inventoryEntries: internal.recipeInventoryEntries,
   })
   const bundle = binding.metadata
   const conformanceSource = internal.recipeByteSource
   const conformanceInventory = [...internal.recipeInventoryEntries]
-  internal.conformanceSceneFactory = async (compiledRecipe = waymoCompiledRecipe) => (await bindRecipeSceneV1({
-    compiledRecipe,
+  internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+    compiledRecipe: candidateRecipe,
     source: conformanceSource,
     inventoryEntries: conformanceInventory,
   })).scene
@@ -1835,13 +2007,22 @@ async function initDataWorker(
   owner.attachPointPool(pool, 0)
   // Pass segmentation parquet URL if available (Phase A worker protocol)
   const segSource = sources.get('lidar_segmentation')
+  const compiledRecipe = activeCompiledRecipe('waymo')
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
-    lidarReaderParams: waymoCompiledRecipe.recipe.sources.lidarRows.params as unknown as ParquetColumnsParamsV1,
+    lidarReaderParams: workerReaderParams(
+      compiledRecipe,
+      'parquet.columns',
+      'lidar',
+    ) as ParquetColumnsParamsV1,
     ...(segSource ? {
       segUrl: segSource,
-      segReaderParams: waymoCompiledRecipe.recipe.sources.lidarSegmentationRows.params as unknown as ParquetColumnsParamsV1,
+      segReaderParams: workerReaderParams(
+        compiledRecipe,
+        'parquet.columns',
+        'lidar_segmentation',
+      ) as ParquetColumnsParamsV1,
     } : {}),
   })
 
@@ -1861,22 +2042,27 @@ async function initCameraWorker(
   if (!cameraSource || !owner) return
 
   const start = async () => {
-  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-    2,
-    () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
-  )
-  owner.attachCameraPool(pool, 0)
-  const { numBatches } = await pool.init({
-    cameraUrl: cameraSource,
-    cameraReaderParams: waymoCompiledRecipe.recipe.sources.cameraImageRows.params as unknown as ParquetColumnsParamsV1,
-  })
+    const compiledRecipe = activeCompiledRecipe('waymo')
+    const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
+      2,
+      () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
+    )
+    owner.attachCameraPool(pool, 0)
+    const { numBatches } = await pool.init({
+      cameraUrl: cameraSource,
+      cameraReaderParams: workerReaderParams(
+        compiledRecipe,
+        'parquet.columns',
+        'camera_image',
+      ) as ParquetColumnsParamsV1,
+    })
 
-  if (owner !== internal.normalizedScene || owner.disposed) {
-    pool.terminate()
-    return
-  }
-  owner.attachCameraPool(pool, numBatches)
-  useSceneStore.setState({ cameraTotalCount: numBatches })
+    if (owner !== internal.normalizedScene || owner.disposed) {
+      pool.terminate()
+      return
+    }
+    owner.attachCameraPool(pool, numBatches)
+    useSceneStore.setState({ cameraTotalCount: numBatches })
   }
 
   internal.cameraPoolInit = start
@@ -1968,12 +2154,13 @@ function graphInventoryEntries(files: ReadonlyMap<string, File | string>) {
   }))
 }
 
-/** Execute the bundled graph to discover its public segment index. */
+/** Execute the active graph to discover its public segment index. */
 async function inspectNuScenesGraphSegments(
   sourceFiles: ReadonlyMap<string, File | string>,
 ): Promise<readonly GraphSegmentDescriptorV1[]> {
+  const compiledRecipe = activeCompiledRecipe('nuscenes')
   const binding = await bindRecipeSceneV1({
-    compiledRecipe: nuScenesCompiledRecipe,
+    compiledRecipe,
     source: new MappedByteSourceV1(sourceFiles),
     inventoryEntries: graphInventoryEntries(sourceFiles),
   })
@@ -2108,8 +2295,9 @@ async function loadRelationalGraphScene(
 
     // 1. Execute the public graph and assemble its selected scene.
     const inventoryEntries = graphInventoryEntries(internal.nuScenesSampleFiles)
+    const compiledRecipe = activeCompiledRecipe('nuscenes')
     const binding = await bindRecipeSceneV1({
-      compiledRecipe: nuScenesCompiledRecipe,
+      compiledRecipe,
       source: new MappedByteSourceV1(internal.nuScenesSampleFiles),
       sceneId: sceneName,
       inventoryEntries,
@@ -2117,8 +2305,8 @@ async function loadRelationalGraphScene(
     const bundle = binding.metadata
     const conformanceFiles = new Map(internal.nuScenesSampleFiles)
     const conformanceSource = new MappedByteSourceV1(conformanceFiles)
-    internal.conformanceSceneFactory = async (compiledRecipe = nuScenesCompiledRecipe) => (await bindRecipeSceneV1({
-      compiledRecipe,
+    internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+      compiledRecipe: candidateRecipe,
       source: conformanceSource,
       sceneId: sceneName,
       inventoryEntries: graphInventoryEntries(conformanceFiles),
@@ -2377,8 +2565,9 @@ async function loadFeatherLogScene(
       path,
       size: typeof value === 'string' ? null : value.size,
     }))
+    const compiledRecipe = activeCompiledRecipe('argoverse2')
     const binding = await bindRecipeSceneV1({
-      compiledRecipe: argoverse2CompiledRecipe,
+      compiledRecipe,
       source: new MappedByteSourceV1(internal.av2SampleFiles),
       sceneId: logId,
       inventoryEntries,
@@ -2386,8 +2575,8 @@ async function loadFeatherLogScene(
     const bundle = binding.metadata
     const conformanceFiles = new Map(internal.av2SampleFiles)
     const conformanceSource = new MappedByteSourceV1(conformanceFiles)
-    internal.conformanceSceneFactory = async (compiledRecipe = argoverse2CompiledRecipe) => (await bindRecipeSceneV1({
-      compiledRecipe,
+    internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+      compiledRecipe: candidateRecipe,
       source: conformanceSource,
       sceneId: logId,
       inventoryEntries,
@@ -2508,7 +2697,11 @@ async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
   const { numBatches } = await pool.init({
     frameBatches: batches,
     fileEntries,
-    readerParams: argoverse2CompiledRecipe.recipe.sources.lidarFrames.params as unknown as FeatherColumnsParamsV1,
+    readerParams: workerReaderParams(
+      activeCompiledRecipe('argoverse2'),
+      'feather.columns',
+      'sensors/lidar',
+    ) as FeatherColumnsParamsV1,
   })
 
   if (owner !== internal.normalizedScene || owner.disposed) {
@@ -2887,16 +3080,25 @@ async function runPostWorkerPipeline(
 
 export function getActiveConformanceDescriptor(): {
   readonly datasetId: string
+  readonly sceneId: string | null
   readonly frameCount: number
   readonly capabilities: readonly NormalizedCapabilityV1[]
+  readonly preflightIdentity: PreflightRuntimeIdentityV1 | null
 } | null {
   const scene = internal.normalizedScene
   if (!scene || scene.disposed || !internal.conformanceSceneFactory) return null
   return {
     datasetId: scene.manifest.id,
+    sceneId: useSceneStore.getState().currentSegment,
     frameCount: scene.index.timestampsMicros.length,
     capabilities: [...scene.manifest.capabilities].sort(),
+    preflightIdentity: internal.preflightRuntimeIdentity,
   }
+}
+
+/** Bind independently computed local-source identity to the active counted run. */
+export function setActivePreflightRuntimeIdentityV1(identity: PreflightRuntimeIdentityV1): void {
+  internal.preflightRuntimeIdentity = Object.freeze({ ...identity })
 }
 
 export async function createActiveConformanceScene(

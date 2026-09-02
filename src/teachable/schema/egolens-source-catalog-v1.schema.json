@@ -9,7 +9,7 @@
     "schema": { "const": "egolens-source-catalog-v1" },
     "entries": {
       "type": "array",
-      "maxItems": 20000,
+      "maxItems": 50000,
       "items": {
         "type": "object",
         "additionalProperties": false,

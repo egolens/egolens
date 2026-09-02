@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-generalization-attempt-v1.schema.json",
+  "title": "EgoLens public-safe generalization attempt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "verifierBinding", "attemptId", "application", "browserProcess", "sourceCase",
+    "phase", "transport", "isolation", "fingerprints", "revisionLineage",
+    "capabilities", "diagnostics", "firstFailure", "humanReview",
+    "observations", "result", "attemptHash"
+  ],
+  "properties": {
+    "schema": { "const": "egolens-generalization-attempt-v1" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
+    "attemptId": { "$ref": "#/$defs/id" },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "deployedUrlIdentity", "buildHash"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "deployedUrlIdentity": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "buildHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "browserProcess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processNonce", "profileNonce", "profileMode", "browserVersion",
+        "platform", "viewport", "startedAt", "stoppedAt", "processExitObserved",
+        "userDataDirectoryCreatedFresh", "userDataDirectoryRemoved"
+      ],
+      "properties": {
+        "processNonce": { "$ref": "#/$defs/uuid" },
+        "profileNonce": { "$ref": "#/$defs/uuid" },
+        "profileMode": { "enum": ["empty", "persisted-origin"] },
+        "browserVersion": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "deviceScaleFactor"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 320, "maximum": 16384 },
+            "height": { "type": "integer", "minimum": 240, "maximum": 16384 },
+            "deviceScaleFactor": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 }
+          }
+        },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "stoppedAt": { "type": "string", "format": "date-time" },
+        "processExitObserved": { "const": true },
+        "userDataDirectoryCreatedFresh": { "type": "boolean" },
+        "userDataDirectoryRemoved": { "type": "boolean" }
+      }
+    },
+    "sourceCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId", "releaseId", "caseId", "sourceCaseManifestHash",
+        "sourceManifestHash", "unopenedAtStart", "unchangedOriginal",
+        "requiredModalitiesRetained", "egolensSidecarPresent"
+      ],
+      "properties": {
+        "datasetId": { "$ref": "#/$defs/id" },
+        "releaseId": { "$ref": "#/$defs/id" },
+        "caseId": { "$ref": "#/$defs/id" },
+        "sourceCaseManifestHash": { "$ref": "#/$defs/hash" },
+        "sourceManifestHash": { "$ref": "#/$defs/hash" },
+        "unopenedAtStart": { "type": "boolean" },
+        "unchangedOriginal": { "const": true },
+        "requiredModalitiesRetained": { "const": true },
+        "egolensSidecarPresent": { "const": false }
+      }
+    },
+    "phase": {
+      "enum": ["D", "A", "B-persisted-local", "B-imported-local", "B-remote-share"]
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "catalogHash", "shareDescriptorHash", "shareUrlHash"],
+      "properties": {
+        "mode": { "enum": ["local", "remote"] },
+        "catalogHash": { "$ref": "#/$defs/nullableHash" },
+        "shareDescriptorHash": { "$ref": "#/$defs/nullableHash" },
+        "shareUrlHash": { "$ref": "#/$defs/nullableHash" }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentCalls", "publicTools", "toolCalls", "networkPolicy", "mounts",
+        "developerConsoleUsed", "repositoryMounted", "referenceLoaderMounted",
+        "sourceMutationObserved"
+      ],
+      "properties": {
+        "agentCalls": { "type": "integer", "minimum": 0 },
+        "publicTools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "toolCalls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["toolId", "count"],
+            "properties": {
+              "toolId": { "$ref": "#/$defs/id" },
+              "count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "allowedOrigins"],
+          "properties": {
+            "mode": { "enum": ["disabled", "exact-origins"] },
+            "allowedOrigins": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "format": "uri", "maxLength": 2048 }
+            }
+          }
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "access", "contents"],
+            "properties": {
+              "name": { "$ref": "#/$defs/id" },
+              "access": { "enum": ["read-only", "write-only", "read-write"] },
+              "contents": { "$ref": "#/$defs/id" }
+            }
+          }
+        },
+        "developerConsoleUsed": { "const": false },
+        "repositoryMounted": { "const": false },
+        "referenceLoaderMounted": { "const": false },
+        "sourceMutationObserved": { "const": false }
+      }
+    },
+    "fingerprints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recipeHash", "artifactHash", "formatFingerprint", "datasetFingerprint", "operatorSetFingerprint"],
+      "properties": {
+        "recipeHash": { "$ref": "#/$defs/hash" },
+        "artifactHash": { "$ref": "#/$defs/hash" },
+        "formatFingerprint": { "$ref": "#/$defs/hash" },
+        "datasetFingerprint": { "$ref": "#/$defs/hash" },
+        "operatorSetFingerprint": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "revisionLineage": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revisionId", "parentRevisionId", "recipeHash", "status", "semanticChange"],
+        "properties": {
+          "revisionId": { "$ref": "#/$defs/id" },
+          "parentRevisionId": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+          "recipeHash": { "$ref": "#/$defs/hash" },
+          "status": { "enum": ["accepted", "rejected", "finalized", "imported", "selected"] },
+          "semanticChange": { "type": "boolean" }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "bound"],
+      "properties": {
+        "declared": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "bound": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "detailsHash"],
+        "properties": {
+          "code": { "$ref": "#/$defs/id" },
+          "severity": { "enum": ["info", "warning", "error"] },
+          "detailsHash": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "firstFailure": { "$ref": "#/$defs/nullableHash" },
+    "humanReview": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rejectedRecipeHash", "correctedRecipeHash", "preservedRecipeHash",
+            "reviewedCapabilities", "reviewedFrames", "defectClass",
+            "findingHash", "lastGoodScenePreserved", "receiptHash"
+          ],
+          "properties": {
+            "rejectedRecipeHash": { "$ref": "#/$defs/hash" },
+            "correctedRecipeHash": { "$ref": "#/$defs/hash" },
+            "preservedRecipeHash": { "$ref": "#/$defs/hash" },
+            "reviewedCapabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+            "reviewedFrames": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } },
+            "defectClass": { "enum": ["coordinate", "calibration", "synchronization", "association", "label", "scene-semantics"] },
+            "findingHash": { "$ref": "#/$defs/hash" },
+            "lastGoodScenePreserved": { "const": true },
+            "receiptHash": { "$ref": "#/$defs/hash" }
+          }
+        }
+      ]
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["structuralHash", "numericHash", "crossOutputHash", "perceptualHashes", "performanceHash", "lifecycleHash"],
+      "properties": {
+        "structuralHash": { "$ref": "#/$defs/hash" },
+        "numericHash": { "$ref": "#/$defs/hash" },
+        "crossOutputHash": { "$ref": "#/$defs/hash" },
+        "perceptualHashes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } },
+        "performanceHash": { "$ref": "#/$defs/hash" },
+        "lifecycleHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "reasonCode"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "reasonCode": { "$ref": "#/$defs/id" }
+      }
+    },
+    "attemptHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableHash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "uuid": { "type": "string", "format": "uuid" },
+    "verifierBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash",
+        "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash",
+        "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"
+      ],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" },
+        "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 },
+        "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" },
+        "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    }
+  }
+}

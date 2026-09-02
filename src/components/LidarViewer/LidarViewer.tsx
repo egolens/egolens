@@ -429,6 +429,10 @@ function InitialCameraSetup({ orbitRef, initializedRef }: { orbitRef: React.RefO
         }
       }
       orbitRef.current.update()
+      // OrbitControls does not guarantee an onChange callback for its first
+      // imperative update. Snapshot explicitly so counted presentation
+      // evidence records the restored pose instead of the module fallback.
+      captureCameraPoseFromOrbit(orbitRef.current)
       initializedRef.current = true
     }
   })
@@ -716,6 +720,15 @@ let _cameraTarget: [number, number, number] = [0, 0, 0]
  *  direction without gimbal-lock precision loss at BEV angles. */
 let _cameraAzimuth = 0
 let _cameraDistance = 0
+
+function captureCameraPoseFromOrbit(controls: OrbitControlsImpl): void {
+  const position = controls.object.position
+  const target = controls.target
+  _cameraPos = [position.x, position.y, position.z]
+  _cameraTarget = [target.x, target.y, target.z]
+  _cameraAzimuth = controls.getAzimuthalAngle()
+  _cameraDistance = position.distanceTo(target)
+}
 
 /** Read current orbit camera state (for Share URL) */
 export function getCameraPose() {
@@ -1052,17 +1065,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
           maxDistance={200}
           enablePan={!(worldMode && followCam)}
           onChange={() => {
-            if (orbitRef.current) {
-              const c = orbitRef.current
-              const p = c.object.position
-              const t = c.target
-              _cameraPos = [p.x, p.y, p.z]
-              _cameraTarget = [t.x, t.y, t.z]
-              // Capture azimuthal angle via public API — this is the compass
-              // direction that gets lost at BEV angles when encoding as cp/ct
-              _cameraAzimuth = c.getAzimuthalAngle()
-              _cameraDistance = p.distanceTo(t)
-            }
+            if (orbitRef.current) captureCameraPoseFromOrbit(orbitRef.current)
           }}
           /* enabled is controlled imperatively by PovController via orbitRef */
         />

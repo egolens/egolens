@@ -7,7 +7,9 @@ import {
   getThumbnailResolver,
   getSegmentSplits,
   currentPortableShareDescriptorV1,
+  currentPresentationEvidenceV1,
   hasPortableShareSourceV1,
+  setActivePreflightRuntimeIdentityV1,
   type BoxMode,
   type ColormapMode,
 } from './stores/useSceneStore'
@@ -22,7 +24,7 @@ import Timeline from './components/Timeline/Timeline'
 import { colors, fonts, radius, gradients, alpha } from './theme'
 import { LOCATION_LABELS } from './types/waymo'
 import { getManifest } from './adapters/registry'
-import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker } from './utils/folderScan'
+import { scanDataTransfer, pickAndScanFolder, hasDirectoryPicker, scanSelectedFiles } from './utils/folderScan'
 import { describeFolderProblem } from './utils/folderScan'
 import type { ScanResult } from './utils/folderScan'
 import { normalizeBaseUrl } from './utils/urlValidation'
@@ -39,11 +41,14 @@ import SearchableSelect, { type SelectItem } from './components/SearchableSelect
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
-import { recipeHashV1 } from './teachable/authoring/hashes'
+import { formatFingerprintV1, recipeHashV1 } from './teachable/authoring/hashes'
+import { generateSourceCatalogV1 } from './teachable/source/SourceCatalog'
+import { operatorSetFingerprintV1 } from './teachable/recipe/fingerprints'
+import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe } from './adapters/recipes/bundled'
 import { bundledPhase2OperatorRegistry } from './teachable/operators/bundledPhase2'
 import { compileRecipeV1, type CompiledRecipeV1 } from './teachable/recipe/compiler'
 import type { NormalizedSceneV1 } from './teachable/runtime/normalizedScene'
-import { encodeInlineShareUrlV1 } from './teachable/share/ShareDescriptor'
+import { encodeInlineShareUrlV1, type ShareDescriptorV1 } from './teachable/share/ShareDescriptor'
 
 
 // ---------------------------------------------------------------------------
@@ -52,6 +57,17 @@ import { encodeInlineShareUrlV1 } from './teachable/share/ShareDescriptor'
 
 /** Guard against double-invocation from React StrictMode */
 let discoveryStarted = false
+
+function benchmarkModeRequested(): boolean {
+  const params = new URLSearchParams(window.location.search)
+  return window.__EGOLENS_BENCHMARK_MODE__ === true || params.get('perf') === '1'
+}
+
+function benchmarkHoldRequested(): boolean {
+  const params = new URLSearchParams(window.location.search)
+  return window.__EGOLENS_BENCHMARK_HOLD__ === true
+    || (params.get('benchmarkHold') === '1' && params.get('perf') === '1')
+}
 
 function useSegmentDiscovery() {
   const availableSegments = useSceneStore((s) => s.availableSegments)
@@ -64,7 +80,7 @@ function useSegmentDiscovery() {
     // A benchmark URL must remain quiescent until CDP has captured the real
     // pre-scene baseline. Dev auto-discovery used to bypass benchmarkHold and
     // start Waymo workers before the runner dispatched benchmark-start.
-    if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') return
+    if (benchmarkHoldRequested()) return
     if (availableSegments.length > 0) return // already discovered
     if (discoveryStarted) return
     discoveryStarted = true
@@ -109,11 +125,23 @@ function usePortableShareAutoLoad() {
     if (portableShareAutoLoadStarted || status !== 'idle') return
     const params = new URLSearchParams(window.location.search)
     if (!params.has('share') && params.get('shareVersion') !== '1') return
-    portableShareAutoLoadStarted = true
-    void loadPortableShare(window.location.href, false, (resolved) => {
-      const pose = resolved.effectiveDescriptor.presentation.cameraPose
-      setPendingCameraPose([...pose.position], [...pose.target], pose.azimuth, pose.distance)
-    })
+    const start = () => {
+      if (portableShareAutoLoadStarted) return
+      portableShareAutoLoadStarted = true
+      void loadPortableShare(window.location.href, false, (resolved) => {
+        const pose = resolved.effectiveDescriptor.presentation.cameraPose
+        setPendingCameraPose([...pose.position], [...pose.target], pose.azimuth, pose.distance)
+      })
+    }
+    if (benchmarkHoldRequested()) {
+      window.addEventListener('egolens:benchmark-start', start, { once: true })
+      window.__EGOLENS_BENCHMARK_READY__ = true
+      return () => {
+        window.__EGOLENS_BENCHMARK_READY__ = false
+        window.removeEventListener('egolens:benchmark-start', start)
+      }
+    }
+    start()
   }, [loadPortableShare, status])
 }
 
@@ -130,7 +158,13 @@ function useUrlAutoLoad() {
     const dataUrl = params.get('data')
     const scene = params.get('scene') || undefined
 
-    if (!dataset || !dataUrl) return
+    if (!dataset || !dataUrl) {
+      if (benchmarkHoldRequested() && !params.has('share') && params.get('shareVersion') !== '1') {
+        window.__EGOLENS_BENCHMARK_READY__ = true
+        return () => { window.__EGOLENS_BENCHMARK_READY__ = false }
+      }
+      return
+    }
     if (!SUPPORTED_URL_DATASETS.includes(dataset as UrlDataset)) return
 
     const start = () => {
@@ -155,7 +189,7 @@ function useUrlAutoLoad() {
 
     // CDP captures the pre-scene checkpoint, then starts the ordinary command
     // path. Sampling the read-only probe itself never triggers this event.
-    if (params.get('benchmarkHold') === '1' && params.get('perf') === '1') {
+    if (benchmarkHoldRequested()) {
       window.addEventListener('egolens:benchmark-start', start, { once: true })
       window.__EGOLENS_BENCHMARK_READY__ = true
       return () => {
@@ -174,7 +208,7 @@ function useUrlAutoLoad() {
  */
 function useBenchmarkLoadCommand() {
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('perf') !== '1') return
+    if (!benchmarkModeRequested()) return
     const disposeScene = () => {
       const store = useSceneStore.getState()
       store.actions.reset()
@@ -202,14 +236,40 @@ function useBenchmarkLoadCommand() {
         // The benchmark runner observes the load timeout/error state.
       }
     }
+    const onReload = () => {
+      const store = useSceneStore.getState()
+      const segment = store.currentSegment
+      const identity = getActiveConformanceDescriptor()?.preflightIdentity
+
+      // Portable shares must be resolved again so a lifecycle cycle exercises
+      // the public descriptor/catalog/recipe path, not a private scene clone.
+      if (hasPortableShareSourceV1()) {
+        void store.actions.loadPortableShare(window.location.href, false, (resolved) => {
+          const pose = resolved.effectiveDescriptor.presentation.cameraPose
+          setPendingCameraPose([...pose.position], [...pose.target], pose.azimuth, pose.distance)
+        })
+        return
+      }
+
+      // Folder and direct-URL modes retain their source handles across reset.
+      // Re-entering selectSegment therefore gives the soak a real dispose/load
+      // generation while preserving the independently computed counted-run
+      // identity used by the evidence recorder.
+      if (!segment) return
+      void store.actions.selectSegment(segment).then(() => {
+        if (identity) setActivePreflightRuntimeIdentityV1(identity)
+      })
+    }
     // Keep the original URL in place so before/after lifecycle samples render
     // the same landing document. Unlike browser navigation, this deliberately
     // leaves the one-shot URL-load guard set and cannot auto-reload the scene.
     const onDispose = () => disposeScene()
     window.addEventListener('egolens:benchmark-load', onLoad)
+    window.addEventListener('egolens:benchmark-reload', onReload)
     window.addEventListener('egolens:benchmark-dispose', onDispose)
     return () => {
       window.removeEventListener('egolens:benchmark-load', onLoad)
+      window.removeEventListener('egolens:benchmark-reload', onReload)
       window.removeEventListener('egolens:benchmark-dispose', onDispose)
     }
   }, [])
@@ -218,6 +278,8 @@ function useBenchmarkLoadCommand() {
 type BrowserConformanceDescriptorV1 = NonNullable<ReturnType<typeof getActiveConformanceDescriptor>> & {
   readonly mode: 'production' | 'adapter-amnesia'
   readonly recipeHash: string | null
+  readonly buildCommit: string
+  readonly sourceTreeHash: string
 }
 
 interface BrowserConformanceCaptureV1 {
@@ -237,11 +299,27 @@ interface BrowserConformanceCaptureV1 {
     readonly activeCamera?: number | null
     readonly controlPanelOpen?: boolean
   }): void
+  presentation(): Readonly<Record<string, unknown>>
+  renderedFrame(): Promise<Readonly<Record<string, unknown>> | null>
+  /** Evidence that no authoring agent touched this page: no WebMCP surface and no tool engagement. */
+  agentActivity(): { readonly modelContextAvailable: boolean; readonly agentEngaged: boolean }
+}
+
+async function browserSha256V1(value: ArrayBufferView): Promise<string> {
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice()
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
 declare global {
   interface Window {
     __EGOLENS_BENCHMARK_READY__?: boolean
+    readonly __EGOLENS_BENCHMARK_MODE__?: boolean
+    readonly __EGOLENS_BENCHMARK_HOLD__?: boolean
+    readonly __EGOLENS_ORACLE_CAPTURE_REQUESTED__?: boolean
+    readonly __EGOLENS_ADAPTER_AMNESIA_CAPTURE__?: boolean
+    readonly __EGOLENS_PREFLIGHT_RECIPE__?: unknown
+    readonly __EGOLENS_PREFLIGHT_PRESENTATION__?: ShareDescriptorV1['presentation']
     __EGOLENS_ORACLE_CAPTURE__?: BrowserConformanceCaptureV1
   }
 }
@@ -250,8 +328,9 @@ declare global {
 function useOracleCaptureCommand() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('oracleCapture') !== '1') return
-    const adapterAmnesia = params.get('adapterAmnesia') === '1'
+    if (window.__EGOLENS_ORACLE_CAPTURE_REQUESTED__ !== true && params.get('oracleCapture') !== '1') return
+    const adapterAmnesia = window.__EGOLENS_ADAPTER_AMNESIA_CAPTURE__ === true
+      || params.get('adapterAmnesia') === '1'
     let installed: {
       readonly compiledRecipe: CompiledRecipeV1
       readonly recipeHash: string
@@ -260,18 +339,34 @@ function useOracleCaptureCommand() {
     const api: BrowserConformanceCaptureV1 = Object.freeze({
       schemaVersion: 1,
       buildCommit: __EGOLENS_GIT_COMMIT__,
+      agentActivity: () => ({
+        modelContextAvailable: typeof (document as Document & {
+          readonly modelContext?: { readonly registerTool?: unknown }
+        }).modelContext?.registerTool === 'function',
+        agentEngaged: teachableAuthoringSession.getState().agentEngaged,
+      }),
       descriptor: () => {
         if (installed) {
           return {
             datasetId: installed.scene.manifest.id,
             frameCount: installed.scene.index.timestampsMicros.length,
             capabilities: [...installed.scene.manifest.capabilities].sort(),
+            sceneId: useSceneStore.getState().currentSegment,
+            preflightIdentity: null,
             mode: 'adapter-amnesia' as const,
             recipeHash: installed.recipeHash,
+            buildCommit: __EGOLENS_GIT_COMMIT__,
+            sourceTreeHash: __EGOLENS_SOURCE_TREE_HASH__,
           }
         }
         const descriptor = getActiveConformanceDescriptor()
-        return descriptor ? { ...descriptor, mode: 'production' as const, recipeHash: null } : null
+        return descriptor ? {
+          ...descriptor,
+          mode: 'production' as const,
+          recipeHash: descriptor.preflightIdentity?.recipeHash ?? null,
+          buildCommit: __EGOLENS_GIT_COMMIT__,
+          sourceTreeHash: __EGOLENS_SOURCE_TREE_HASH__,
+        } : null
       },
       async installRecipe(recipe: unknown) {
         if (!adapterAmnesia) throw new Error('Adapter recipes may be installed only in explicit Adapter Amnesia capture mode.')
@@ -361,6 +456,28 @@ function useOracleCaptureCommand() {
           }
         }
       },
+      presentation() {
+        return currentPresentationEvidenceV1(getCameraPose()) ?? {}
+      },
+      async renderedFrame() {
+        const state = useSceneStore.getState()
+        const frame = state.currentFrame
+        if (!frame) return null
+        const sensors = await Promise.all([...frame.sensorClouds]
+          .sort(([left], [right]) => left - right)
+          .map(async ([sensorId, cloud]) => ({
+            sensorId,
+            pointCount: cloud.pointCount,
+            positionsHash: await browserSha256V1(cloud.positions),
+            segmentationHash: cloud.segLabels ? await browserSha256V1(cloud.segLabels) : null,
+            panopticHash: cloud.panopticLabels ? await browserSha256V1(cloud.panopticLabels) : null,
+          })))
+        return {
+          frameIndex: state.currentFrameIndex,
+          timestampMicros: frame.timestamp.toString(),
+          sensors,
+        }
+      },
     })
     Object.defineProperty(window, '__EGOLENS_ORACLE_CAPTURE__', {
       configurable: true,
@@ -389,11 +506,17 @@ function useUrlViewRestore() {
   useEffect(() => {
     if (urlViewRestoreApplied) return
     if (status !== 'ready') return
-    const initialParams = new URLSearchParams(getInitialSearch() ?? undefined)
+    // Portable shares intentionally do not call setUrlSource(), so there is
+    // no captured legacy search string. Fall back to the live URL before
+    // deciding whether to run the numeric legacy parser; otherwise stable
+    // v1 sensor IDs are parsed as NaN and the exact restored selection is
+    // toggled empty immediately after the portable load succeeds.
+    const initialSearch = getInitialSearch() ?? window.location.search
+    const initialParams = new URLSearchParams(initialSearch)
     if (initialParams.has('share') || initialParams.get('shareVersion') === '1') return
 
     // Use initial search (captured before replaceState overwrites view params)
-    const viewParams = parseViewParams(getInitialSearch() ?? undefined)
+    const viewParams = parseViewParams(initialSearch)
     // Only restore if there are view params beyond dataset/data/scene
     if (Object.keys(viewParams).length === 0) return
 
@@ -1217,11 +1340,17 @@ function ThemeToggle({ isMobile }: { isMobile: boolean }) {
   )
 }
 
-function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map<string, File>>) => Promise<void> }) {
+function DropZone({ onFilesLoaded }: {
+  onFilesLoaded: (
+    segments: Map<string, Map<string, File>>,
+    countedRecipe?: CompiledRecipeV1,
+  ) => Promise<void>
+}) {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const dragCounter = useRef(0)
+  const directoryInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
 
   // URL loading state
@@ -1233,6 +1362,119 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
   const loadFromUrl = useSceneStore((s) => s.actions.loadFromUrl)
 
   const handleFiles = useCallback(async ({ segments, rejection, inventory }: ScanResult) => {
+    let preflightIdentity = null
+    let preflightCompiledRecipe: CompiledRecipeV1 | null = null
+    const preflightPresentation = window.__EGOLENS_PREFLIGHT_PRESENTATION__
+    const expectedSourceManifestHash = window.__EGOLENS_EXPECTED_SOURCE_MANIFEST_HASH__
+    const suppliedPreflightRecipe = window.__EGOLENS_PREFLIGHT_RECIPE__
+    if (suppliedPreflightRecipe != null && !expectedSourceManifestHash) {
+      throw new Error('A local preflight recipe requires a precommitted source identity.')
+    }
+    if (expectedSourceManifestHash) {
+      if (suppliedPreflightRecipe == null) {
+        throw new Error('Counted local preflight requires its Phase 9 author recipe.')
+      }
+      if (!inventory || inventory.snapshot().truncated || inventory.snapshot().revoked) {
+        throw new Error('Counted local preflight requires a complete browser-authorized inventory.')
+      }
+      const source = await generateSourceCatalogV1(inventory, { transportChunkSize: null })
+      if (source.sourceManifestHash !== expectedSourceManifestHash) {
+        throw new Error('SOURCE_MANIFEST_HASH_MISMATCH: selected local bytes do not match the precommitted source.')
+      }
+      const datasetId = segments.has('__nuscenes__')
+        ? 'nuscenes'
+        : segments.has('__argoverse2__') ? 'argoverse2' : 'waymo'
+      const compiled = compileRecipeV1(suppliedPreflightRecipe, bundledPhase2OperatorRegistry)
+      if (compiled.normalizedManifest.id !== datasetId) {
+        throw new Error(`Counted local recipe targets ${compiled.normalizedManifest.id}, not ${datasetId}.`)
+      }
+      preflightCompiledRecipe = compiled
+      const [recipeHash, formatFingerprint, operatorSetFingerprint] = await Promise.all([
+        recipeHashV1(compiled.recipe),
+        formatFingerprintV1(compiled.recipe, inventory),
+        operatorSetFingerprintV1(compiled.recipe.engine.requiredOperators),
+      ])
+      preflightIdentity = {
+        sourceManifestHash: source.sourceManifestHash,
+        catalogHash: null,
+        shareDescriptorHash: null,
+        recipeHash,
+        formatFingerprint,
+        operatorSetFingerprint,
+      }
+    }
+    const finishCountedLoad = async (loaded: Map<string, Map<string, File>>) => {
+      if (preflightPresentation) {
+        setPendingCameraPose(
+          [...preflightPresentation.cameraPose.position],
+          [...preflightPresentation.cameraPose.target],
+          preflightPresentation.cameraPose.azimuth,
+          preflightPresentation.cameraPose.distance,
+        )
+      }
+      await onFilesLoaded(loaded, preflightCompiledRecipe ?? undefined)
+      const requestedScene = window.__EGOLENS_PREFLIGHT_SCENE__
+      const state = useSceneStore.getState()
+      if (requestedScene && state.currentSegment !== requestedScene) {
+        if (!state.availableSegments.includes(requestedScene)) {
+          throw new Error(`Counted preflight scene is unavailable: ${requestedScene}`)
+        }
+        if (preflightPresentation) {
+          setPendingCameraPose(
+            [...preflightPresentation.cameraPose.position],
+            [...preflightPresentation.cameraPose.target],
+            preflightPresentation.cameraPose.azimuth,
+            preflightPresentation.cameraPose.distance,
+          )
+        }
+        await state.actions.selectSegment(requestedScene)
+      }
+      if (preflightPresentation) {
+        const compiled = preflightCompiledRecipe ?? (loaded.has('__nuscenes__')
+          ? nuScenesCompiledRecipe
+          : loaded.has('__argoverse2__')
+            ? argoverse2CompiledRecipe
+            : waymoCompiledRecipe)
+        const pointSensors = new Map(compiled.recipe.scene.sensors
+          .filter((sensor) => sensor.modality !== 'camera')
+          .map((sensor) => [sensor.id, sensor.rendererId]))
+        const cameras = new Map(compiled.recipe.scene.sensors
+          .filter((sensor) => sensor.modality === 'camera')
+          .map((sensor) => [sensor.id, sensor.rendererId]))
+        const visibleSensors = new Set(preflightPresentation.visibleSensorIds.map((id) => {
+          const rendererId = pointSensors.get(id)
+          if (rendererId === undefined) throw new Error(`Unknown preflight sensor ID: ${id}`)
+          return rendererId
+        }))
+        const activeCam = preflightPresentation.activeCameraId === null
+          ? null
+          : cameras.get(preflightPresentation.activeCameraId)
+        if (preflightPresentation.activeCameraId !== null && activeCam === undefined) {
+          throw new Error(`Unknown preflight camera ID: ${preflightPresentation.activeCameraId}`)
+        }
+        useSceneStore.getState().actions.pause()
+        useSceneStore.getState().actions.setTheme(preflightPresentation.theme, preflightPresentation.accent)
+        useSceneStore.setState({
+          cameraStripVisible: preflightPresentation.cameraStrip,
+          worldMode: preflightPresentation.coordinateMode === 'world',
+          visibleSensors,
+          activeCam: activeCam ?? null,
+          colormapMode: preflightPresentation.colormap,
+          boxMode: preflightPresentation.boxMode,
+          trailLength: preflightPresentation.trailLength,
+          pointSize: preflightPresentation.pointSize,
+          pointOpacity: preflightPresentation.pointOpacity,
+          showLidarOverlay: preflightPresentation.overlays.lidarProjection,
+          showKeypoints3D: preflightPresentation.overlays.keypoints3d,
+          showKeypoints2D: preflightPresentation.overlays.keypoints2d,
+          showCameraSeg: preflightPresentation.overlays.cameraSegmentation,
+          playbackSpeed: preflightPresentation.playbackSpeed,
+          followCam: preflightPresentation.followCamera,
+          isPlaying: false,
+        })
+      }
+      if (preflightIdentity) setActivePreflightRuntimeIdentityV1(preflightIdentity)
+    }
     if (segments.size === 0) {
       // Restating the requirement is what left an ex-Zoox PM asking "what folder
       // do I drop?" twice against a 2 TB tree. Name what we saw instead.
@@ -1250,13 +1492,13 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
     // nuScenes sentinel key — pass directly (store handles validation)
     if (segments.has('__nuscenes__')) {
       setError(null)
-      await onFilesLoaded(segments)
+      await finishCountedLoad(segments)
       return
     }
     // Argoverse 2 sentinel key — pass directly (store handles validation)
     if (segments.has('__argoverse2__')) {
       setError(null)
-      await onFilesLoaded(segments)
+      await finishCountedLoad(segments)
       return
     }
     // Waymo: check that at least one segment has vehicle_pose (required)
@@ -1267,7 +1509,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       return
     }
     setError(null)
-    await onFilesLoaded(new Map(valid))
+    await finishCountedLoad(new Map(valid))
   }, [onFilesLoaded])
 
   const onDrop = useCallback(async (e: React.DragEvent) => {
@@ -1320,6 +1562,18 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         setScanning(false)
         return
       }
+      setError(`Failed to scan folder: ${err instanceof Error ? err.message : String(err)}`)
+      setScanning(false)
+    }
+  }, [handleFiles])
+
+  const onSelectedFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setScanning(true)
+    setError(null)
+    try {
+      await handleFiles(scanSelectedFiles(files))
+    } catch (err) {
       setError(`Failed to scan folder: ${err instanceof Error ? err.message : String(err)}`)
       setScanning(false)
     }
@@ -1732,11 +1986,25 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
               }}>
                 Drop a dataset folder here
               </span>
-              {hasDirectoryPicker() && (
-                <>
-                  <span style={{ fontSize: '12px', fontFamily: fonts.sans, color: colors.textDim }}>or</span>
-                  <button
-                    onClick={onPickFolder}
+              <>
+                <span style={{ fontSize: '12px', fontFamily: fonts.sans, color: colors.textDim }}>or</span>
+                <input
+                  ref={directoryInputRef}
+                  data-testid="dataset-folder-input"
+                  type="file"
+                  multiple
+                  hidden
+                  {...{ webkitdirectory: '' }}
+                  onChange={(event) => {
+                    void onSelectedFiles(event.currentTarget.files)
+                    event.currentTarget.value = ''
+                  }}
+                />
+                <button
+                    onClick={() => {
+                      if (hasDirectoryPicker()) void onPickFolder()
+                      else directoryInputRef.current?.click()
+                    }}
                     style={{
                       padding: '5px 14px',
                       fontSize: '12px',
@@ -1755,11 +2023,10 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'transparent'
                     }}
-                  >
-                    Select Folder
-                  </button>
-                </>
-              )}
+                >
+                  Select Folder
+                </button>
+              </>
             </div>
             <div style={{
               fontSize: '12px',

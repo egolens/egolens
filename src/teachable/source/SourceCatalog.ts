@@ -8,7 +8,7 @@ import { IncrementalSha256V1, sha256DigestV1 } from './sha256'
 
 export const SOURCE_CATALOG_SCHEMA_V1 = 'egolens-source-catalog-v1' as const
 export const DEFAULT_TRANSPORT_CHUNK_SIZE_V1 = 1024 * 1024
-export const MAX_SOURCE_CATALOG_ENTRIES_V1 = 20_000
+export const MAX_SOURCE_CATALOG_ENTRIES_V1 = 50_000
 export const MAX_SOURCE_CATALOG_BYTES_V1 = 16 * 1024 * 1024
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u

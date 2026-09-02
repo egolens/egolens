@@ -2,7 +2,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { canonicalize, verifySignedReceipt } from './lib/oracle-receipts.mjs'
+import { canonicalize, sha256Canonical, verifySignedReceipt } from './lib/oracle-receipts.mjs'
 
 const argv = process.argv.slice(2)
 const values = (name) => argv.flatMap((value, index) => value === `--${name}` ? [argv[index + 1]] : []).filter(Boolean)
@@ -41,7 +41,7 @@ const receipts = await Promise.all(receiptPaths.map(async (receiptPath) => ({
   path: path.resolve(receiptPath),
   receipt: JSON.parse(await readFile(path.resolve(receiptPath), 'utf8')),
 })))
-const checks = receipts.map(({ path: receiptPath, receipt }) => {
+const checks = receipts.map(({ receipt }) => {
   const requiredChecks = ['integrity', 'target', 'coverage', 'structural', 'numeric', 'perceptual']
   const receiptChecks = Array.isArray(receipt.checks) ? receipt.checks : []
   const checkNames = new Set(receiptChecks.map((check) => check.name))
@@ -49,7 +49,6 @@ const checks = receipts.map(({ path: receiptPath, receipt }) => {
   return {
     datasetId: receipt.target?.datasetId ?? null,
     caseId: receipt.target?.caseId ?? null,
-    path: receiptPath,
     passed: verifySignedReceipt(receipt, publicKey, keyId)
       && receipt.passed === true
       && receipt.oracleGeneratorCommit === expectedCommit
@@ -75,7 +74,7 @@ const report = {
   expectedGeneratorCommit: expectedCommit,
   expectedCandidateCommit,
   signingKeyId: keyId,
-  requirements: path.resolve(requirementsPath),
+  requirementsHash: sha256Canonical(requirements),
   checks,
 }
 const json = `${JSON.stringify(report, null, 2)}\n`

@@ -144,6 +144,7 @@ export function installPerformanceProbe(force = false): void {
   if (typeof window === 'undefined') return
   const enabled = force
     || import.meta.env.DEV
+    || window.__EGOLENS_BENCHMARK_MODE__ === true
     || new URLSearchParams(window.location.search).get('perf') === '1'
   if (!enabled || window.__EGOLENS_PERF__) return
   const probe: EgoLensPerformanceProbeV1 = Object.freeze({

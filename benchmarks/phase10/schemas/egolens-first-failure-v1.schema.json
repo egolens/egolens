@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-first-failure-v1.schema.json",
+  "title": "EgoLens public-safe first failure artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "verifierBinding", "artifactId", "attemptId", "applicationCommit", "phase",
+    "sourceCaseManifestHash", "sourceManifestHash", "observedAt", "terminalCode",
+    "diagnosticHash", "boundedInspectionHash", "classification", "artifactHash"
+  ],
+  "properties": {
+    "schema": { "const": "egolens-first-failure-v1" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
+    "artifactId": { "$ref": "#/$defs/id" },
+    "attemptId": { "$ref": "#/$defs/id" },
+    "applicationCommit": { "$ref": "#/$defs/commit" },
+    "phase": { "enum": ["D", "A", "B-persisted-local", "B-imported-local", "B-remote-share"] },
+    "sourceCaseManifestHash": { "$ref": "#/$defs/hash" },
+    "sourceManifestHash": { "$ref": "#/$defs/hash" },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "terminalCode": { "$ref": "#/$defs/id" },
+    "diagnosticHash": { "$ref": "#/$defs/hash" },
+    "boundedInspectionHash": { "$ref": "#/$defs/hash" },
+    "classification": { "$ref": "#/$defs/classification" },
+    "artifactHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "verifierBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash",
+        "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash",
+        "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"
+      ],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" },
+        "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 },
+        "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" },
+        "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    },
+    "classification": {
+      "enum": [
+        "unclassified", "source-limitation", "generic-reader-operator-gap",
+        "extension-security-gap", "authoring-observability-gap",
+        "runtime-resource-gap", "recipe-contract-gap", "normalized-scene-contract-gap"
+      ]
+    }
+  }
+}

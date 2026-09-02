@@ -733,6 +733,15 @@ const recordsSelect: CoreOperatorImplementationV1 = async (inputs, params) => {
   const aliases = typeof params.aliases === 'object' && params.aliases !== null
     ? params.aliases as Readonly<Record<string, unknown>>
     : {}
+  const segmentIdentity = typeof params.segmentIdentity === 'object' && params.segmentIdentity !== null
+    ? params.segmentIdentity as Readonly<Record<string, unknown>>
+    : null
+  const metadataKey = segmentIdentity?.metadataKey === undefined
+    ? undefined
+    : String(segmentIdentity.metadataKey)
+  if (metadataKey !== undefined && (metadataKey.length === 0 || metadataKey.length > 128)) {
+    throw new Error('GRAPH_SEGMENT_IDENTITY_INVALID')
+  }
   return {
     records: {
       kind: 'records',
@@ -742,6 +751,12 @@ const recordsSelect: CoreOperatorImplementationV1 = async (inputs, params) => {
           ...Object.fromEntries(fields.map((field) => [field, row[field]])),
           ...Object.fromEntries(Object.entries(aliases).map(([target, source]) => [target, row[String(source)]])),
         })),
+      ...(segmentIdentity ? {
+        segmentIdentity: {
+          labelFromSceneId: segmentIdentity.labelFromSceneId === true,
+          ...(metadataKey === undefined ? {} : { metadataKey }),
+        },
+      } : {}),
     } satisfies GraphRecordsV1,
   }
 }
@@ -772,6 +787,7 @@ function relationalCameraPlan(
   const translationField = String(params.translationField)
   const sensors = new Map(inputs.sensors.rows.map((row) => [String(row[sensorKeyField]), row]))
   const calibrations = new Map<string, NormalizedCameraCalibrationV1>()
+  const sensorTransforms: { sensorId: string; egoFromSensor: Float64Array }[] = []
   const calibrationByKey = new Map(inputs.calibration.rows.map((row) => [String(row[calibrationKeyField]), row]))
   const dimensionsByCalibration = new Map<string, readonly [number, number]>()
   for (const row of inputs.sampleData.rows) {
@@ -782,19 +798,22 @@ function relationalCameraPlan(
   }
   for (const [key, calibration] of calibrationByKey) {
     const sensor = sensors.get(String(calibration[calibrationSensorKeyField]))
-    if (!sensor || String(sensor[modalityField]) !== cameraModality) continue
+    if (!sensor) continue
     const sensorId = String(sensor[sensorIdField])
+    const rotation = finiteTuple(calibration[quaternionField], 4, quaternionField) as [number, number, number, number]
+    const translation = finiteTuple(calibration[translationField], 3, translationField) as [number, number, number]
+    const egoFromSensor = new Float64Array(quaternionToMatrix4x4(rotation, translation))
+    sensorTransforms.push({ sensorId, egoFromSensor })
+    if (String(sensor[modalityField]) !== cameraModality) continue
     const matrix = calibration[intrinsicMatrixField]
     if (!Array.isArray(matrix)) continue
     const row0 = finiteTuple(matrix[0], 3, `${intrinsicMatrixField}[0]`)
     const row1 = finiteTuple(matrix[1], 3, `${intrinsicMatrixField}[1]`)
     const [width, height] = dimensionsByCalibration.get(key) ?? [Number(params.defaultWidth), Number(params.defaultHeight)]
-    const rotation = finiteTuple(calibration[quaternionField], 4, quaternionField) as [number, number, number, number]
-    const translation = finiteTuple(calibration[translationField], 3, translationField) as [number, number, number]
     calibrations.set(sensorId, {
       sensorId, frameId: `${sensorId}${String(params.frameIdSuffix)}`, width, height,
       intrinsics: [row0[0], row1[1], row0[2], row1[2]], distortionModel: 'none', distortion: [],
-      egoFromCamera: new Float64Array(quaternionToMatrix4x4(rotation, translation)),
+      egoFromCamera: egoFromSensor,
     })
   }
   const files = new Set(encoded.files.map((file) => file.path))
@@ -808,7 +827,7 @@ function relationalCameraPlan(
       path, sensorId: String(sensor[sensorIdField]),
     }]
   })
-  return { kind: 'camera-plan', encoded, calibrations, maxDelta: 0n, bindings }
+  return { kind: 'camera-plan', encoded, calibrations, sensorTransforms, maxDelta: 0n, bindings }
 }
 
 async function parquetCameraPlan(

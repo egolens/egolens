@@ -80,7 +80,17 @@ describe('Argoverse 2 executable recipe graph', () => {
     })
     expect(diagnostics).toEqual([])
     expect(scene.manifest.capabilities).toEqual(compiledRecipe.capabilities)
-    expect(scene.index.segments[0]).toMatchObject({ id: 'av2-log', frameCount: 1 })
+    expect(scene.index.segments[0]).toEqual({
+      id: 'av2-log',
+      label: 'av2-log',
+      firstFrame: 0,
+      frameCount: 1,
+      metadata: { logId: 'av2-log' },
+    })
+    expect(scene.relations.staticTransforms.map((entry) => entry.childFrameId)).toEqual([
+      'lidar-frame',
+      'ring_front_center-frame',
+    ])
     expect(scene.relations.cameraCalibrations.get('ring_front_center')).toMatchObject({
       distortionModel: 'brown-conrady', distortion: [0, 0, 0, 0, 0],
     })
@@ -93,7 +103,9 @@ describe('Argoverse 2 executable recipe graph', () => {
     expect(frame.worldFromEgo).toEqual(new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]))
     expect(frame.pointClouds[0]).toMatchObject({ sensorId: 'lidar', frameId: 'ego', pointCount: 2, stride: 4, attributes: ['x', 'y', 'z', 'intensity'] })
     expect(frame.pointClouds[0].values).toEqual(new Float32Array([1, 3, 5, 7, 2, 4, 6, 8]))
-    expect(frame.cameraImages).toMatchObject([{ sensorId: 'ring_front_center', timestampMicros: 1_000n }])
+    expect(frame.cameraImages).toMatchObject([{
+      sensorId: 'ring_front_center', timestampMicros: 1_000n, width: 1550, height: 2048,
+    }])
     expect(frame.boxes3d).toMatchObject([{ id: 'track', classId: 'REGULAR_VEHICLE', center: [10, 0, 0], dimensions: [4, 2, 2] }])
     expect(frame.boxes2d).toMatchObject([{ cameraId: 'ring_front_center', center: [50, 50], dimensions: [25, 25] }])
     expect(scene.relations.box2dToBox3d.get(frame.boxes2d[0].id)).toBe('track')

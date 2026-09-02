@@ -465,9 +465,11 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
       const sensor = sensors.get(result.laserName)
       if (!sensor || sensor.modality === 'camera') continue
       const stride = result.pointCount > 0 ? result.positions.length / result.pointCount : this.manifest.pointLayout.interleavedAttributes.length
-      const attributes = stride === this.manifest.pointLayout.interleavedAttributes.length
-        ? this.manifest.pointLayout.interleavedAttributes
-        : ['x', 'y', 'z', ...Array.from({ length: Math.max(0, stride - 3) }, (_, index) => `attribute-${index + 3}`)]
+      const attributes = sensor.modality === 'radar' && stride === 5
+        ? ['x', 'y', 'z', 'speedComp', 'speedRaw']
+        : stride === this.manifest.pointLayout.interleavedAttributes.length
+          ? this.manifest.pointLayout.interleavedAttributes
+          : ['x', 'y', 'z', ...Array.from({ length: Math.max(0, stride - 3) }, (_, index) => `attribute-${index + 3}`)]
       const cloud: NormalizedPointCloudV1 = {
         sensorId: sensor.id,
         frameId: 'ego',

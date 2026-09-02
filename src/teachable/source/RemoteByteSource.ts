@@ -58,9 +58,13 @@ export interface RemoteByteSourceLimitsV1 {
 }
 
 export const DEFAULT_REMOTE_BYTE_SOURCE_LIMITS_V1: RemoteByteSourceLimitsV1 = Object.freeze({
-  maxTotalResponseBytes: 512 * 1024 * 1024,
+  // Cumulative verified transport I/O. The shipped Waymo case is about
+  // 488 MiB and legitimately rereads bounded Parquet metadata/projections.
+  maxTotalResponseBytes: 1024 * 1024 * 1024,
   maxFullObjectBytes: 64 * 1024 * 1024,
-  maxRangeResponseBytes: 64 * 1024 * 1024,
+  // A Waymo camera-image Parquet column chunk is about 88 MiB; verified
+  // ranges expand to fixed catalog chunk boundaries before decode.
+  maxRangeResponseBytes: 128 * 1024 * 1024,
   maxCacheBytes: 64 * 1024 * 1024,
   maxRetries: 3,
   retryBaseDelayMs: 100,
@@ -377,7 +381,11 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
     this.catalogHash = validated.catalogHash
     this.sourceManifestHash = validated.sourceManifestHash
     for (const entry of this.catalog.entries) this.#entries.set(entry.path, entry)
-    this.#fetch = options.fetch ?? fetch
+    // Window.fetch is a Web IDL method in Chromium. Storing it in a class
+    // field and invoking `this.#fetch(...)` otherwise supplies the
+    // RemoteByteSource instance as its receiver and fails with
+    // `TypeError: Illegal invocation` before any request is sent.
+    this.#fetch = (options.fetch ?? globalThis.fetch).bind(globalThis)
     this.#limits = checkedLimits(options.limits)
     this.#cache = options.cache ?? new VerifiedSourceCacheV1(this.#limits.maxCacheBytes)
     this.#ownsCache = options.cache === undefined

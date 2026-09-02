@@ -43,7 +43,12 @@ function radarFile(): File {
   return new File([buffer], 'radar.pcd')
 }
 
-function fixture(options: { radar?: boolean; camera?: boolean; annotations?: boolean } = {}) {
+function fixture(options: {
+  radar?: boolean
+  camera?: boolean
+  annotations?: boolean
+  calibrationDecoys?: boolean
+} = {}) {
   const radar = options.radar ?? true
   const camera = options.camera ?? true
   const annotations = options.annotations ?? true
@@ -82,12 +87,58 @@ function fixture(options: { radar?: boolean; camera?: boolean; annotations?: boo
     'lidarseg.json': [{ token: 'seg', sample_data_token: 'lidar-data', filename: 'lidarseg/v1.0-mini/one.bin' }],
     'panoptic.json': [],
   }
+  if (options.calibrationDecoys) {
+    tables['scene.json'].unshift({
+      token: 'scene-before', log_token: 'log', nbr_samples: 1,
+      first_sample_token: 'sample-before', last_sample_token: 'sample-before',
+      name: 'scene-before', description: 'decoy',
+    })
+    tables['scene.json'].push({
+      token: 'scene-after', log_token: 'log', nbr_samples: 1,
+      first_sample_token: 'sample-after', last_sample_token: 'sample-after',
+      name: 'scene-after', description: 'decoy',
+    })
+    tables['sample.json'].unshift({
+      token: 'sample-before', timestamp: 500_000, prev: '', next: '', scene_token: 'scene-before',
+    })
+    tables['sample.json'].push({
+      token: 'sample-after', timestamp: 1_500_000, prev: '', next: '', scene_token: 'scene-after',
+    })
+    tables['calibrated_sensor.json'].unshift({
+      token: 'lidar-cal-before', sensor_token: 'lidar-sensor',
+      translation: [90, 0, 0], rotation: [1, 0, 0, 0], camera_intrinsic: [],
+    })
+    tables['calibrated_sensor.json'].push({
+      token: 'lidar-cal-after', sensor_token: 'lidar-sensor',
+      translation: [-90, 0, 0], rotation: [1, 0, 0, 0], camera_intrinsic: [],
+    })
+    tables['ego_pose.json'].unshift({
+      token: 'pose-before', timestamp: 500_000, translation: [0, 0, 0], rotation: [1, 0, 0, 0],
+    })
+    tables['ego_pose.json'].push({
+      token: 'pose-after', timestamp: 1_500_000, translation: [0, 0, 0], rotation: [1, 0, 0, 0],
+    })
+    tables['sample_data.json'].unshift({
+      token: 'lidar-before', sample_token: 'sample-before', ego_pose_token: 'pose-before',
+      calibrated_sensor_token: 'lidar-cal-before', timestamp: 500_000, fileformat: 'pcd.bin',
+      is_key_frame: true, height: 0, width: 0, filename: 'samples/LIDAR_TOP/a-decoy.pcd.bin', prev: '', next: '',
+    })
+    tables['sample_data.json'].push({
+      token: 'lidar-after', sample_token: 'sample-after', ego_pose_token: 'pose-after',
+      calibrated_sensor_token: 'lidar-cal-after', timestamp: 1_500_000, fileformat: 'pcd.bin',
+      is_key_frame: true, height: 0, width: 0, filename: 'samples/LIDAR_TOP/z-decoy.pcd.bin', prev: '', next: '',
+    })
+  }
   const files = new Map<string, File | string>()
   for (const [name, rows] of Object.entries(tables)) {
     const path = `v1.0-mini/${name}`
     files.set(path, new File([JSON.stringify(rows)], name, { type: 'application/json' }))
   }
   files.set('samples/LIDAR_TOP/one.pcd.bin', lidarFile([[1, 2, 3, 0.5, 9], [-1, -2, -3, 0.75, 10]]))
+  if (options.calibrationDecoys) {
+    files.set('samples/LIDAR_TOP/a-decoy.pcd.bin', lidarFile([[1, 2, 3, 0.5, 9]]))
+    files.set('samples/LIDAR_TOP/z-decoy.pcd.bin', lidarFile([[1, 2, 3, 0.5, 9]]))
+  }
   if (radar) files.set('samples/RADAR_FRONT/one.pcd', radarFile())
   if (camera) files.set('samples/CAM_FRONT/one.jpg', new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'one.jpg'))
   files.set('lidarseg/v1.0-mini/one.bin', new File([new Uint8Array([17, 24])], 'one.bin'))
@@ -176,6 +227,22 @@ describe('nuScenes executable recipe graph', () => {
       expect(cameraBinding.scene.manifest.capabilities.has(capability)).toBe(false)
       expect(cameraBinding.diagnostics).toContainEqual(expect.objectContaining({ jsonPointer: `/outputs/${capability}` }))
     }
+  })
+
+  it('preserves ordered relational calibrations for conformance-v1 compatibility', async () => {
+    const { compiledRecipe, files, inventoryEntries } = fixture({ calibrationDecoys: true })
+    const { scene, metadata } = await bindRecipeSceneV1({
+      compiledRecipe, source: new MappedByteSourceV1(files), inventoryEntries, sceneId: 'scene-0001',
+    })
+
+    expect(metadata.lidarCalibrations.get(1)?.extrinsic[3]).toBe(-90)
+    expect(scene.relations.staticTransforms
+      .filter((entry) => entry.childFrameId === 'LIDAR_TOP-frame')
+      .map((entry) => entry.parentFromChild[3])).toEqual([90, 10, -90])
+    await expect(scene.loadFrame(0, { capabilities: scene.manifest.capabilities })).resolves.toMatchObject({
+      pointClouds: [expect.objectContaining({ values: new Float32Array([-89, 2, 3, 0.5, -91, -2, -3, 0.75]) })],
+    })
+    scene.dispose()
   })
 
   it('fails closed with the bound path when required relational input is missing or malformed', async () => {

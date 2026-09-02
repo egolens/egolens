@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://egolens.org/schema/egolens-adapter-amnesia-boundary-report-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schemaVersion",
+    "candidateCommit",
+    "enforcement",
+    "controller",
+    "cases",
+    "passed",
+    "reportHash"
+  ],
+  "properties": {
+    "kind": { "const": "egolens-adapter-amnesia-boundary-report" },
+    "schemaVersion": { "const": 1 },
+    "candidateCommit": { "$ref": "#/$defs/commit" },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "coordinatorRuntimeId"],
+      "properties": {
+        "platform": { "const": "macos-seatbelt" },
+        "coordinatorRuntimeId": { "const": "egolens-amnesia-boundary-coordinator-v1" }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetAccess",
+        "applicationAccess",
+        "candidateOutputAccess",
+        "toolNetwork",
+        "modelControlPlane"
+      ],
+      "properties": {
+        "datasetAccess": { "const": false },
+        "applicationAccess": { "const": false },
+        "candidateOutputAccess": { "const": false },
+        "toolNetwork": { "const": "loopback-only" },
+        "modelControlPlane": { "const": "exact-controller-process-only" }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/case" }
+    },
+    "passed": { "const": true },
+    "reportHash": { "$ref": "#/$defs/canonicalHash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "canonicalHash": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "absolutePath": {
+      "type": "string",
+      "pattern": "^/(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//).+$",
+      "minLength": 2
+    },
+    "freshDirectory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalPath", "fresh", "emptyBefore", "destroyedAfter"],
+      "properties": {
+        "canonicalPath": { "$ref": "#/$defs/absolutePath" },
+        "fresh": { "const": true },
+        "emptyBefore": { "const": true },
+        "destroyedAfter": { "const": true }
+      }
+    },
+    "mount": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "access", "canonicalPath"],
+          "properties": {
+            "name": { "const": "application" },
+            "access": { "const": "read-only" },
+            "canonicalPath": { "$ref": "#/$defs/absolutePath" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "access", "canonicalPath"],
+          "properties": {
+            "name": { "const": "dataset" },
+            "access": { "const": "read-only" },
+            "canonicalPath": { "$ref": "#/$defs/absolutePath" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "access", "canonicalPath"],
+          "properties": {
+            "name": { "const": "candidate-output" },
+            "access": { "const": "write-only" },
+            "canonicalPath": { "$ref": "#/$defs/absolutePath" }
+          }
+        }
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId",
+        "caseId",
+        "runId",
+        "sourceCommit",
+        "applicationBuildHash",
+        "recipeHash",
+        "sourceFingerprint",
+        "sourceContentHash",
+        "policyHash",
+        "negativeProbeReportHash",
+        "sourceCount",
+        "controllerDatasetAccess",
+        "externalToolNetworkDenied",
+        "loopbackOnly",
+        "outputReadDenied",
+        "datasetWriteDenied",
+        "forbiddenResourceReadDenied",
+        "oneSourceAtATime",
+        "publicTools",
+        "mounts",
+        "browserProfile",
+        "runtimeScratch"
+      ],
+      "properties": {
+        "datasetId": { "enum": ["waymo", "nuscenes", "argoverse2"] },
+        "caseId": { "$ref": "#/$defs/id" },
+        "runId": { "$ref": "#/$defs/id" },
+        "sourceCommit": { "$ref": "#/$defs/commit" },
+        "applicationBuildHash": { "$ref": "#/$defs/hash" },
+        "recipeHash": { "$ref": "#/$defs/hash" },
+        "sourceFingerprint": { "$ref": "#/$defs/canonicalHash" },
+        "sourceContentHash": { "$ref": "#/$defs/canonicalHash" },
+        "policyHash": { "$ref": "#/$defs/hash" },
+        "negativeProbeReportHash": { "$ref": "#/$defs/hash" },
+        "sourceCount": { "const": 1 },
+        "controllerDatasetAccess": { "const": false },
+        "externalToolNetworkDenied": { "const": true },
+        "loopbackOnly": { "const": true },
+        "outputReadDenied": { "const": true },
+        "datasetWriteDenied": { "const": true },
+        "forbiddenResourceReadDenied": { "const": true },
+        "oneSourceAtATime": { "const": true },
+        "publicTools": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "egolens_teachable_apply_revision",
+              "egolens_teachable_finalize",
+              "egolens_teachable_get_contract",
+              "egolens_teachable_get_state",
+              "egolens_teachable_inspect"
+            ]
+          }
+        },
+        "mounts": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/mount" }
+        },
+        "browserProfile": { "$ref": "#/$defs/freshDirectory" },
+        "runtimeScratch": { "$ref": "#/$defs/freshDirectory" }
+      }
+    }
+  }
+}

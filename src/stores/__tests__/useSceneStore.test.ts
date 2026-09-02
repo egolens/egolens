@@ -18,6 +18,14 @@ import { resolve } from 'path'
 import type { AsyncBuffer } from 'hyparquet'
 import type { LidarCalibration, RangeImage } from '../../utils/rangeImage'
 
+const workerInitPayloads = vi.hoisted(() => [] as Record<string, unknown>[])
+
+interface MutableRecipeFixture {
+  identity: { name: string }
+  sources: Record<string, { params?: unknown }>
+  pipelines: Record<string, { nodes: Array<{ inputs?: Record<string, string> }> }>
+}
+
 // Type-only handles to the dynamically imported modules used by the mock pool.
 // (Type-level `import()` is erased at runtime, so this doesn't defeat vi.mock hoisting.)
 type ParquetModule = typeof import('../../utils/parquet')
@@ -56,6 +64,7 @@ vi.mock('../../workers/workerPool', () => {
       constructor(public readonly concurrency: number, _workerFactory?: () => Worker) {}
 
       async init(opts: Record<string, unknown>) {
+        workerInitPayloads.push(opts)
         // Camera pool init — no fixtures, return 0 batches
         if ('cameraUrl' in opts) {
           return { numBatches: 0 }
@@ -176,7 +185,15 @@ vi.mock('../../workers/workerPool', () => {
 // ---------------------------------------------------------------------------
 
 import { isHeavyComponent } from '../../utils/parquet'
-import { useSceneStore } from '../useSceneStore'
+import {
+  createActiveConformanceScene,
+  getActiveConformanceDescriptor,
+  useSceneStore,
+} from '../useSceneStore'
+import { getManifest } from '../../adapters/registry'
+import { waymoCompiledRecipe } from '../../adapters/recipes/bundled'
+import { bundledPhase2OperatorRegistry } from '../../teachable/operators/bundledPhase2'
+import { compileRecipeV1 } from '../../teachable/recipe/compiler'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -504,6 +521,39 @@ describe('useSceneStore', () => {
       expect(state().pointOpacity).toBe(1)
       actions().setPointOpacity(0.85) // restore
     })
+  })
+
+  describe('counted external recipe', () => {
+    it('keeps renamed author sources on the managed scene, worker, conformance, and reload paths', async () => {
+      const recipe = structuredClone(waymoCompiledRecipe.recipe) as unknown as MutableRecipeFixture
+      recipe.identity.name = 'Fresh Phase 9 Waymo recipe'
+      recipe.sources.blindAuthoredLidar = recipe.sources.lidarRows
+      delete recipe.sources.lidarRows
+      for (const pipeline of Object.values(recipe.pipelines)) {
+        for (const node of pipeline.nodes) {
+          for (const [name, value] of Object.entries(node.inputs ?? {})) {
+            if (typeof value === 'string' && value.startsWith('lidarRows.')) {
+              node.inputs[name] = `blindAuthoredLidar.${value.slice('lidarRows.'.length)}`
+            }
+          }
+        }
+      }
+      const compiled = compileRecipeV1(recipe as never, bundledPhase2OperatorRegistry)
+      workerInitPayloads.length = 0
+
+      await actions().loadDataset(buildTestSources() as Map<string, File | string>, compiled)
+      expect(getManifest().name).toBe('Fresh Phase 9 Waymo recipe')
+      expect(getActiveConformanceDescriptor()).toMatchObject({ datasetId: 'waymo', frameCount: 199 })
+      expect(workerInitPayloads.find((payload) => 'lidarUrl' in payload)?.lidarReaderParams)
+        .toEqual(recipe.sources.blindAuthoredLidar.params)
+      const conformance = await createActiveConformanceScene()
+      expect(conformance.manifest.name).toBe('Fresh Phase 9 Waymo recipe')
+      conformance.dispose()
+
+      await actions().loadDataset(buildTestSources() as Map<string, File | string>)
+      expect(getManifest().name).toBe('Fresh Phase 9 Waymo recipe')
+      expect(getActiveConformanceDescriptor()).toMatchObject({ datasetId: 'waymo', frameCount: 199 })
+    }, 60000)
   })
 
   describe('reset', () => {

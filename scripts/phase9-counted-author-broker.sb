@@ -1,0 +1,122 @@
+(version 1)
+(deny default)
+
+; Non-file process services needed by Node and headless Chromium. File and
+; network capabilities remain an explicit allowlist below.
+(allow process*)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+(allow mach*)
+(allow ipc-posix*)
+(allow iokit*)
+
+; Immutable operating-system runtime only. No user, temporary, removable, or
+; network-volume subtree is admitted by this deny-default profile.
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (literal "/var")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/ColorSync")
+  (subpath "/Library/Preferences")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone"))
+
+; Trusted executable/runtime inputs. These paths contain the broker runtime,
+; never repository source, recipes, oracle material, or judge material.
+(allow file-read* file-test-existence file-map-executable
+  (subpath (param "NODE_RUNTIME_ROOT"))
+  (subpath (param "PLAYWRIGHT_ROOT"))
+  (subpath (param "PLAYWRIGHT_CORE_ROOT"))
+  (subpath (param "CHROME_ROOT"))
+  (literal (param "BROKER_FILE"))
+  (literal (param "PROBE_FILE")))
+
+; The two read-only semantic mounts for one case.
+(allow file-read* file-test-existence
+  (subpath (param "APPLICATION_ROOT"))
+  (subpath (param "APPLICATION_REAL_ROOT"))
+  (subpath (param "DATASET_ROOT"))
+  (subpath (param "DATASET_REAL_ROOT")))
+
+; Empty, case-private runtime state. The coordinator verifies it is empty before
+; launch and destroys it after the complete browser process exits.
+(allow file-read* file-write* file-test-existence
+  (subpath (param "BROWSER_PROFILE"))
+  (subpath (param "BROWSER_PROFILE_REAL"))
+  (subpath (param "RUNTIME_SCRATCH"))
+  (subpath (param "RUNTIME_SCRATCH_REAL")))
+
+; Chrome's macOS ProcessSingleton insists on creating a random
+; com.google.Chrome.* AF_UNIX socket directory in the per-user Darwin temp
+; root. Metadata traversal is allowed, but writes are restricted to that exact
+; Chrome-owned prefix; unrelated ambient temp contents stay unreadable and
+; unwritable.
+(allow file-read-metadata file-test-existence
+  (subpath (param "SYSTEM_SOCKET_ROOT"))
+  (subpath (param "SYSTEM_SOCKET_REAL_ROOT")))
+(allow file-write*
+  (require-all
+    (subpath (param "SYSTEM_SOCKET_ROOT"))
+    (regex "/com\\.google\\.Chrome\\.[A-Za-z0-9]+(/.*)?$"))
+  (require-all
+    (subpath (param "SYSTEM_SOCKET_REAL_ROOT"))
+    (regex "/com\\.google\\.Chrome\\.[A-Za-z0-9]+(/.*)?$")))
+
+; Candidate output is genuinely write-only. The broker may create/rename/unlink
+; its predetermined filename but cannot read any file in this mount.
+(allow file-write* file-test-existence
+  (subpath (param "OUTPUT_ROOT"))
+  (subpath (param "OUTPUT_REAL_ROOT")))
+(deny file-read* (subpath (param "OUTPUT_ROOT")))
+(deny file-read* (subpath (param "OUTPUT_REAL_ROOT")))
+
+; Path traversal needs metadata for mount ancestors, but never file contents.
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "NODE_RUNTIME_ROOT"))
+  (path-ancestors (param "PLAYWRIGHT_ROOT"))
+  (path-ancestors (param "PLAYWRIGHT_CORE_ROOT"))
+  (path-ancestors (param "CHROME_ROOT"))
+  (path-ancestors (param "BROKER_FILE"))
+  (path-ancestors (param "PROBE_FILE"))
+  (path-ancestors (param "APPLICATION_REAL_ROOT"))
+  (path-ancestors (param "DATASET_REAL_ROOT"))
+  (path-ancestors (param "OUTPUT_REAL_ROOT"))
+  (path-ancestors (param "BROWSER_PROFILE_REAL"))
+  (path-ancestors (param "RUNTIME_SCRATCH_REAL")))
+
+; Only standard descriptors and entropy devices are visible.
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+; No external network. The single fixed loopback endpoint serves both the exact
+; author build and the authenticated controller bridge.
+(allow network-bind network-inbound
+  (local ip (param "LOOPBACK_BIND_ENDPOINT")))
+(allow network-outbound
+  (remote ip (param "LOOPBACK_REMOTE_ENDPOINT")))
+
+; Chromium's ProcessSingleton and Playwright pipe helpers use case-private
+; AF_UNIX sockets. They remain confined to the two fresh runtime directories.
+(allow network-bind network-inbound
+  (local unix-socket (subpath (param "BROWSER_PROFILE_REAL")))
+  (local unix-socket (subpath (param "RUNTIME_SCRATCH_REAL")))
+  (local unix-socket (subpath (param "SYSTEM_SOCKET_ROOT")))
+  (local unix-socket (subpath (param "SYSTEM_SOCKET_REAL_ROOT"))))
+(allow network-outbound
+  (remote unix-socket (subpath (param "BROWSER_PROFILE_REAL")))
+  (remote unix-socket (subpath (param "RUNTIME_SCRATCH_REAL")))
+  (remote unix-socket (subpath (param "SYSTEM_SOCKET_ROOT")))
+  (remote unix-socket (subpath (param "SYSTEM_SOCKET_REAL_ROOT"))))

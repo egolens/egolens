@@ -407,6 +407,17 @@ all of the following with the Phase 9 finalized recipe and no agent call:
 4. round-trip a share URL into an empty profile and restore the same selected
    scene/frame and presentation state.
 
+The baseline must use the exact three blind-authored recipes finalized by the
+Phase 9 run. Each semantic recipe hash comes from the verified author
+attestation and its signed hidden-oracle receipt; it is not a predeclared hash
+of a bundled recipe. Local, remote, and share replay for a dataset all bind that
+same attested hash, and the baseline freeze records the attestation, aggregate
+gate, signing-key identity, per-dataset receipt hash, and the exact clean judge
+tool commit and judge version (`spec013-phase9-v1`) that signed those receipts;
+that judge commit must equal the Phase 10 verifier's operator-pinned tool
+commit. No held-out rung source is opened while establishing or correcting this
+binding.
+
 The baseline must also pass the Phase 9 Adapter Amnesia gates, applicable Spec
 012 performance/lifecycle scenarios for both transports, production/isolated
 build-boundary scans, and negative tests for catalog traversal, CORS,
