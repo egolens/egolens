@@ -184,6 +184,10 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
         for (const error of registry.validateParams(node.op, dependency, node.params ?? {})) {
           diagnostics.push(diagnostic('OPERATOR_PARAMS_INVALID', error.message ?? `Parameters for operator "${node.op}" are invalid.`, `/pipelines/${pipelineId}/nodes/${node.id}/params${error.instancePath}`))
         }
+        const taxonomy = (node.params as Readonly<Record<string, unknown>> | undefined)?.taxonomy
+        if (typeof taxonomy === 'string' && !recipe.scene.taxonomies.some((entry) => entry.id === taxonomy)) {
+          diagnostics.push(diagnostic('TAXONOMY_UNDECLARED', `Operator "${node.op}" references taxonomy "${taxonomy}", which is not declared in scene.taxonomies.`, `/pipelines/${pipelineId}/nodes/${node.id}/params/taxonomy`))
+        }
       }
     }
   }

@@ -601,6 +601,19 @@ Body outline (claim only what is listed in
   `OPERATOR_INPUTS_INVALID`), a descriptive sample-stage message, and an explicit
   prompt rule that a rejected revision retains no candidate and the complete
   corrected recipe must be resubmitted.
+- 2026-09-02, candidate `5aaa1cd` (includes #49): Waymo passed
+  (`phase9-waymo-33f451d8da4f211c`). The nuScenes author validated 9 of 10
+  capabilities and stopped on `lidarSegmentation`: the public
+  `labels.attach_by_point_index` contract offered only a pose-less two-input
+  form (which for per-file labels can never bind, having no index) and a
+  five-input form that forces panoptic inputs; the author's indexed attempt
+  used the lidarseg `token` instead of `sample_data_token` and a taxonomy id
+  that no `scene.taxonomies` entry declares, and every mismatch surfaced only
+  as `OPTIONAL_OUTPUT_UNBOUND`. Fixed by adding the
+  `pointClouds`/`labels`/`labelIndex` contract variant, failing the sample
+  with `GRAPH_LABEL_INDEX_UNMATCHED` (naming both keys) when selected label
+  files reach no bound point-cloud record, and a compile-time
+  `TAXONOMY_UNDECLARED` diagnostic for operator taxonomy references.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.

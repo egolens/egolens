@@ -308,6 +308,9 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['labels.attach_by_point_index', {
     oneOf: [
       recordContract(['pointClouds', 'labels']),
+      // Binary (per-file) labels need an index that maps each label file to
+      // the point-cloud record key; panoptic labels are optional on top.
+      recordContract(['pointClouds', 'labels', 'labelIndex']),
       recordContract(['pointClouds', 'labels', 'panoptic', 'labelIndex', 'panopticIndex']),
     ],
   }, closedParams({
