@@ -618,7 +618,58 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   execute: coreGraphOperatorImplementationsV1[name as string],
 }))
 
+const pickleLimitContracts = {
+  maxExpandedBytes: positiveLimit,
+  maxRows: positiveLimit,
+  maxMemo: positiveLimit,
+} as const
+
+const pickleRecordsParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    columns: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 128 } },
+    attributes: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 64 } },
+    ...pickleLimitContracts,
+  },
+  required: ['columns'],
+  additionalProperties: false,
+}
+
+const pickleRowsParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    pathField: { type: 'string', minLength: 1, maxLength: 256 },
+    indexField: { type: 'string', minLength: 1, maxLength: 128 },
+    ...pickleLimitContracts,
+  },
+  additionalProperties: false,
+}
+
 const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
+  {
+    name: 'archive.pickle_records',
+    majorVersion: 1,
+    provider: 'core',
+    tier: 1,
+    inputContract: byteInputContract,
+    paramsContract: pickleRecordsParamsContract,
+    outputContract: recordContract(['records']),
+    execution: 'worker',
+    deterministic: true,
+    execute: coreGraphOperatorImplementationsV1['archive.pickle_records'],
+  },
+  {
+    name: 'archive.pickle_rows',
+    majorVersion: 1,
+    provider: 'core',
+    tier: 1,
+    inputContract: byteInputContract,
+    paramsContract: pickleRowsParamsContract,
+    outputContract: recordContract(['rows']),
+    execution: 'worker',
+    deterministic: true,
+    execute: coreGraphOperatorImplementationsV1['archive.pickle_rows'],
+  },
   {
     name: 'archive.npz_array',
     majorVersion: 1,
