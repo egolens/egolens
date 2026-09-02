@@ -1,16 +1,46 @@
 # Spec 014 — Teachable Lens Phase 10 original-data generalization ladder
 
-**Status**: in progress (transport/runtime preflight 10.P1, executable graph
-kernel/Argoverse 2 migration 10.P2, nuScenes graph migration 10.P3, Waymo graph
-migration/legacy removal 10.P4, and verified remote transport 10.P5
-and portable recipe/share round-trip 10.P6 implemented; baseline proofs and
-four-dataset original-drop evidence pending) · **Date**: 2026-08-31
+**Status**: in progress (10.P1–10.P6 implemented; 10.P7 counted evidence on
+hold after the 2026-09-02 direction change below; four-dataset original-drop
+work proceeds as collaborative authoring) · **Date**: 2026-09-02
 
 **Relationship to earlier specs**: this is the normative acceptance addendum for
 [`spec_006_teachable_lens.md`](spec_006_teachable_lens.md) Phase 10. It retains
 the Mystery A/B intent while replacing a fabricated Mystery Drive format with
 a four-rung held-out corpus of unsupported, officially distributed datasets.
 Where this document is more specific, it takes precedence.
+
+## Direction change (2026-09-02)
+
+The 10.P7 counted Phase 9 runs were executed end to end for Waymo, nuScenes,
+and Argoverse 2 (ten tooling defects found and fixed on the way, egolens#47
+through egolens#56). Comparing the first captured blind recipe with the hidden
+oracle showed the structural reason the exact-parity judge cannot pass: a
+blind author that is asked only for capabilities collapses sensors (Waymo
+1 lidar + 1 camera instead of 5 + 5, nuScenes 1 radar + 1 camera instead of
+5 + 6, Argoverse 2 1 camera instead of 7), while every public validation and
+the human review still accept the result.
+
+The owner decided that the "authored with public tools only" purity claim is
+not a goal. The goal is efficient human + Codex collaboration that yields a
+working adapter recipe. Consequences:
+
+- The author workspace asks the human to confirm the sensor layout (counts
+  per modality, defaults inferred from the folder) before authoring; the
+  session publishes it in the public contract, rejects revisions that declare
+  a different layout (`SENSOR_CONFIGURATION_UNMET`), and the review panel
+  shows declared sensors per modality against it (egolens#56).
+- Feedback to the author flows through the Codex chat, not a new review
+  channel; the review receipt keeps only verdicts.
+- The 10.P7 counted evidence PR (PR B) is on hold. Reopening it requires the
+  same sensor layout in `phase9-requirements.json`, a judge that ignores
+  presentation-only fields (manifest name, sensor labels, colors), and fresh
+  counted runs. The exact-parity judge is better used as a parity report
+  during development than as a merge gate.
+- The held-out rungs below no longer wait for that gate. Each rung is
+  attempted as a collaborative authoring session; first-failure artifacts,
+  classification, and the contract-change rule still apply, but the
+  "unopened until 10.P7 freezes" precondition is withdrawn.
 
 ## Finding
 

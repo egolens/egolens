@@ -19,7 +19,7 @@ branch/PR topology changes.
 4. Keep PR #34 Draft. Its current title/body describe evidence that is not valid
    for the present uncommitted tree; a replacement title/body draft is in
    [PR A title and body](#pr-a-title-and-body).
-5. Do not open any held-out A2D2, KITTI Raw, ONCE, or PandaSet source bytes.
+5. Held-out A2D2, KITTI Raw, ONCE, and PandaSet bytes may be opened for collaborative authoring sessions (direction change 2026-09-02; see Spec 014).
 6. The six blockers in [Required next work](#required-next-work) are closed in
    the working tree (see [Blocker status](#blocker-status-2026-09-02)). What
    remains is a final human review of the whole diff, the commit, the push,
