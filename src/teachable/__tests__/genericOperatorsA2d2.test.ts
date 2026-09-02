@@ -66,6 +66,33 @@ describe('generic operators surfaced by the A2D2 rung', () => {
     await expect(rows({}, ['cams_lidars.json'])).rejects.toThrow(/expected a JSON array/u)
   })
 
+  it('expands a nested calibration object into flattened rows through rootPath', async () => {
+    const jsonRecords = coreGraphOperatorImplementationsV1['json.records']!
+    const files = { 'cams_lidars.json': JSON.stringify({ vehicle: {}, lidars: { front_center: { view: { origin: [1, 2, 3], 'x-axis': [1, 0, 0] } }, rear_left: { view: { origin: [0, 0, 0], 'x-axis': [0, 1, 0] } } } }) }
+    const result = await jsonRecords({ files: [{ path: 'cams_lidars.json', size: 1 }] }, { layout: 'object-rows', keyField: 'name', rootPath: 'lidars', flatten: true }, context(files))
+    expect((result.rows as { rows: unknown[] }).rows).toEqual([
+      { name: 'front_center', 'view.origin': [1, 2, 3], 'view.x-axis': [1, 0, 0] },
+      { name: 'rear_left', 'view.origin': [0, 0, 0], 'view.x-axis': [0, 1, 0] },
+    ])
+    await expect(jsonRecords({ files: [{ path: 'cams_lidars.json', size: 1 }] }, { layout: 'object-rows', rootPath: 'cameras' }, context(files))).rejects.toThrow(/does not name a nested object/u)
+  })
+
+  it('binds every row when no keyframe field is declared and explains an empty binding', async () => {
+    const join = coreGraphOperatorImplementationsV1['timeline.join']!
+    const params = {
+      mode: 'token', pathField: 'lidarPath', frameKeyField: 'frame', recordKeyField: 'frame', timestampField: 'ts',
+      recordCalibrationKeyField: 'sensor', calibrationKeyField: 'name', calibrationSensorKeyField: 'name', sensorKeyField: 'name',
+      sensorIdField: 'name', quaternionField: 'unused', translationField: 'view.origin', rotationForm: 'axes', axisFields: ['view.x-axis', 'view.y-axis'], outputFrame: 'ego',
+    }
+    const calibration = { kind: 'records', rows: [{ name: 'front_center', 'view.origin': [0, 0, 0], 'view.x-axis': [1, 0, 0], 'view.y-axis': [0, 1, 0] }] }
+    const sensors = { kind: 'records', rows: [{ name: 'front_center' }] }
+    const records = { kind: 'binary-collection', files: [{ path: 'scene/lidar/cam_front_center/1.npz', size: 1 }], cache: new Map(), retainedReleases: new Map() }
+    const bound = (await join({ records, sampleData: { kind: 'records', rows: [{ lidarPath: 'scene/lidar/cam_front_center/1.npz', frame: '1', ts: 5, sensor: 'front_center' }] }, calibration, sensors }, params, context({}))).pointClouds as { bindings: unknown[] }
+    expect(bound.bindings).toHaveLength(1)
+    await expect(join({ records, sampleData: { kind: 'records', rows: [{ lidarPath: '1.npz', frame: '1', ts: 5, sensor: 'front_center' }] }, calibration, sensors }, params, context({})))
+      .rejects.toThrow(/GRAPH_POINT_RELATION_UNBOUND: none of 1 sampleData rows .* lidarPath="1.npz" must equal an inventory-relative record path such as "scene\/lidar\/cam_front_center\/1.npz"/u)
+  })
+
   it('derives fields with regular expressions and drops rows a required derivation misses', async () => {
     const derive = coreGraphOperatorImplementationsV1['records.derive']!
     const result = await derive({ rows: { kind: 'records', rows: [
