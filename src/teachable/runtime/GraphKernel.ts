@@ -59,9 +59,14 @@ function numericPathCompare(left: string, right: string): number {
 function resolve(reference: string, local: ReadonlyMap<string, Readonly<Record<string, unknown>>>, global: ReadonlyMap<string, Readonly<Record<string, unknown>>>): unknown {
   const [root, ...path] = reference.split('.')
   let value: unknown = local.get(root) ?? global.get(root)
+  const resolved: string[] = [root]
   for (const key of path) {
-    if (typeof value !== 'object' || value === null || !(key in value)) throw new Error(`GRAPH_REFERENCE_UNRESOLVED: ${reference}`)
+    if (typeof value !== 'object' || value === null || !(key in value)) {
+      const available = typeof value === 'object' && value !== null ? Object.keys(value).join(', ') : 'none'
+      throw new Error(`GRAPH_REFERENCE_UNRESOLVED: ${reference}; "${resolved.join('.')}" has no "${key}" (available: ${available || 'none'}). Inputs reference "<sourceId>.<output>" or "<nodeId>.<output>" inside the pipeline; other pipelines are reachable only as "<pipelineId>.result".`)
+    }
     value = (value as Record<string, unknown>)[key]
+    resolved.push(key)
   }
   return value
 }

@@ -634,6 +634,17 @@ Body outline (claim only what is listed in
   `$EVIDENCE` for the PR. Fixed in the verifier only (the shared evidence root
   is coordinator-owned; case-private mounts must still stay outside it and
   each other); the candidate and its counted artifacts are unchanged.
+- 2026-09-02, candidate `19c27e8` (includes #52): the verifier's
+  `verifyPolicyDescriptor` binds every boundary-case artifact to the exact
+  trusted tool manifest (Seatbelt profiles, coordinator scripts and library,
+  reviewed author sources) of the verifier checkout, so #52 forced all three
+  counted runs to be redone. The Waymo author then stopped after three
+  rejected revisions: it bound `outputs` to `<pipeline>.<node>.<output>`
+  (`pc.convert.pointClouds`), which the compiler accepted and the graph kernel
+  rejected at sample time with the bare `GRAPH_REFERENCE_UNRESOLVED`. Fixed by
+  a compile-time `OUTPUT_BINDING_INVALID` diagnostic (outputs bind exactly
+  `<pipelineId>.result`) and an unresolved-reference message that names the
+  missing key, the available keys, and the reference grammar.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.

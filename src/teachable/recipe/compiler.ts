@@ -249,6 +249,9 @@ export function compileRecipeV1(input: string | unknown, registry: OperatorRegis
   for (const [output, binding] of Object.entries(recipe.outputs)) {
     const pipelineId = binding.split('.')[0]
     if (!recipe.pipelines[pipelineId]) diagnostics.push(diagnostic('OUTPUT_BINDING_MISSING', `Output "${output}" references unknown pipeline "${pipelineId}".`, `/outputs/${output}`, binding))
+    else if (binding !== `${pipelineId}.result`) {
+      diagnostics.push(diagnostic('OUTPUT_BINDING_INVALID', `Output "${output}" must bind "${pipelineId}.result"; a pipeline exposes only its declared result (set pipelines.${pipelineId}.result to the node output you want).`, `/outputs/${output}`, binding))
+    }
     capabilities.add(output as NormalizedCapabilityV1)
   }
   for (const assertion of recipe.validation.assertions) {
