@@ -305,6 +305,9 @@ export function controllerExecArguments({ controlRoot, prompt }) {
     '--strict-config',
     '--dangerously-bypass-approvals-and-sandbox',
     '-c', 'shell_environment_policy.inherit="none"',
+    // Web search is enabled by default in this Codex release and the
+    // per-feature disables below are deprecated for it; pin it off explicitly.
+    '-c', 'web_search="disabled"',
     ...disabledFeatures.flatMap((feature) => ['--disable', feature]),
     '--enable', 'skip_host_skill_discovery',
     '-C', controlRoot,
