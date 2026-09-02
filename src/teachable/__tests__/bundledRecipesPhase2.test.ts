@@ -98,6 +98,20 @@ describe('bundled Phase 2 recipes', () => {
     }
   })
 
+  it('rejects an output bound to a node output instead of the pipeline result', () => {
+    const recipe = structuredClone(nuScenesCompiledRecipe.recipe)
+    ;(recipe.outputs as Record<string, string>).timeline = 'timeline.sort.frames'
+    expect(() => compileRecipeV1(recipe, bundledPhase2OperatorRegistry)).toThrow(AdapterCompileError)
+    try {
+      compileRecipeV1(recipe, bundledPhase2OperatorRegistry)
+    } catch (error) {
+      expect((error as AdapterCompileError).diagnostics).toContainEqual(expect.objectContaining({
+        code: 'OUTPUT_BINDING_INVALID',
+        jsonPointer: '/outputs/timeline',
+      }))
+    }
+  })
+
   it('rejects the relational boxes3d form without an ego-pose timeline at compile time', () => {
     const recipe = structuredClone(nuScenesCompiledRecipe.recipe)
     const node = recipe.pipelines.boxes3d.nodes.find((entry) => entry.op === 'geometry.normalize_boxes3d') as unknown as { inputs: Record<string, string> }
