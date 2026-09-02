@@ -292,8 +292,16 @@ node "$PHASE10_TOOL/scripts/phase10-baseline-gate.mjs" \
   --phase6-receipt "$PUBLIC/phase6-argoverse2-receipt.json" \
   --candidate-repository "$CANDIDATE_REPOSITORY" \
   --expected-commit "$CANDIDATE_COMMIT" \
+  --ledger "$PUBLIC/decision-ledger.ndjson" \
   --output "$PUBLIC/phase10-baseline-gate.json"
 ```
+
+`--ledger` is required: the gate verifies the hash-chained decision ledger
+against the operator-pinned verifier and requires a `baseline-frozen` entry
+whose `detailsHash` equals this freeze's `freezeHash`. Record that entry with
+`phase10:ledger` before running the gate. Benchmark artifacts written by
+`phase6-cdp-benchmark.mjs` are mode `0600` and have every range-host
+capability replaced by `{capability}` before they are written.
 
 The final gate always rejects a dirty or different candidate HEAD; there is no
 optional clean-head switch. It independently rebuilds both outputs in another

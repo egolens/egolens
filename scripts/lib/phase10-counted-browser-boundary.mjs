@@ -32,6 +32,24 @@ export function boundaryHashV1(value) {
   return `sha256:${createHash('sha256').update(canonicalize(value)).digest('hex')}`
 }
 
+const CAPABILITY_URL_SEGMENT = /(\/|%2[fF])access(\/|%2[fF])[0-9a-f]{64}(?=\/|%2[fF])/gu
+
+/**
+ * Replace every range-host bearer capability (`/access/<64 hex>/`, raw or
+ * percent-encoded) in a serialized artifact with a fixed placeholder. Public
+ * benchmark artifacts record request URLs, the counted page URL, and
+ * `location.href`; none of them may carry the capability that grants read
+ * access to the protected source host.
+ */
+export function redactCapabilityUrlsV1(text) {
+  if (typeof text !== 'string') throw new Error('Capability redaction expects serialized text')
+  return text.replace(CAPABILITY_URL_SEGMENT, '$1access$2{capability}')
+}
+
+export function containsCapabilityUrlV1(text) {
+  return new RegExp(CAPABILITY_URL_SEGMENT.source, 'u').test(String(text))
+}
+
 export function countedBrowserSeatbeltArgumentsV1(profile, parameters, command) {
   if (!path.isAbsolute(profile) || !Array.isArray(command) || command.length === 0
     || canonicalize(Object.keys(parameters).sort()) !== canonicalize([...SEATBELT_PARAMETERS].sort())) {
