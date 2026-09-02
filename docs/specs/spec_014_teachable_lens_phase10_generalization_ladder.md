@@ -41,6 +41,11 @@ working adapter recipe. Consequences:
   attempted as a collaborative authoring session; first-failure artifacts,
   classification, and the contract-change rule still apply, but the
   "unopened until 10.P7 freezes" precondition is withdrawn.
+- Rung 1 (A2D2) first collaborative result, 2026-09-02: three Codex turns
+  with operator feedback produced a recipe binding six cameras and six
+  per-view lidar streams that renders in the production viewer. Generic
+  operator additions on the way: egolens#61, egolens#62. See the handoff run
+  log for the artifact locations.
 
 ## Finding
 
