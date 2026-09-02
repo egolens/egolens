@@ -687,6 +687,22 @@ Body outline (claim only what is listed in
   through the Codex chat, not a new review channel. Remaining for PR B: carry
   the same layout in `phase9-requirements.json`, relax the judge on
   presentation-only fields, rerun.
+- 2026-09-02, A2D2 rung (collaborative, no human reviewer; Claude acted as
+  operator and reviewer): `a2d2-preview.tar` (md5 verified) → case root
+  `case-20180810_150607` (calibration file + one sensor-fusion scene, 40
+  frames × 6 cameras, per-view NPZ lidar). Confirmed layout 6 cameras / 6
+  lidar streams / 0 radar. Session 01a063bd… over three Codex turns:
+  turn 1 found four generic operator gaps (JSON object files, per-file NPZ
+  float arrays, axis-vector calibration, path-derived linkage → egolens#61);
+  turn 2 found nested-object reach and the required keyframe flag
+  (egolens#62); turn 3 validated a recipe binding all 12 sensors
+  (timeline, pointClouds, cameraImages, segmentMetadata; egoPoses omitted,
+  no trustworthy pose signal). Reviewed, finalized, exported
+  (`sha256:fb080a22…`), then rendered in the production viewer through an
+  inline share over a loopback range host: six cameras and a coherent 360°
+  fused point cloud. Artifacts (local, not committed):
+  `~/Workspace/egolens-p7/collab-a2d2/` (first-failure.md, feedback1/2,
+  recipe, transcripts, screenshots). Each Codex turn took under ten minutes.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
