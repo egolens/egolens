@@ -63,6 +63,23 @@ function isList(value: unknown): value is ArrayLike<unknown> {
   return Array.isArray(value) || (ArrayBuffer.isView(value) && !(value instanceof DataView))
 }
 
+/**
+ * Validate every element of a decoded list in place. Range-image lists hold
+ * tens of millions of numbers per row group; copying them (`Array.from`) for
+ * validation doubled the renderer's peak memory and crashed the authoring
+ * preview before any limit could fire.
+ */
+function everyListEntry(value: ArrayLike<unknown>, predicate: (entry: unknown) => boolean): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (!predicate(value[index])) return false
+  }
+  return true
+}
+
+const isFiniteNumber = (entry: unknown): boolean => typeof entry === 'number' && Number.isFinite(entry)
+const isSafeInteger = (entry: unknown): boolean => typeof entry === 'number' && Number.isSafeInteger(entry)
+const isBoolean = (entry: unknown): boolean => typeof entry === 'boolean'
+
 function matchesType(value: unknown, type: ParquetLogicalTypeV1): boolean {
   switch (type) {
     case 'bigint': return typeof value === 'bigint'
@@ -71,12 +88,9 @@ function matchesType(value: unknown, type: ParquetLogicalTypeV1): boolean {
     case 'utf8': return typeof value === 'string'
     case 'boolean': return typeof value === 'boolean'
     case 'binary': return value instanceof ArrayBuffer || value instanceof Uint8Array
-    case 'number-list':
-      return isList(value) && Array.from(value).every((entry) => typeof entry === 'number' && Number.isFinite(entry))
-    case 'integer-list':
-      return isList(value) && Array.from(value).every((entry) => typeof entry === 'number' && Number.isSafeInteger(entry))
-    case 'boolean-list':
-      return isList(value) && Array.from(value).every((entry) => typeof entry === 'boolean')
+    case 'number-list': return isList(value) && everyListEntry(value, isFiniteNumber)
+    case 'integer-list': return isList(value) && everyListEntry(value, isSafeInteger)
+    case 'boolean-list': return isList(value) && everyListEntry(value, isBoolean)
   }
 }
 
@@ -87,8 +101,101 @@ function valueBytes(value: unknown): number {
   if (typeof value === 'number' || typeof value === 'bigint') return 8
   if (value instanceof ArrayBuffer) return value.byteLength
   if (ArrayBuffer.isView(value)) return value.byteLength
-  if (Array.isArray(value)) return value.reduce((total, entry) => total + valueBytes(entry), 0)
+  if (Array.isArray(value)) {
+    // Flat numeric/boolean lists dominate; account for them without
+    // recursion or allocation, and fall back to recursion only for nesting.
+    let total = 0
+    for (let index = 0; index < value.length; index += 1) {
+      const entry: unknown = value[index]
+      total += typeof entry === 'number' || typeof entry === 'bigint' ? 8
+        : typeof entry === 'boolean' ? 1
+          : valueBytes(entry)
+    }
+    return total
+  }
   throw new Error('Unsupported decoded Parquet value.')
+}
+
+/**
+ * Upper bound on the transient decoded footprint of one Parquet read. Parquet
+ * decompresses whole row groups, so a five-row frame read still materializes
+ * every selected column of every overlapping row group as JavaScript arrays;
+ * the browser renderer, not the recipe, decides when that is fatal. Wide
+ * (list/binary) columns are therefore read one at a time so the peak equals
+ * the largest single column, and each read is measured against this ceiling
+ * before any page is decoded. The value sits below the renderer heap limits
+ * observed for counted Chrome and above the largest shipped Waymo range-image
+ * column (about 1.4 GB decoded per row group).
+ */
+export const PARQUET_MAX_DECODED_BYTES_PER_READ_V1 = 2 * 1024 * 1024 * 1024
+
+const WIDE_TYPES: ReadonlySet<ParquetLogicalTypeV1> = new Set(['number-list', 'integer-list', 'boolean-list', 'binary'])
+
+export interface ParquetDecodeEstimateV1 {
+  /** Estimated decoded bytes for the selected columns of the overlapping row groups. */
+  readonly bytes: number
+  readonly rowGroups: number
+  readonly columns: readonly string[]
+}
+
+/**
+ * Estimate, from footer metadata only, how many bytes the selected columns
+ * of the row groups overlapping `[rowStart, rowEnd)` occupy once decoded.
+ * hyparquet materializes every leaf value as a JavaScript number, boolean, or
+ * bigint (8 bytes each) regardless of the stored width or compression, so the
+ * leaf value count, not the uncompressed size, drives the estimate; strings
+ * and binary payloads add their uncompressed bytes.
+ */
+export function estimateParquetDecodedBytesV1(
+  file: WaymoParquetFile,
+  columns: readonly ParquetColumnSpecV1[],
+  rowStart: number,
+  rowEnd: number,
+): ParquetDecodeEstimateV1 {
+  const selected = new Map(columns.map((column) => [column.name, column.type]))
+  let bytes = 0
+  let rowGroups = 0
+  file.rowGroups.forEach((group, index) => {
+    if (group.rowEnd <= rowStart || group.rowStart >= rowEnd) return
+    rowGroups += 1
+    for (const chunk of file.metadata.row_groups[index]?.columns ?? []) {
+      const meta = chunk.meta_data
+      const leaf = meta?.path_in_schema?.[0]
+      const type = typeof leaf === 'string' ? selected.get(leaf) : undefined
+      if (!meta || !type) continue
+      const values = Number(meta.num_values ?? 0)
+      const uncompressed = Number(meta.total_uncompressed_size ?? 0)
+      if (!Number.isFinite(values) || values < 0 || !Number.isFinite(uncompressed) || uncompressed < 0) {
+        throw new Error(`Parquet column ${leaf} has invalid chunk metadata.`)
+      }
+      bytes += type === 'utf8' || type === 'binary' ? uncompressed + values * 8 : values * 8
+    }
+  })
+  return { bytes, rowGroups, columns: columns.map((column) => column.name) }
+}
+
+function assertDecodeBudget(file: WaymoParquetFile, columns: readonly ParquetColumnSpecV1[], rowStart: number, rowEnd: number): void {
+  const estimate = estimateParquetDecodedBytesV1(file, columns, rowStart, rowEnd)
+  if (estimate.bytes > PARQUET_MAX_DECODED_BYTES_PER_READ_V1) {
+    throw new Error(
+      `PARQUET_DECODE_BUDGET_EXCEEDED: decoding ${estimate.rowGroups} row group(s) of `
+      + `[${estimate.columns.join(', ')}] needs about ${estimate.bytes} bytes, above the `
+      + `${PARQUET_MAX_DECODED_BYTES_PER_READ_V1}-byte per-read ceiling. Select a narrower column, or a `
+      + 'source whose row groups are smaller.',
+    )
+  }
+}
+
+/**
+ * Split a projection into one read for every wide column plus one read for
+ * all scalar columns, so the transient decode peak is the largest column
+ * rather than the sum of all of them.
+ */
+function readPlansV1(columns: readonly ParquetColumnSpecV1[]): readonly (readonly ParquetColumnSpecV1[])[] {
+  const scalars = columns.filter((column) => !WIDE_TYPES.has(column.type))
+  const wide = columns.filter((column) => WIDE_TYPES.has(column.type))
+  if (wide.length <= 1) return [columns]
+  return [...(scalars.length > 0 ? [scalars] : []), ...wide.map((column) => [column])]
 }
 
 function validateRows(
@@ -144,11 +251,21 @@ export async function readParquetColumnsV1(
   if (rowEnd - rowStart > params.maxRows) {
     throw new Error(`Parquet row range ${rowEnd - rowStart} exceeds limit ${params.maxRows}.`)
   }
-  const columns = params.columns.map((column) => column.name)
-  const utf8 = !params.columns.some((column) => column.type === 'binary')
-  const rows = rowStart === 0 && rowEnd === file.numRows
-    ? await readAllRows(file, columns, { utf8 })
-    : await readRowRange(file, rowStart, rowEnd, columns, { utf8 })
-  throwIfAborted(options.signal)
-  return validateRows(rows, params, options.signal)
+  const plans = readPlansV1(params.columns)
+  for (const plan of plans) assertDecodeBudget(file, plan, rowStart, rowEnd)
+  let merged: ParquetRow[] | null = null
+  for (const plan of plans) {
+    const columns = plan.map((column) => column.name)
+    const utf8 = !plan.some((column) => column.type === 'binary')
+    const rows = rowStart === 0 && rowEnd === file.numRows
+      ? await readAllRows(file, columns, { utf8 })
+      : await readRowRange(file, rowStart, rowEnd, columns, { utf8 })
+    throwIfAborted(options.signal)
+    if (merged === null) merged = rows
+    else {
+      if (rows.length !== merged.length) throw new Error('Parquet column reads returned different row counts.')
+      for (let index = 0; index < rows.length; index += 1) Object.assign(merged[index], rows[index])
+    }
+  }
+  return validateRows(merged ?? [], params, options.signal)
 }
