@@ -167,18 +167,18 @@ export default function TeachableLensPanel({
           </div>
         </div>
 
-        {state.currentArtifact && (
+        {(state.currentArtifact || state.sensorConfiguration) && (
           <div data-testid="declared-sensors" style={{ padding: 14, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: radius.md }}>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Declared sensors</div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{state.currentArtifact ? 'Declared sensors' : 'Confirmed sensor layout'}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {declaredSensorSummaryV1(state.currentArtifact).map(({ modality, ids }) => {
                 const expected = state.sensorConfiguration?.[modality]
                 const mismatch = expected !== undefined && expected !== ids.length
                 return <div key={modality} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
                   <span style={{ fontWeight: 600, minWidth: 64 }}>{modality}</span>
-                  <span>{ids.length}{expected !== undefined ? ` / ${expected} expected` : ''}</span>
+                  <span>{state.currentArtifact ? `${ids.length}${expected !== undefined ? ` / ${expected} expected` : ''}` : `${expected ?? 0} expected`}</span>
                   {mismatch && <Pill tone="warning">mismatch</Pill>}
-                  <span style={{ color: colors.textDim, fontSize: 10 }}>{ids.length > 0 ? ids.join(', ') : 'none declared'}</span>
+                  <span style={{ color: colors.textDim, fontSize: 10 }}>{state.currentArtifact ? (ids.length > 0 ? ids.join(', ') : 'none declared') : 'waiting for a recipe'}</span>
                 </div>
               })}
             </div>
