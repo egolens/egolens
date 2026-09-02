@@ -544,6 +544,12 @@ Body outline (claim only what is listed in
   merged as #41: wide Parquet columns are read one at a time, a metadata
   estimate enforces a 2 GiB per-read decode ceiling before any page is read,
   and list validation no longer copies. The crashing recipe now previews.
+- 2026-09-02: #36 merged the run log into main, so this branch is re-created
+  from main with this commit as the PR B candidate; #42 (sparse-output
+  observability, serialized broker calls), #43 (broker invoke closure), and
+  #44 (controller transcript bound) are merged. Verifier and judge pin move to
+  the current main head for every counted run because the reviewed author
+  source list includes the changed runtime files.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
@@ -575,3 +581,5 @@ Body outline (claim only what is listed in
 Only after PR B's P7 freeze is merged may a new task reserve and open held-out
 source bytes for the remaining Spec 014 generalization ladder.
 
+- 2026-09-02T07:55Z: counted run restarted from main df92b72.
+- 2026-09-02T08:18Z: counted run restarted from main 6e6d520.
