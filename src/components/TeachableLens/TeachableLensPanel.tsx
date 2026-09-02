@@ -1,3 +1,4 @@
+import { declaredSensorSummaryV1 } from '../../teachable/authoring/sensorConfiguration'
 import { useRef, useState, useSyncExternalStore } from 'react'
 import { colors, fonts, radius, alpha } from '../../theme'
 import type { TeachableAuthoringSessionV1 } from '../../teachable/authoring/AuthoringSession'
@@ -165,6 +166,24 @@ export default function TeachableLensPanel({
             >Import URL</button>
           </div>
         </div>
+
+        {state.currentArtifact && (
+          <div data-testid="declared-sensors" style={{ padding: 14, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: radius.md }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Declared sensors</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {declaredSensorSummaryV1(state.currentArtifact).map(({ modality, ids }) => {
+                const expected = state.sensorConfiguration?.[modality]
+                const mismatch = expected !== undefined && expected !== ids.length
+                return <div key={modality} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                  <span style={{ fontWeight: 600, minWidth: 64 }}>{modality}</span>
+                  <span>{ids.length}{expected !== undefined ? ` / ${expected} expected` : ''}</span>
+                  {mismatch && <Pill tone="warning">mismatch</Pill>}
+                  <span style={{ color: colors.textDim, fontSize: 10 }}>{ids.length > 0 ? ids.join(', ') : 'none declared'}</span>
+                </div>
+              })}
+            </div>
+          </div>
+        )}
 
         {state.validation && state.validation.requiredReview.length > 0 && (
           <div style={{ padding: 16, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: radius.md }}>

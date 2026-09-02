@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
-import { sourceInventoryFromFilesV1 } from './teachable/authoring/SourceInventory'
+import { sourceInventoryFromFilesV1, type SourceInventoryV1 } from './teachable/authoring/SourceInventory'
+import { inferSensorConfigurationV1, type SensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
 import { selectedFileKeysV1 } from './teachable/authoring/selectedFileKeys'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
 import { colors, fonts } from './theme'
@@ -9,6 +10,9 @@ import { colors, fonts } from './theme'
 export default function AmnesiaAuthorApp() {
   const [started, setStarted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The folder is scanned first; authoring starts only after the human
+  // confirms how many sensors of each modality the recipe must expose.
+  const [pending, setPending] = useState<{ inventory: SourceInventoryV1; configuration: SensorConfigurationV1 } | null>(null)
 
   useEffect(() => {
     void registerTeachableWebMcpToolsV1(teachableAuthoringSession).catch((cause) => {
@@ -21,12 +25,30 @@ export default function AmnesiaAuthorApp() {
     try {
       // Same canonical relative keys as the ordinary viewer's directory input,
       // so an authored recipe binds identically at capture time.
-      teachableAuthoringSession.start(sourceInventoryFromFilesV1(selectedFileKeysV1(files)))
+      const inventory = sourceInventoryFromFilesV1(selectedFileKeysV1(files))
+      setPending({ inventory, configuration: inferSensorConfigurationV1(inventory.snapshot()) })
+      setError(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const confirmConfiguration = () => {
+    if (!pending) return
+    try {
+      teachableAuthoringSession.start(pending.inventory, { sensorConfiguration: pending.configuration })
+      setPending(null)
       setStarted(true)
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
+  }
+
+  const setCount = (modality: keyof SensorConfigurationV1, value: string) => {
+    if (!pending) return
+    const parsed = Number.parseInt(value, 10)
+    setPending({ ...pending, configuration: { ...pending.configuration, [modality]: Number.isFinite(parsed) ? Math.max(0, Math.min(64, parsed)) : 0 } })
   }
 
   if (started) return <TeachableLensPanel />
@@ -47,6 +69,28 @@ export default function AmnesiaAuthorApp() {
           onChange={(event) => selectFiles(event.currentTarget.files)}
         />
       </label>
+      {pending && (
+        <div data-testid="sensor-configuration" style={{ marginTop: 18, padding: 14, border: `1px solid ${colors.border}`, borderRadius: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Confirm the sensor layout</div>
+          <p style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.5, margin: '6px 0 10px' }}>
+            {pending.inventory.snapshot().entries.length} files scanned. Defaults are guessed from the folder layout; correct them so the recipe must expose every physical stream.
+          </p>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            {(['camera', 'lidar', 'radar'] as const).map((modality) => (
+              <label key={modality} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: colors.textSecondary }}>
+                {modality} sensors
+                <input
+                  type="number" min={0} max={64} value={pending.configuration[modality]}
+                  aria-label={`${modality} sensor count`}
+                  onChange={(event) => setCount(modality, event.currentTarget.value)}
+                  style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary }}
+                />
+              </label>
+            ))}
+          </div>
+          <button onClick={confirmConfiguration} style={{ marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Confirm and start authoring</button>
+        </div>
+      )}
       {error && <pre style={{ whiteSpace: 'pre-wrap', color: colors.danger, fontSize: 11 }}>{error}</pre>}
     </section>
   </main>

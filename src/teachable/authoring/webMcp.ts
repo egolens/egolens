@@ -1,3 +1,4 @@
+import { declaredSensorSummaryV1 } from './sensorConfiguration'
 import type { TeachableAuthoringSessionV1 } from './AuthoringSession'
 import type { SourceInspectionModeV1 } from './inspection'
 
@@ -28,6 +29,8 @@ function stateForTool(session: TeachableAuthoringSessionV1): Readonly<Record<str
       truncated: state.inventory.truncated,
       revoked: state.inventory.revoked,
     } : null,
+    sensorConfiguration: state.sensorConfiguration,
+    declaredSensors: declaredSensorSummaryV1(state.currentArtifact),
     currentRecipe: state.currentArtifact ? {
       name: state.currentArtifact.identity.name,
       formatId: state.currentArtifact.scene.formatId,

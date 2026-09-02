@@ -1,3 +1,4 @@
+import { assertValidSensorConfigurationV1, sensorConfigurationDiagnosticsV1, type SensorConfigurationV1 } from './sensorConfiguration'
 import schema from '../schema/egolens-adapter-v1.schema.json'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import type { OperatorRegistry } from '../operators/registry'
@@ -59,6 +60,8 @@ export interface AuthoringSessionStateV1 {
   readonly phase: AuthoringPhaseV1
   readonly agentEngaged: boolean
   readonly inventory: SourceInventorySnapshotV1 | null
+  /** Human-confirmed sensor layout; null when authoring started without one. */
+  readonly sensorConfiguration: SensorConfigurationV1 | null
   readonly currentArtifact: EgoLensAdapterRecipeV1 | null
   readonly currentRecipeHash: string | null
   readonly diagnostics: readonly AdapterDiagnostic[]
@@ -106,6 +109,7 @@ function initialState(): AuthoringSessionStateV1 {
     phase: 'idle',
     agentEngaged: false,
     inventory: null,
+    sensorConfiguration: null,
     currentArtifact: null,
     currentRecipeHash: null,
     diagnostics: [],
@@ -143,10 +147,11 @@ export class TeachableAuthoringSessionV1 {
     return () => this.#listeners.delete(listener)
   }
 
-  start(inventory: SourceInventoryV1): void {
+  start(inventory: SourceInventoryV1, options: { readonly sensorConfiguration?: SensorConfigurationV1 | null } = {}): void {
     this.#inventory?.revoke()
     this.#inventory = inventory
-    this.#set({ ...initialState(), phase: 'inspecting', inventory: inventory.snapshot() })
+    const sensorConfiguration = options.sensorConfiguration ? assertValidSensorConfigurationV1(options.sensorConfiguration) : null
+    this.#set({ ...initialState(), phase: 'inspecting', inventory: inventory.snapshot(), sensorConfiguration })
   }
 
   revoke(): void {
@@ -184,6 +189,9 @@ export class TeachableAuthoringSessionV1 {
         ...(operator.provider === 'extension' ? { package: operator.package, resources: operator.resources } : {}),
       })),
       inspectionLimits: INSPECTION_LIMITS_V1,
+      // The confirmed layout is part of the public contract: every modality
+      // count here must be matched by declared (and bound) scene sensors.
+      sensorConfiguration: this.#state.sensorConfiguration,
       diagnostics: this.#state.diagnostics,
     }
   }
@@ -220,6 +228,8 @@ export class TeachableAuthoringSessionV1 {
           '/provenance/author',
         )])
       }
+      const sensorDiagnostics = sensorConfigurationDiagnosticsV1(recipe, this.#state.sensorConfiguration)
+      if (sensorDiagnostics.length > 0) throw new AdapterCompileError(sensorDiagnostics)
       const compiled = compileRecipeV1(recipe, this.#operators)
       prepared = await this.#evaluator.prepare(compiled, inventory, signal)
       const errors = prepared.diagnostics.filter((item) => item.severity === 'error')
