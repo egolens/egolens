@@ -451,7 +451,7 @@ test('macOS build profile reads only staged source and denies protected source a
   assert.notEqual(denied.code, 0)
   assert.match(`${denied.stdout}\n${denied.stderr}`, /Operation not permitted|Permission denied/u)
   const network = await runProcess('/usr/bin/sandbox-exec', sandboxArguments(profile, parameters, [
-    '/usr/bin/curl', '--connect-timeout', '1', '--max-time', '2', '-fsS', 'http://93.184.216.34/',
+    '/usr/bin/curl', '--connect-timeout', '1', '--max-time', '2', '-sS', '-o', '/dev/null', 'http://1.1.1.1/',
   ]), { cwd: source, env: environment, timeoutMs: 10_000 })
   assert.notEqual(network.code, 0)
 })
