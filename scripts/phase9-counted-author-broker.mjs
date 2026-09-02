@@ -382,7 +382,12 @@ export async function createBrowserAdapter({
   // operator's confirmed counts replace the inferred defaults before start.
   await page.getByTestId('sensor-configuration').waitFor({ timeout: 60_000 })
   for (const modality of ['camera', 'lidar', 'radar']) {
-    if (sensorConfiguration && Number.isSafeInteger(sensorConfiguration[modality])) {
+    if (!sensorConfiguration) continue
+    const names = sensorConfiguration.names?.[modality]
+    if (Array.isArray(names)) {
+      // Names imply the count; the workspace derives it from the list.
+      await page.getByLabel(`${modality} sensor ids`, { exact: true }).fill(names.join(', '))
+    } else if (Number.isSafeInteger(sensorConfiguration[modality])) {
       await page.getByLabel(`${modality} sensor count`, { exact: true }).fill(String(sensorConfiguration[modality]))
     }
   }
