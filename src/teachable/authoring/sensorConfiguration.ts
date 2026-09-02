@@ -84,7 +84,15 @@ export function inferSensorConfigurationV1(snapshot: SourceInventorySnapshotV1):
     if (/(^|\/)radar/u.test(lowered)) radarDirectories.add(directory)
     else if (/(^|\/)(lidar|velodyne|points?)/u.test(lowered)) lidarDirectories.add(directory)
   }
-  const nameOf = (directory: string) => directory.split('/').at(-1)!.replace(/[^A-Za-z0-9_.:-]/gu, '_').replace(/^[^A-Za-z]+/u, '') || 'stream'
+  // A generic leaf folder (image_02/data, velodyne_points/data) names nothing;
+  // the parent folder is the stream identity.
+  const GENERIC = new Set(['data', 'images', 'image', 'frames', 'files', 'raw', 'bin', 'png', 'jpg'])
+  const nameOf = (directory: string) => {
+    const segments = directory.split('/')
+    let leaf = segments.at(-1)!
+    if (GENERIC.has(leaf.toLowerCase()) && segments.length > 1) leaf = segments.at(-2)!
+    return leaf.replace(/[^A-Za-z0-9_.:-]/gu, '_').replace(/^[^A-Za-z]+/u, '') || 'stream'
+  }
   const unique = (directories: Set<string>) => {
     const seen = new Map<string, number>()
     return [...directories].sort().map((directory) => {

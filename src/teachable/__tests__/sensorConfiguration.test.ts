@@ -34,6 +34,10 @@ describe('sensor configuration', () => {
       'annotations.feather', 'sensors/lidar/1.feather', 'sensors/cameras/ring_front_center/1.jpg', 'sensors/cameras/ring_side_left/1.jpg',
     ]).snapshot()
     expect(inferSensorConfigurationV1(av2)).toMatchObject({ lidar: 1, radar: 0, camera: 2, names: { lidar: ['lidar'], camera: ['ring_front_center', 'ring_side_left'] } })
+    // KITTI-style generic leaf folders take the parent folder's name.
+    expect(inferSensorConfigurationV1(inventoryOf([
+      'drive/image_00/data/0000000000.png', 'drive/image_02/data/0000000000.png', 'drive/velodyne_points/data/0000000000.bin',
+    ]).snapshot())).toEqual({ lidar: 1, radar: 0, camera: 2, names: { lidar: ['velodyne_points'], camera: ['image_00', 'image_02'] } })
     // Single-table layouts carry no per-stream directories: the human fills these in.
     expect(inferSensorConfigurationV1(inventoryOf(['lidar/segment.parquet', 'camera_image/segment.parquet']).snapshot())).toEqual({ lidar: 0, radar: 0, camera: 0 })
   })
