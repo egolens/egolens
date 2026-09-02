@@ -354,6 +354,12 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     maxRecords: positiveLimit,
     maxDepth: { type: 'integer', minimum: 1, maximum: 256 },
   }, ['recordPath']), recordContract(['rows'])],
+  ['records.unpivot', recordContract(['rows']), closedParams({
+    pattern: { type: 'string', minLength: 1, maxLength: 512 },
+    keyGroup: { type: 'integer', minimum: 1, maximum: 9 },
+    fieldGroup: { type: 'integer', minimum: 1, maximum: 9 },
+    keyField: { type: 'string', minLength: 1, maxLength: 128 },
+  }, ['pattern']), recordContract(['rows'])],
   ['records.explode', recordContract(['rows']), closedParams({
     path: { type: 'string', minLength: 1, maxLength: 256 },
     indexField: { type: 'string', minLength: 1, maxLength: 128 },
