@@ -59,6 +59,11 @@ const BUILD_PROFILE = path.join(SCRIPT_DIRECTORY, 'phase9-counted-author-build.s
 const BROKER_PROGRAM = path.join(SCRIPT_DIRECTORY, 'phase9-counted-author-broker.mjs')
 const BROKER_PROBE = path.join(SCRIPT_DIRECTORY, 'phase9-counted-boundary-probe.mjs')
 const MAX_PROCESS_OUTPUT = 2 * 1024 * 1024
+// The isolated Codex author streams its whole transcript (every tool response
+// it inspects) to stderr; a complete counted session runs to tens of
+// megabytes. Only its commitment is retained, so the bound is generous while
+// every other counted subprocess keeps the 2 MiB limit.
+const MAX_CONTROLLER_OUTPUT = 64 * 1024 * 1024
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/u
 const CANONICAL_HASH_PATTERN = /^sha256-[0-9a-f]{64}$/u
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u
@@ -238,9 +243,9 @@ export function sandboxArguments(profilePath, parameters, command) {
   return [...definitions, '-f', profilePath, ...command]
 }
 
-function appendBounded(current, chunk, onOverflow) {
+function appendBounded(current, chunk, onOverflow, limit = MAX_PROCESS_OUTPUT) {
   const next = current + chunk.toString('utf8')
-  if (Buffer.byteLength(next) > MAX_PROCESS_OUTPUT) {
+  if (Buffer.byteLength(next) > limit) {
     onOverflow()
     throw new Error('A counted subprocess exceeded its bounded output limit.')
   }
@@ -251,6 +256,7 @@ export async function runProcess(file, argumentsValue, {
   cwd,
   env,
   timeoutMs = 60_000,
+  maxOutputBytes = MAX_PROCESS_OUTPUT,
 } = {}) {
   if (env === undefined || env === null || typeof env !== 'object' || Array.isArray(env)) {
     throw new Error('Counted subprocesses require an explicit minimal environment.')
@@ -272,10 +278,10 @@ export async function runProcess(file, argumentsValue, {
       finish(() => reject(new Error('A counted subprocess exceeded its bounded output limit.')))
     }
     child.stdout.on('data', (chunk) => {
-      try { stdout = appendBounded(stdout, chunk, overflow) } catch { /* handled by overflow */ }
+      try { stdout = appendBounded(stdout, chunk, overflow, maxOutputBytes) } catch { /* handled by overflow */ }
     })
     child.stderr.on('data', (chunk) => {
-      try { stderr = appendBounded(stderr, chunk, overflow) } catch { /* handled by overflow */ }
+      try { stderr = appendBounded(stderr, chunk, overflow, maxOutputBytes) } catch { /* handled by overflow */ }
     })
     child.once('error', (error) => finish(() => reject(error)))
     child.once('close', (code, signal) => finish(() => resolve({ code, signal, stdout, stderr })))
@@ -1403,6 +1409,7 @@ async function runCase(options) {
       cwd: controlRoot,
       env: controllerEnv,
       timeoutMs: Number(options['timeout-ms'] ?? 45 * 60_000),
+      maxOutputBytes: MAX_CONTROLLER_OUTPUT,
     })
     if (controllerResult.code !== 0) {
       throw new Error(`Isolated Codex author did not complete (${sha256Colon(controllerResult.stderr)}).`)
