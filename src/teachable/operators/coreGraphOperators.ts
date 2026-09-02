@@ -1173,6 +1173,17 @@ const attachLabels: CoreOperatorImplementationV1 = async (inputs, params) => {
     const path = String(row[pathField])
     if (availablePanoptic.has(path)) panopticPathByRecordKey.set(String(row[keyField]), path)
   }
+  // Selected label files that never reach a bound point-cloud record are an
+  // authoring mistake (wrong index, key field, or path field), not an absent
+  // capability: fail the sample with the two keys that had to agree.
+  if ((availableSemantic.size > 0 || availablePanoptic.size > 0)
+    && !pointClouds.bindings.some((binding) => semanticPathByRecordKey.has(binding.recordKey)
+      || panopticPathByRecordKey.has(binding.recordKey))) {
+    const indexRow = semanticIndex[0] ?? panopticIndex[0]
+    const indexKey = indexRow ? `"${String(indexRow[keyField])}" (path "${String(indexRow[pathField])}")` : 'none (labelIndex is missing or empty)'
+    const recordKey = pointClouds.bindings[0] ? `"${pointClouds.bindings[0].recordKey}"` : 'none (no point-cloud bindings)'
+    throw new Error(`GRAPH_LABEL_INDEX_UNMATCHED: no label file maps to a bound point-cloud record; inputs.labelIndex rows must carry the record key in params.indexRecordKeyField ("${keyField}") and the label file path in params.indexPathField ("${pathField}"). First index key: ${indexKey}; first point-cloud record key: ${recordKey}.`)
+  }
   return {
     segmentation: {
       kind: 'segmentation-plan', pointClouds, semantic, panoptic, semanticPathByRecordKey, panopticPathByRecordKey,
