@@ -565,6 +565,39 @@ const recordsExplode: CoreOperatorImplementationV1 = async (inputs, params) => {
   return { rows: { kind: 'records', rows: out } satisfies GraphRecordsV1 }
 }
 
+/**
+ * Wide → long reshape: fields whose names match `pattern` are grouped by one
+ * capture (the new row key) and stored under another capture (the field
+ * name). A KITTI calib row with P_rect_00 … T_03 becomes one row per camera
+ * { camera: "00", P_rect: […], R_rect: […], S_rect: […] }. Fields that do
+ * not match are copied to every row.
+ */
+const recordsUnpivot: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const rows = await materialize(inputs.rows)
+  const pattern = new RegExp(String(params.pattern), 'u')
+  const keyGroup = Number(params.keyGroup ?? 2)
+  const fieldGroup = Number(params.fieldGroup ?? 1)
+  const keyField = String(params.keyField ?? 'key')
+  const out: Record<string, unknown>[] = []
+  for (const row of rows) {
+    const shared: Record<string, unknown> = {}
+    const byKey = new Map<string, Record<string, unknown>>()
+    for (const [name, value] of Object.entries(row)) {
+      const match = pattern.exec(name)
+      if (!match) { shared[name] = value; continue }
+      const key = match[keyGroup] ?? ''
+      const field = match[fieldGroup] ?? name
+      const target = byKey.get(key) ?? {}
+      target[field] = value
+      byKey.set(key, target)
+    }
+    for (const [key, fields] of [...byKey.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+      out.push({ ...shared, [keyField]: key, ...fields })
+    }
+  }
+  return { rows: { kind: 'records', rows: out } satisfies GraphRecordsV1 }
+}
+
 const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
   const candidate = inputs.lidar ?? inputs.rows ?? inputs.samples
   const unit = String(params.timestampUnit ?? 'us') as GraphTimelineV1['unit']
@@ -1063,11 +1096,27 @@ function relationalCameraPlan(
     const stride = matrix.length === 12 ? 4 : 3
     const row0 = flat ? [flat[0]!, flat[1]!, flat[2]!] : finiteTuple(matrix[0], 3, `${intrinsicMatrixField}[0]`)
     const row1 = flat ? [flat[stride]!, flat[stride + 1]!, flat[stride + 2]!] : finiteTuple(matrix[1], 3, `${intrinsicMatrixField}[1]`)
+    // A 3×4 projection matrix P = K·[I | t] (KITTI P_rect_0X) places this camera
+    // at t = -K⁻¹·P[:,3] relative to the calibrated reference camera: shift
+    // the pose along the camera axes by that baseline.
+    let egoFromCameraMatrix = egoFromSensor
+    if (flat && matrix.length === 12) {
+      const fx = row0[0]!, fy = row1[1]!
+      const tx = fx !== 0 ? -flat[3]! / fx : 0
+      const ty = fy !== 0 ? -flat[7]! / fy : 0
+      const tz = -flat[11]!
+      const shifted = new Float64Array(egoFromSensor)
+      // column-major: translation += R · t (columns 0..2 are the camera axes in ego)
+      shifted[12] += shifted[0] * tx + shifted[4] * ty + shifted[8] * tz
+      shifted[13] += shifted[1] * tx + shifted[5] * ty + shifted[9] * tz
+      shifted[14] += shifted[2] * tx + shifted[6] * ty + shifted[10] * tz
+      egoFromCameraMatrix = shifted
+    }
     const [width, height] = dimensionsByCalibration.get(key) ?? [Number(params.defaultWidth), Number(params.defaultHeight)]
     calibrations.set(sensorId, {
       sensorId, frameId: `${sensorId}${String(params.frameIdSuffix)}`, width, height,
       intrinsics: [row0[0], row1[1], row0[2], row1[2]], distortionModel: 'none', distortion: [],
-      egoFromCamera: egoFromSensor,
+      egoFromCamera: egoFromCameraMatrix,
     })
   }
   const files = new Set(encoded.files.map((file) => file.path))
@@ -1459,6 +1508,7 @@ export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOpe
   'xml.records': xmlRecords,
   'records.derive': recordsDerive,
   'records.explode': recordsExplode,
+  'records.unpivot': recordsUnpivot,
   'timeline.sort': timelineSort,
   'geometry.relative_poses': relativePoses,
   'geometry.geodetic_poses': geodeticPoses,
