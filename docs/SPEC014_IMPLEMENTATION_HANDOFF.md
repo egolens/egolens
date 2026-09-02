@@ -703,6 +703,9 @@ Body outline (claim only what is listed in
   fused point cloud. Artifacts (local, not committed):
   `~/Workspace/egolens-p7/collab-a2d2/` (first-failure.md, feedback1/2,
   recipe, transcripts, screenshots). Each Codex turn took under ten minutes.
+- 2026-09-02: findings and the prioritized action list are in Spec 014
+  ("Findings and action items"). Work continues with item 2 (self-consistency
+  diagnostics); items 1 and 4 wait for owner-downloaded archives.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.

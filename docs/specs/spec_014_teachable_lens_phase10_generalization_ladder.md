@@ -47,6 +47,56 @@ working adapter recipe. Consequences:
   operator additions on the way: egolens#61, egolens#62. See the handoff run
   log for the artifact locations.
 
+## Findings and action items (2026-09-02)
+
+Evidence: fifteen counted/collaborative Codex sessions on Waymo, nuScenes,
+Argoverse 2 (shipped) and A2D2 (held-out), egolens#47 through egolens#64.
+
+### Findings
+
+1. **Most failures were tooling observability, not model ability.** Of the
+   fifteen defects fixed today, almost none were things the author could not
+   know from public evidence: contract/implementation drift (`poses`,
+   `labelIndex`), bare diagnostic codes, unreadable Feather schemas, and rules
+   stated nowhere (`scene.formatId`, `provenance.author`, output binding
+   grammar). Once a diagnostic named the keys that had to agree, the author
+   corrected itself within one turn. After the fixes, shipped datasets took
+   5–7 revisions, 1–2 review rounds, and under ten minutes per session.
+2. **Capability validation does not imply semantic completeness.** Every
+   blind author collapsed sensors (Waymo 1 lidar + 1 camera instead of
+   5 + 5) while passing every check. A human-confirmed sensor layout is a
+   required contract, and the review screen must show renderings, not
+   counts.
+3. **A truly unknown dataset needs model + a growing dataset-neutral
+   operator vocabulary.** On first contact with A2D2 the registered operators
+   could not express the drop; two rounds of generic additions (JSON object
+   layouts and path stamping, regex derivations, NPZ numeric records, axis
+   vector rotations, nested `rootPath`/`flatten`, optional keyframe gating)
+   were enough for the next turn to bind all twelve sensors. Every addition
+   applies to KITTI Raw and ONCE layouts as well, so the developer share of
+   each new dataset shrinks as the vocabulary grows.
+4. **The author does not fabricate.** It left A2D2 `egoPoses` out for lack of
+   a trustworthy pose signal. Good for a collaborative loop; it also means
+   pose integration and time synchronization need explicit operators or
+   diagnostics rather than author guesswork.
+5. **Exact structural parity against a hidden oracle is the wrong bar for
+   unknown data.** Sensor ids, labels, colors, and taxonomy ids cannot be
+   inferred blind; the practical loop is confirmed layout + rendered review
+   + self-consistency diagnostics, with the parity judge kept as a
+   development report.
+
+### Action items (priority order)
+
+| # | Owner | Item | Status |
+|---|---|---|---|
+| 1 | owner | Download one sequence each of KITTI Raw (synced + calib), ONCE, PandaSet (accounts required) | blocked on owner |
+| 2 | Claude | Self-consistency diagnostics at apply time: camera reprojection coverage, timeline spacing irregularity, box point density, ego pose continuity (warnings, non-blocking) | next |
+| 3 | Claude | Reader vocabulary ahead of the rungs: whitespace/CSV text tables (KITTI calib, timestamps), XML records (KITTI tracklets); decide the PandaSet input path (JSON, not pickle) | after 2 |
+| 4 | Claude + owner | Run each rung as a collaborative session as archives arrive; keep first-failure artifacts and generic-operator fixes | as datasets arrive |
+| 5 | Claude | Review UX: BEV thumbnail, channel-name defaults in the layout confirmation, one-click "revision request" text for the Codex chat | after 3 |
+| 6 | Claude | `poses.integrate`: ego poses from raw GPS/IMU/velocity signals (A2D2 bus, KITTI OXTS) | after 5 |
+| 7 | Claude | PR B redefinition: confirmed sensor contract in `phase9-requirements.json`, judge ignores presentation-only fields, rerun; kept as a development report rather than a merge gate | last |
+
 ## Finding
 
 EgoLens is intended to understand a dataset when a user drops the original
