@@ -29,11 +29,11 @@ describe('sensor configuration', () => {
       'samples/CAM_FRONT/a.jpg', 'samples/CAM_FRONT/b.jpg', 'samples/CAM_BACK/a.jpg',
       'samples/LIDAR_TOP/a.pcd.bin', 'samples/RADAR_FRONT/a.pcd', 'samples/RADAR_BACK_LEFT/a.pcd',
     ]).snapshot()
-    expect(inferSensorConfigurationV1(nuscenes)).toEqual({ lidar: 1, radar: 2, camera: 2 })
+    expect(inferSensorConfigurationV1(nuscenes)).toEqual({ lidar: 1, radar: 2, camera: 2, names: { lidar: ['LIDAR_TOP'], radar: ['RADAR_BACK_LEFT', 'RADAR_FRONT'], camera: ['CAM_BACK', 'CAM_FRONT'] } })
     const av2 = inventoryOf([
       'annotations.feather', 'sensors/lidar/1.feather', 'sensors/cameras/ring_front_center/1.jpg', 'sensors/cameras/ring_side_left/1.jpg',
     ]).snapshot()
-    expect(inferSensorConfigurationV1(av2)).toEqual({ lidar: 1, radar: 0, camera: 2 })
+    expect(inferSensorConfigurationV1(av2)).toMatchObject({ lidar: 1, radar: 0, camera: 2, names: { lidar: ['lidar'], camera: ['ring_front_center', 'ring_side_left'] } })
     // Single-table layouts carry no per-stream directories: the human fills these in.
     expect(inferSensorConfigurationV1(inventoryOf(['lidar/segment.parquet', 'camera_image/segment.parquet']).snapshot())).toEqual({ lidar: 0, radar: 0, camera: 0 })
   })

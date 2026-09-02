@@ -45,10 +45,20 @@ export default function AmnesiaAuthorApp() {
     }
   }
 
-  const setCount = (modality: keyof SensorConfigurationV1, value: string) => {
+  const setCount = (modality: 'camera' | 'lidar' | 'radar', value: string) => {
     if (!pending) return
     const parsed = Number.parseInt(value, 10)
-    setPending({ ...pending, configuration: { ...pending.configuration, [modality]: Number.isFinite(parsed) ? Math.max(0, Math.min(64, parsed)) : 0 } })
+    const count = Number.isFinite(parsed) ? Math.max(0, Math.min(64, parsed)) : 0
+    // A count edit drops the inferred names for that modality; they no longer match.
+    const { [modality]: _dropped, ...names } = pending.configuration.names ?? {}
+    setPending({ ...pending, configuration: { ...pending.configuration, [modality]: count, ...(Object.keys(names).length > 0 ? { names } : { names: undefined }) } })
+  }
+
+  const setNames = (modality: 'camera' | 'lidar' | 'radar', value: string) => {
+    if (!pending) return
+    const list = value.split(',').map((name) => name.trim()).filter((name) => name.length > 0)
+    const names = { ...(pending.configuration.names ?? {}), [modality]: list }
+    setPending({ ...pending, configuration: { ...pending.configuration, [modality]: list.length, names } })
   }
 
   if (started) return <TeachableLensPanel />
@@ -77,15 +87,27 @@ export default function AmnesiaAuthorApp() {
           </p>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
             {(['camera', 'lidar', 'radar'] as const).map((modality) => (
-              <label key={modality} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: colors.textSecondary }}>
-                {modality} sensors
-                <input
-                  type="number" min={0} max={64} value={pending.configuration[modality]}
-                  aria-label={`${modality} sensor count`}
-                  onChange={(event) => setCount(modality, event.currentTarget.value)}
-                  style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary }}
-                />
-              </label>
+              <div key={modality} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: colors.textSecondary, minWidth: 180 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {modality} sensors
+                  <input
+                    type="number" min={0} max={64} value={pending.configuration[modality]}
+                    aria-label={`${modality} sensor count`}
+                    onChange={(event) => setCount(modality, event.currentTarget.value)}
+                    style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary }}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {modality} ids (comma-separated, optional)
+                  <input
+                    type="text" value={(pending.configuration.names?.[modality] ?? []).join(', ')}
+                    aria-label={`${modality} sensor ids`}
+                    placeholder="found in the folder, edit if wrong"
+                    onChange={(event) => setNames(modality, event.currentTarget.value)}
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary }}
+                  />
+                </label>
+              </div>
             ))}
           </div>
           <button onClick={confirmConfiguration} style={{ marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Confirm and start authoring</button>

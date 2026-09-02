@@ -15,6 +15,8 @@ export interface SensorConfigurationV1 {
   readonly lidar: number
   readonly radar: number
   readonly camera: number
+  /** Optional stream names per modality; when present, declared sensor ids must be exactly this set. */
+  readonly names?: Readonly<Partial<Record<SensorModalityV1, readonly string[]>>>
 }
 
 export interface DeclaredSensorSummaryV1 {
@@ -35,9 +37,26 @@ function assertCount(value: unknown, name: string): number {
 export function assertValidSensorConfigurationV1(value: unknown): SensorConfigurationV1 {
   if (typeof value !== 'object' || value === null) throw new Error('Sensor configuration must be an object.')
   const input = value as Record<string, unknown>
-  const configuration = { lidar: assertCount(input.lidar, 'lidar'), radar: assertCount(input.radar, 'radar'), camera: assertCount(input.camera, 'camera') }
+  const configuration: { lidar: number; radar: number; camera: number; names?: Partial<Record<SensorModalityV1, readonly string[]>> } = {
+    lidar: assertCount(input.lidar, 'lidar'), radar: assertCount(input.radar, 'radar'), camera: assertCount(input.camera, 'camera'),
+  }
   if (configuration.lidar + configuration.radar + configuration.camera === 0) {
     throw new Error('Sensor configuration must expect at least one sensor.')
+  }
+  if (input.names !== undefined) {
+    if (typeof input.names !== 'object' || input.names === null) throw new Error('Sensor configuration names must be an object.')
+    const names: Partial<Record<SensorModalityV1, readonly string[]>> = {}
+    for (const modality of SENSOR_MODALITIES_V1) {
+      const list = (input.names as Record<string, unknown>)[modality]
+      if (list === undefined) continue
+      if (!Array.isArray(list) || list.some((name) => typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/u.test(name))) {
+        throw new Error(`Sensor configuration names.${modality} must list valid sensor ids.`)
+      }
+      if (new Set(list).size !== list.length) throw new Error(`Sensor configuration names.${modality} must be unique.`)
+      if (list.length !== configuration[modality]) throw new Error(`Sensor configuration names.${modality} lists ${list.length} ids but ${configuration[modality]} sensors are expected.`)
+      names[modality] = [...list]
+    }
+    if (Object.keys(names).length > 0) configuration.names = names
   }
   return configuration
 }
@@ -65,7 +84,22 @@ export function inferSensorConfigurationV1(snapshot: SourceInventorySnapshotV1):
     if (/(^|\/)radar/u.test(lowered)) radarDirectories.add(directory)
     else if (/(^|\/)(lidar|velodyne|points?)/u.test(lowered)) lidarDirectories.add(directory)
   }
-  return { lidar: lidarDirectories.size, radar: radarDirectories.size, camera: cameraDirectories.size }
+  const nameOf = (directory: string) => directory.split('/').at(-1)!.replace(/[^A-Za-z0-9_.:-]/gu, '_').replace(/^[^A-Za-z]+/u, '') || 'stream'
+  const unique = (directories: Set<string>) => {
+    const seen = new Map<string, number>()
+    return [...directories].sort().map((directory) => {
+      const base = nameOf(directory)
+      const count = seen.get(base) ?? 0
+      seen.set(base, count + 1)
+      return count === 0 ? base : `${base}_${count + 1}`
+    })
+  }
+  const names = {
+    ...(lidarDirectories.size > 0 ? { lidar: unique(lidarDirectories) } : {}),
+    ...(radarDirectories.size > 0 ? { radar: unique(radarDirectories) } : {}),
+    ...(cameraDirectories.size > 0 ? { camera: unique(cameraDirectories) } : {}),
+  }
+  return { lidar: lidarDirectories.size, radar: radarDirectories.size, camera: cameraDirectories.size, ...(Object.keys(names).length > 0 ? { names } : {}) }
 }
 
 export function declaredSensorSummaryV1(recipe: Pick<EgoLensAdapterRecipeV1, 'scene'> | null): readonly DeclaredSensorSummaryV1[] {
@@ -84,14 +118,27 @@ export function sensorConfigurationDiagnosticsV1(
   if (!configuration) return []
   return declaredSensorSummaryV1(recipe).flatMap(({ modality, ids }) => {
     const expected = configuration[modality]
-    if (ids.length === expected) return []
     const declared = ids.length === 0 ? 'none' : ids.join(', ')
+    if (ids.length !== expected) {
+      return [{
+        stage: 'compile' as const,
+        severity: 'error' as const,
+        code: 'SENSOR_CONFIGURATION_UNMET',
+        jsonPointer: '/scene/sensors',
+        hint: `The confirmed sensor configuration expects ${expected} ${modality} sensor${expected === 1 ? '' : 's'}; the recipe declares ${ids.length} (${declared}). Declare one scene sensor per physical ${modality} stream and bind each of them.`,
+      }]
+    }
+    const expectedNames = configuration.names?.[modality]
+    if (!expectedNames) return []
+    const missing = expectedNames.filter((name) => !ids.includes(name))
+    const extra = ids.filter((id) => !expectedNames.includes(id))
+    if (missing.length === 0 && extra.length === 0) return []
     return [{
       stage: 'compile' as const,
       severity: 'error' as const,
       code: 'SENSOR_CONFIGURATION_UNMET',
       jsonPointer: '/scene/sensors',
-      hint: `The confirmed sensor configuration expects ${expected} ${modality} sensor${expected === 1 ? '' : 's'}; the recipe declares ${ids.length} (${declared}). Declare one scene sensor per physical ${modality} stream and bind each of them.`,
+      hint: `The confirmed ${modality} sensor ids are ${expectedNames.join(', ')}; the recipe declares ${declared}${missing.length > 0 ? ` (missing: ${missing.join(', ')})` : ''}${extra.length > 0 ? ` (unexpected: ${extra.join(', ')})` : ''}. Use exactly the confirmed ids as scene sensor ids.`,
     }]
   })
 }
