@@ -339,6 +339,7 @@ export async function createBrowserAdapter({
   origin,
   browserToken,
   sensorConfiguration = null,
+  onPage = null,
 }) {
   const playwright = await import(pathToFileURL(playwrightPath).href)
   const chromium = playwright.chromium ?? playwright.default?.chromium
@@ -374,6 +375,7 @@ export async function createBrowserAdapter({
   await installPublicToolTransport(context)
   const pages = context.pages()
   const page = pages[0] ?? await context.newPage()
+  if (typeof onPage === 'function') await onPage(page)
   await page.goto(`${origin}/amnesia.html`, { waitUntil: 'networkidle' })
   await page.locator('input[type=file]').setInputFiles(datasetRoot)
   // The workspace scans the folder and then asks for the sensor layout; the
