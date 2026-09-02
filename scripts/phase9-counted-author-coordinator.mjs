@@ -329,6 +329,10 @@ function protectedJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`
 }
 
+async function writeProtectedText(filename, text) {
+  await writeFile(filename, text, { flag: 'wx', mode: 0o600 })
+}
+
 async function writeProtectedJson(filename, value) {
   if (!path.isAbsolute(filename)) throw new Error('Protected evidence path must be absolute.')
   const handle = await open(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600)
@@ -1276,6 +1280,7 @@ async function runCase(options) {
     const controllerToken = randomToken()
     const browserToken = randomToken()
     adminToken = randomToken()
+    const runToken = randomToken()
     const outputFile = path.join(outputRoot, `${datasetId}.egolens-adapter.json`)
     const brokerParams = brokerParameters({
       runtime, applicationRoot, datasetRoot, outputRoot,
@@ -1411,6 +1416,14 @@ async function runCase(options) {
       timeoutMs: Number(options['timeout-ms'] ?? 45 * 60_000),
       maxOutputBytes: MAX_CONTROLLER_OUTPUT,
     })
+    // The author transcript and the broker audit are protected-local run
+    // records: they stay in the owner-only evidence root (never staged or
+    // published) so a stopped session can be diagnosed without a re-run.
+    // The controller bearer token is redacted before writing.
+    const redactControllerToken = (text) => String(text).split(controllerToken).join('[controller-token]')
+    const transcriptPrefix = `${datasetId}.${runToken.slice(0, 16)}`
+    await writeProtectedText(path.join(evidenceRoot, `${transcriptPrefix}.author-transcript.txt`), redactControllerToken(controllerResult.stderr))
+    await writeProtectedText(path.join(evidenceRoot, `${transcriptPrefix}.author-summary.txt`), redactControllerToken(controllerResult.stdout))
     if (controllerResult.code !== 0) {
       throw new Error(`Isolated Codex author did not complete (${sha256Colon(controllerResult.stderr)}).`)
     }
@@ -1420,6 +1433,7 @@ async function runCase(options) {
       token: adminToken,
       pathname: '/__phase9/audit',
     })
+    await writeProtectedText(path.join(evidenceRoot, `${transcriptPrefix}.broker-audit.json`), `${JSON.stringify(auditEnvelope, null, 2)}\n`)
     const audit = auditEnvelope?.audit
     if (auditEnvelope?.ok !== true || audit?.exported !== true
       || !exactStringSet(audit.publicTools, AMNESIA_PUBLIC_TOOLS)) {
