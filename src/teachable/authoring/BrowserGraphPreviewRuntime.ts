@@ -1,3 +1,4 @@
+import { consistencyDiagnosticsV1 } from './consistencyDiagnostics'
 import { renderReviewThumbnailsV1 } from './reviewThumbnails'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
@@ -195,9 +196,13 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
         sampledFrames: sampled,
         capabilitySamples,
       })
+      const consistency = consistencyDiagnosticsV1({
+        frames, cameraCalibrations: binding.scene.relations.cameraCalibrations,
+        timestampsMicros: binding.scene.index.timestampsMicros,
+      })
       let committed = false
       return {
-        diagnostics: [...binding.diagnostics, ...sparse],
+        diagnostics: [...binding.diagnostics, ...sparse, ...consistency],
         capabilities: binding.scene.manifest.capabilities,
         presentedFrames,
         validationSummary: {
