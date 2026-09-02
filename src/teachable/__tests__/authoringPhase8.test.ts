@@ -142,6 +142,18 @@ describe('Phase 8 revision transaction and review gate', () => {
     expect(authoring.getState().currentArtifact?.provenance?.datasetFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/u)
   })
 
+  it('rejects a revision without a declared provenance author', async () => {
+    const evaluator: AuthoringRevisionEvaluatorV1 = { prepare: vi.fn(async () => prepared(vi.fn())) }
+    const authoring = session(evaluator)
+    authoring.start(inventory())
+    const anonymous = structuredClone(recipe()) as { provenance?: unknown }
+    delete anonymous.provenance
+    const result = await authoring.applyRevision(anonymous as EgoLensAdapterRecipeV1)
+    expect(result.ok).toBe(false)
+    expect(result.diagnostics).toMatchObject([{ code: 'PROVENANCE_AUTHOR_REQUIRED', jsonPointer: '/provenance/author' }])
+    expect(evaluator.prepare).not.toHaveBeenCalled()
+  })
+
   it('rejects a stale parent and preserves the last good artifact and preview', async () => {
     const commit = vi.fn()
     const evaluator: AuthoringRevisionEvaluatorV1 = { prepare: vi.fn(async () => prepared(commit)) }

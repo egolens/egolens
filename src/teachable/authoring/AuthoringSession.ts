@@ -210,6 +210,16 @@ export class TeachableAuthoringSessionV1 {
           '/provenance/parentRecipeHash',
         )])
       }
+      // The finalized export is only ever attributed to the declared author;
+      // a revision without one would silently export as "imported".
+      if (recipe.provenance?.author === undefined) {
+        throw new AdapterCompileError([diagnostic(
+          'compile',
+          'PROVENANCE_AUTHOR_REQUIRED',
+          'Declare provenance.author ("codex" for an agent author) and provenance.createdAt on every revision; the export carries them unchanged.',
+          '/provenance/author',
+        )])
+      }
       const compiled = compileRecipeV1(recipe, this.#operators)
       prepared = await this.#evaluator.prepare(compiled, inventory, signal)
       const errors = prepared.diagnostics.filter((item) => item.severity === 'error')

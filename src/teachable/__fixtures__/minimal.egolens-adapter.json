@@ -12,6 +12,7 @@
     "name": "Minimal fixture format",
     "description": "Contract fixture for the Phase 1 recipe-backed adapter"
   },
+  "provenance": { "author": "codex", "createdAt": "2026-08-30T00:00:00.000Z" },
   "match": {
     "inventory": {
       "rootEntries": [

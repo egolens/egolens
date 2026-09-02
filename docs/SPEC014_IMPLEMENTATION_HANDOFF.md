@@ -614,6 +614,16 @@ Body outline (claim only what is listed in
   with `GRAPH_LABEL_INDEX_UNMATCHED` (naming both keys) when selected label
   files reach no bound point-cloud record, and a compile-time
   `TAXONOMY_UNDECLARED` diagnostic for operator taxonomy references.
+- 2026-09-02, candidate `7f08fb0` (includes #50): Waymo passed
+  (`phase9-waymo-268d0e208f6ae508`) and the nuScenes author completed the
+  whole public flow for the first time (10/10 capabilities, 8 accepted
+  reviews, finalize, one export), but the coordinator rejected the export:
+  the author never declared `provenance`, the session defaulted the finalized
+  artifact to `author: "imported"`, and the coordinator requires `"codex"`.
+  Neither the prompt nor the public apply path had asked for it. Fixed by
+  rejecting any revision without `provenance.author` at apply time
+  (`PROVENANCE_AUTHOR_REQUIRED`) and stating the requirement in the author
+  prompt.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
