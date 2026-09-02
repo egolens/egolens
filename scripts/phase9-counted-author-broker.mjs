@@ -17,6 +17,11 @@ export const COUNTED_PUBLIC_TOOLS = Object.freeze([
 
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024
 const MAX_VISIBLE_TEXT = 64 * 1024
+// A validation sweep over many sampled frames decodes one Parquet row group per
+// frame and can legitimately run for minutes; the transport waits that long,
+// and tool calls are serialized so a second call can never overlap the first
+// inside the page and double its transient memory.
+const TOOL_CALL_TIMEOUT_MS = 15 * 60_000
 const ARGUMENT_NAMES = Object.freeze([
   'application', 'dataset', 'profile', 'scratch', 'output-file', 'port',
   'controller-token', 'browser-token', 'admin-token', 'chrome', 'playwright',
@@ -367,13 +372,22 @@ export async function createBrowserAdapter({
 
   let sequence = 0
   let exported = false
+  let queue = Promise.resolve()
+  const serialized = (task) => {
+    const run = queue.then(task, task)
+    queue = run.then(() => undefined, () => undefined)
+    return run
+  }
   const tools = async () => JSON.parse(await page.locator('#egolens-public-webmcp-definitions').inputValue())
   return {
     ready: true,
     get exported() { return exported },
     tools,
-    async call(name, argumentsValue) {
+    call(name, argumentsValue) {
       if (!COUNTED_PUBLIC_TOOLS.includes(name)) throw new Error('Tool name is outside the counted author boundary.')
+      return serialized(() => invoke(name, argumentsValue))
+    },
+    async invoke(name, argumentsValue) {
       const id = ++sequence
       const response = page.locator('#egolens-public-webmcp-response')
       await response.fill('', { force: true })
@@ -386,7 +400,7 @@ export async function createBrowserAdapter({
         const value = document.querySelector('#egolens-public-webmcp-response')?.value
         if (!value) return false
         try { return JSON.parse(value).id === expectedId } catch { return false }
-      }, { expectedId: id }, { timeout: 30_000 })
+      }, { expectedId: id }, { timeout: TOOL_CALL_TIMEOUT_MS })
       return JSON.parse(await response.inputValue())
     },
     async view() {
@@ -461,6 +475,10 @@ async function main() {
   })
   await new Promise((resolve, reject) => {
     server.once('error', reject)
+    // Node's default requestTimeout (5 minutes) would cut a long serialized
+    // tool call; the tool-call ceiling governs instead.
+    server.requestTimeout = TOOL_CALL_TIMEOUT_MS + 60_000
+    server.headersTimeout = 60_000
     server.listen(port, '127.0.0.1', resolve)
   })
   try {
