@@ -378,7 +378,10 @@ export async function createBrowserAdapter({
       const response = page.locator('#egolens-public-webmcp-response')
       await response.fill('', { force: true })
       await page.locator('#egolens-public-webmcp-request').fill(JSON.stringify({ id, name, arguments: argumentsValue }), { force: true })
-      await page.locator('#egolens-public-webmcp-invoke').click({ force: true })
+      // The transport host is a 1px, overflow-hidden fixture, so a real
+      // pointer click never reaches the button and the bridge never runs.
+      // Dispatch the click event directly; the bridge listener is what matters.
+      await page.locator('#egolens-public-webmcp-invoke').dispatchEvent('click')
       await page.waitForFunction(({ expectedId }) => {
         const value = document.querySelector('#egolens-public-webmcp-response')?.value
         if (!value) return false
