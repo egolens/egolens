@@ -379,15 +379,7 @@ export async function createBrowserAdapter({
     return run
   }
   const tools = async () => JSON.parse(await page.locator('#egolens-public-webmcp-definitions').inputValue())
-  return {
-    ready: true,
-    get exported() { return exported },
-    tools,
-    call(name, argumentsValue) {
-      if (!COUNTED_PUBLIC_TOOLS.includes(name)) throw new Error('Tool name is outside the counted author boundary.')
-      return serialized(() => invoke(name, argumentsValue))
-    },
-    async invoke(name, argumentsValue) {
+  const invoke = async (name, argumentsValue) => {
       const id = ++sequence
       const response = page.locator('#egolens-public-webmcp-response')
       await response.fill('', { force: true })
@@ -402,6 +394,14 @@ export async function createBrowserAdapter({
         try { return JSON.parse(value).id === expectedId } catch { return false }
       }, { expectedId: id }, { timeout: TOOL_CALL_TIMEOUT_MS })
       return JSON.parse(await response.inputValue())
+  }
+  return {
+    ready: true,
+    get exported() { return exported },
+    tools,
+    call(name, argumentsValue) {
+      if (!COUNTED_PUBLIC_TOOLS.includes(name)) throw new Error('Tool name is outside the counted author boundary.')
+      return serialized(() => invoke(name, argumentsValue))
     },
     async view() {
       const checks = []
