@@ -225,9 +225,15 @@ export default function TeachableLensPanel({
           </div>
         )}
 
-        {(localError || state.diagnostics.length > 0) && (
+        {state.diagnostics.some((item) => item.severity === 'warning') && (
+          <div data-testid="consistency-warnings" style={{ padding: 14, whiteSpace: 'pre-wrap', background: alpha(colors.warning, 0.08), border: `1px solid ${alpha(colors.warning, 0.4)}`, color: colors.warning, borderRadius: radius.md, fontSize: 11, lineHeight: 1.5 }}>
+            {state.diagnostics.filter((item) => item.severity === 'warning').map((item) => `${item.code}: ${item.hint}`).join('\n')}
+          </div>
+        )}
+
+        {(localError || state.diagnostics.some((item) => item.severity === 'error')) && (
           <div style={{ padding: 14, whiteSpace: 'pre-wrap', background: alpha(colors.danger, 0.08), border: `1px solid ${alpha(colors.danger, 0.4)}`, color: colors.danger, borderRadius: radius.md, fontSize: 11, lineHeight: 1.5 }}>
-            {localError ?? state.diagnostics.map((item) => `${item.code}: ${item.hint}`).join('\n')}
+            {localError ?? state.diagnostics.filter((item) => item.severity === 'error').map((item) => `${item.code}: ${item.hint}`).join('\n')}
           </div>
         )}
 

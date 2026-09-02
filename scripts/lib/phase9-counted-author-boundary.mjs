@@ -56,6 +56,7 @@ export const REVIEWED_AUTHOR_SOURCE_PATHS = Object.freeze([
   'src/teachable/authoring/InventoryBindingEvaluator.ts',
   'src/teachable/authoring/SourceInventory.ts',
   'src/teachable/authoring/browserSession.ts',
+  'src/teachable/authoring/consistencyDiagnostics.ts',
   'src/teachable/authoring/hashes.ts',
   'src/teachable/authoring/inspection.ts',
   'src/teachable/authoring/persistence.ts',
