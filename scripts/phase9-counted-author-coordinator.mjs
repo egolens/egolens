@@ -718,6 +718,15 @@ async function prepareExactApplication({ candidateCommit, runRoot, runtime }) {
       path.join(installRuntimeRoot, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
       'trusted npm CLI',
     )
+    // npm refuses to load the same file as both the user and the global
+    // config ("double-loading config"), so each points at its own empty file
+    // inside the fresh build home; neither can inherit operator settings.
+    const npmUserConfig = path.join(buildHome, 'npmrc.user')
+    const npmGlobalConfig = path.join(buildHome, 'npmrc.global')
+    await Promise.all([
+      writeFile(npmUserConfig, '', { flag: 'wx', mode: 0o600 }),
+      writeFile(npmGlobalConfig, '', { flag: 'wx', mode: 0o600 }),
+    ])
     const installEnvironment = {
       HOME: buildHome,
       TMPDIR: buildHome,
@@ -727,9 +736,9 @@ async function prepareExactApplication({ candidateCommit, runRoot, runtime }) {
       npm_config_audit: 'false',
       npm_config_cache: path.join(buildHome, 'npm-cache'),
       npm_config_fund: 'false',
-      npm_config_globalconfig: '/dev/null',
+      npm_config_globalconfig: npmGlobalConfig,
       npm_config_ignore_scripts: 'true',
-      npm_config_userconfig: '/dev/null',
+      npm_config_userconfig: npmUserConfig,
       npm_config_update_notifier: 'false',
     }
     const install = await runProcess(installNode, [npmCli,
