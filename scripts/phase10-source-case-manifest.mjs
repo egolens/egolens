@@ -6,7 +6,9 @@ import { lstat, mkdir, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   normalizeContentBlindPathV1,
+  loadPhase10ProductionTrustV1,
   phase10HashV1,
+  phase10VerifierBindingV1,
   sourceManifestHashFromFilesV1,
   validateSourceCaseManifestSemanticsV1,
 } from './lib/phase10-evidence.mjs'
@@ -100,9 +102,11 @@ for (const [index, entry] of entries.entries()) {
   }
 }
 process.stderr.write('\n')
+const verifierBinding = phase10VerifierBindingV1(await loadPhase10ProductionTrustV1())
 files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
 const payload = {
   schema: 'egolens-source-case-manifest-v1',
+  verifierBinding,
   release: {
     datasetId: String(options['dataset-id']),
     releaseId: String(options['release-id']),
@@ -140,6 +144,7 @@ const publicSummary = {
   role: manifest.case.role,
   reserveFor: manifest.case.reserveFor,
   sourceCaseManifestHash: manifest.manifestHash,
+  verifierBinding: manifest.verifierBinding,
   sourceManifestHash: manifest.sourceManifestHash,
   ...manifest.aggregate,
 }

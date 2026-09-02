@@ -1,7 +1,6 @@
 {
   "datasetId": "nuscenes",
   "caseId": "phase6-nuscenes-urban-vru-001",
-  "sourceFingerprint": "sha256-277ea9f12350c1d8c00e4fe4582a487a23829c905ed847f7e9b5f987d7fa02cf",
   "requiredCapabilities": [
     "boxes2d",
     "boxes3d",

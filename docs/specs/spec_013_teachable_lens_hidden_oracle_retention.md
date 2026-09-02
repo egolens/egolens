@@ -105,6 +105,14 @@ after the candidate code changes.
 Detailed oracle-side diagnostics remain a trusted human artifact. The
 authoring loop cannot query the judge repeatedly as an oracle-extraction API.
 
+The reviewed public coverage declaration does not contain a target semantic
+recipe hash. A fresh author has no canonical recipe identifier vocabulary or
+oracle feedback from which it could reproduce the bundled recipe's hash. The
+candidate's hash is therefore computed after blind authoring, bound to the
+machine-produced isolation attestation and exact runtime ID, and accepted only
+when the one-shot hidden judge signs full structural, numeric, and perceptual
+parity. Hash equality with a bundled recipe is neither disclosed nor required.
+
 ### Capture-readiness finding
 
 The Waymo evidence run showed that the interactive `seekFrame()` action may
@@ -222,5 +230,8 @@ judge-tool commit; it must not check out, install, or execute the candidate PR.
 - [x] Oracle bundles are mounted only in the trusted judge workspace.
 - [x] The authoring agent receives no oracle values or executable built-in
       adapter and cannot invoke the judge as an interactive probing tool.
+- [x] The public authoring attestation retains only a boundary-report commitment
+      and path-free witness. Source fingerprints, concrete policy/probe hashes,
+      and canonical paths remain protected and are checked by the trusted judge.
 - [x] Signed receipts and trusted detailed reports cover every exposed feature
       at structural, numeric, and perceptual levels.

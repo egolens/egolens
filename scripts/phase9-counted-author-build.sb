@@ -1,0 +1,57 @@
+(version 1)
+(deny default)
+
+; Candidate-controlled TypeScript/Vite executes here before authoring.  It may
+; read only its allowlisted exact-commit source stage and reviewed Node runtime;
+; it can write only dependency build caches, the predetermined dist directory,
+; and a fresh private build home.  Dataset, auth, repository parent, evidence,
+; model control plane, and every network endpoint remain unavailable.
+(allow process*)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+(allow mach*)
+(allow ipc-posix*)
+(allow iokit*)
+
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/ColorSync")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone")
+  (subpath (param "NODE_RUNTIME_ROOT"))
+  (subpath (param "SOURCE_STAGE_ROOT"))
+  (subpath (param "SOURCE_STAGE_REAL_ROOT")))
+
+(allow file-read* file-write* file-test-existence file-map-executable
+  (subpath (param "NODE_MODULES_ROOT"))
+  (subpath (param "NODE_MODULES_REAL_ROOT"))
+  (subpath (param "OUTPUT_ROOT"))
+  (subpath (param "OUTPUT_REAL_ROOT"))
+  (subpath (param "BUILD_HOME"))
+  (subpath (param "BUILD_HOME_REAL")))
+
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "NODE_RUNTIME_ROOT"))
+  (path-ancestors (param "SOURCE_STAGE_REAL_ROOT"))
+  (path-ancestors (param "NODE_MODULES_REAL_ROOT"))
+  (path-ancestors (param "OUTPUT_REAL_ROOT"))
+  (path-ancestors (param "BUILD_HOME_REAL")))
+
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+; No network rule is present: deny-default rejects bind, inbound, and outbound.

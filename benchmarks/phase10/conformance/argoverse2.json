@@ -1,7 +1,6 @@
 {
   "datasetId": "argoverse2",
   "caseId": "phase6-av2-urban-001",
-  "sourceFingerprint": "sha256-9f786d49304d1025d42e9c86d324706d96cf9428db4bf5a930d99c2c93c64789",
   "requiredCapabilities": [
     "boxes2d",
     "boxes3d",

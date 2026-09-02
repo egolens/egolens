@@ -1,0 +1,68 @@
+(version 1)
+(deny default)
+
+; Generated tools inherit this profile. They receive only process primitives,
+; immutable system executables, the empty control root, and one fixed loopback
+; endpoint. In particular they receive no application, dataset, or output path.
+(allow process*)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+
+; sandbox-exec may launch the one controller process, but generated children
+; cannot re-exec the privileged Codex path and regain its filtered privileges.
+(deny process-exec file-read* (literal (param "CODEX_BINARY")))
+(with-filter (process-path "/usr/bin/sandbox-exec")
+  (allow process-exec file-read* file-map-executable
+    (literal (param "CODEX_BINARY"))))
+
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone")
+  (subpath (param "CODEX_RUNTIME_ROOT")))
+
+(allow file-read* file-write* file-test-existence
+  (subpath (param "CONTROL_ROOT"))
+  (subpath (param "CONTROL_REAL_ROOT")))
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "CODEX_RUNTIME_ROOT"))
+  (path-ancestors (param "CONTROL_REAL_ROOT"))
+  (path-ancestors (param "CODEX_HOME_ROOT"))
+  (path-ancestors (param "OPENAI_SUPPORT_ROOT"))
+  (path-ancestors (param "CODEX_SUPPORT_ROOT"))
+  (path-ancestors (param "SYSTEM_TMP")))
+
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+; The reviewed Codex binary alone may access its authentication/control-plane
+; state and external model service. These privileges do not follow shell,
+; curl, Node, or any other generated child/tool process.
+(with-filter (process-path (param "CODEX_BINARY"))
+  (allow mach*)
+  (allow ipc-posix*)
+  (allow iokit*)
+  (allow file-read* file-write* file-test-existence
+    (subpath (param "CODEX_HOME_ROOT"))
+    (subpath (param "OPENAI_SUPPORT_ROOT"))
+    (subpath (param "CODEX_SUPPORT_ROOT"))
+    (subpath (param "SYSTEM_TMP")))
+  (allow network-outbound)
+  (allow network-bind network-inbound (local ip "localhost:*")))
+
+; Every child/tool process is otherwise confined to this single broker port.
+(allow network-outbound
+  (remote ip (param "BROKER_REMOTE_ENDPOINT")))

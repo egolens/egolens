@@ -5,11 +5,12 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema", "release", "case", "files", "aggregate",
+    "schema", "verifierBinding", "release", "case", "files", "aggregate",
     "sourceManifestHash", "manifestHash"
   ],
   "properties": {
     "schema": { "const": "egolens-source-case-manifest-v1" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
     "release": {
       "type": "object",
       "additionalProperties": false,
@@ -85,6 +86,18 @@
   },
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
-    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "verifierBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash", "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash", "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" }, "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" }, "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 }, "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" }, "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" }, "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    }
   }
 }

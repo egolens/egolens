@@ -278,6 +278,8 @@ function useBenchmarkLoadCommand() {
 type BrowserConformanceDescriptorV1 = NonNullable<ReturnType<typeof getActiveConformanceDescriptor>> & {
   readonly mode: 'production' | 'adapter-amnesia'
   readonly recipeHash: string | null
+  readonly buildCommit: string
+  readonly sourceTreeHash: string
 }
 
 interface BrowserConformanceCaptureV1 {
@@ -299,6 +301,8 @@ interface BrowserConformanceCaptureV1 {
   }): void
   presentation(): Readonly<Record<string, unknown>>
   renderedFrame(): Promise<Readonly<Record<string, unknown>> | null>
+  /** Evidence that no authoring agent touched this page: no WebMCP surface and no tool engagement. */
+  agentActivity(): { readonly modelContextAvailable: boolean; readonly agentEngaged: boolean }
 }
 
 async function browserSha256V1(value: ArrayBufferView): Promise<string> {
@@ -314,6 +318,7 @@ declare global {
     readonly __EGOLENS_BENCHMARK_HOLD__?: boolean
     readonly __EGOLENS_ORACLE_CAPTURE_REQUESTED__?: boolean
     readonly __EGOLENS_ADAPTER_AMNESIA_CAPTURE__?: boolean
+    readonly __EGOLENS_PREFLIGHT_RECIPE__?: unknown
     readonly __EGOLENS_PREFLIGHT_PRESENTATION__?: ShareDescriptorV1['presentation']
     __EGOLENS_ORACLE_CAPTURE__?: BrowserConformanceCaptureV1
   }
@@ -334,6 +339,12 @@ function useOracleCaptureCommand() {
     const api: BrowserConformanceCaptureV1 = Object.freeze({
       schemaVersion: 1,
       buildCommit: __EGOLENS_GIT_COMMIT__,
+      agentActivity: () => ({
+        modelContextAvailable: typeof (document as Document & {
+          readonly modelContext?: { readonly registerTool?: unknown }
+        }).modelContext?.registerTool === 'function',
+        agentEngaged: teachableAuthoringSession.getState().agentEngaged,
+      }),
       descriptor: () => {
         if (installed) {
           return {
@@ -344,6 +355,8 @@ function useOracleCaptureCommand() {
             preflightIdentity: null,
             mode: 'adapter-amnesia' as const,
             recipeHash: installed.recipeHash,
+            buildCommit: __EGOLENS_GIT_COMMIT__,
+            sourceTreeHash: __EGOLENS_SOURCE_TREE_HASH__,
           }
         }
         const descriptor = getActiveConformanceDescriptor()
@@ -351,6 +364,8 @@ function useOracleCaptureCommand() {
           ...descriptor,
           mode: 'production' as const,
           recipeHash: descriptor.preflightIdentity?.recipeHash ?? null,
+          buildCommit: __EGOLENS_GIT_COMMIT__,
+          sourceTreeHash: __EGOLENS_SOURCE_TREE_HASH__,
         } : null
       },
       async installRecipe(recipe: unknown) {
@@ -1325,7 +1340,12 @@ function ThemeToggle({ isMobile }: { isMobile: boolean }) {
   )
 }
 
-function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map<string, File>>) => Promise<void> }) {
+function DropZone({ onFilesLoaded }: {
+  onFilesLoaded: (
+    segments: Map<string, Map<string, File>>,
+    countedRecipe?: CompiledRecipeV1,
+  ) => Promise<void>
+}) {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -1343,9 +1363,17 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
 
   const handleFiles = useCallback(async ({ segments, rejection, inventory }: ScanResult) => {
     let preflightIdentity = null
+    let preflightCompiledRecipe: CompiledRecipeV1 | null = null
     const preflightPresentation = window.__EGOLENS_PREFLIGHT_PRESENTATION__
     const expectedSourceManifestHash = window.__EGOLENS_EXPECTED_SOURCE_MANIFEST_HASH__
+    const suppliedPreflightRecipe = window.__EGOLENS_PREFLIGHT_RECIPE__
+    if (suppliedPreflightRecipe != null && !expectedSourceManifestHash) {
+      throw new Error('A local preflight recipe requires a precommitted source identity.')
+    }
     if (expectedSourceManifestHash) {
+      if (suppliedPreflightRecipe == null) {
+        throw new Error('Counted local preflight requires its Phase 9 author recipe.')
+      }
       if (!inventory || inventory.snapshot().truncated || inventory.snapshot().revoked) {
         throw new Error('Counted local preflight requires a complete browser-authorized inventory.')
       }
@@ -1353,11 +1381,14 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
       if (source.sourceManifestHash !== expectedSourceManifestHash) {
         throw new Error('SOURCE_MANIFEST_HASH_MISMATCH: selected local bytes do not match the precommitted source.')
       }
-      const compiled = segments.has('__nuscenes__')
-        ? nuScenesCompiledRecipe
-        : segments.has('__argoverse2__')
-          ? argoverse2CompiledRecipe
-          : waymoCompiledRecipe
+      const datasetId = segments.has('__nuscenes__')
+        ? 'nuscenes'
+        : segments.has('__argoverse2__') ? 'argoverse2' : 'waymo'
+      const compiled = compileRecipeV1(suppliedPreflightRecipe, bundledPhase2OperatorRegistry)
+      if (compiled.normalizedManifest.id !== datasetId) {
+        throw new Error(`Counted local recipe targets ${compiled.normalizedManifest.id}, not ${datasetId}.`)
+      }
+      preflightCompiledRecipe = compiled
       const [recipeHash, formatFingerprint, operatorSetFingerprint] = await Promise.all([
         recipeHashV1(compiled.recipe),
         formatFingerprintV1(compiled.recipe, inventory),
@@ -1381,7 +1412,7 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
           preflightPresentation.cameraPose.distance,
         )
       }
-      await onFilesLoaded(loaded)
+      await onFilesLoaded(loaded, preflightCompiledRecipe ?? undefined)
       const requestedScene = window.__EGOLENS_PREFLIGHT_SCENE__
       const state = useSceneStore.getState()
       if (requestedScene && state.currentSegment !== requestedScene) {
@@ -1399,11 +1430,11 @@ function DropZone({ onFilesLoaded }: { onFilesLoaded: (segments: Map<string, Map
         await state.actions.selectSegment(requestedScene)
       }
       if (preflightPresentation) {
-        const compiled = loaded.has('__nuscenes__')
+        const compiled = preflightCompiledRecipe ?? (loaded.has('__nuscenes__')
           ? nuScenesCompiledRecipe
           : loaded.has('__argoverse2__')
             ? argoverse2CompiledRecipe
-            : waymoCompiledRecipe
+            : waymoCompiledRecipe)
         const pointSensors = new Map(compiled.recipe.scene.sensors
           .filter((sensor) => sensor.modality !== 'camera')
           .map((sensor) => [sensor.id, sensor.rendererId]))

@@ -5,13 +5,14 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema", "attemptId", "application", "browserProcess", "sourceCase",
+    "schema", "verifierBinding", "attemptId", "application", "browserProcess", "sourceCase",
     "phase", "transport", "isolation", "fingerprints", "revisionLineage",
     "capabilities", "diagnostics", "firstFailure", "humanReview",
     "observations", "result", "attemptHash"
   ],
   "properties": {
     "schema": { "const": "egolens-generalization-attempt-v1" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
     "attemptId": { "$ref": "#/$defs/id" },
     "application": {
       "type": "object",
@@ -252,6 +253,27 @@
     "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "nullableHash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-    "uuid": { "type": "string", "format": "uuid" }
+    "uuid": { "type": "string", "format": "uuid" },
+    "verifierBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash",
+        "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash",
+        "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"
+      ],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" },
+        "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 },
+        "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" },
+        "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    }
   }
 }

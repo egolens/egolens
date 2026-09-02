@@ -1,9 +1,24 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn } from 'node:child_process'
-import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { recipeSemanticHash } from './lib/amnesia-evidence.mjs'
+import {
+  boundaryHashV1,
+  countedBrowserSeatbeltArgumentsV1,
+  countedSourceBoundaryV1,
+  endpointForOriginV1,
+  inspectOfficialChromeIdentityV1,
+  makeBoundaryEnvironmentV1,
+  makeBoundaryRunEvidenceV1,
+  requestAuditV1,
+  sourceRootCommitmentV1,
+} from './lib/phase10-counted-browser-boundary.mjs'
 import {
   closeFreshProcessWorkspaceV1,
   createFreshProcessWorkspaceV1,
@@ -14,10 +29,33 @@ import {
   transportPerceptualClipV2,
 } from './lib/perceptual-clip.mjs'
 import { selectInitialSceneMilestones } from './lib/phase6-benchmark-summary.mjs'
+import {
+  loadPhase10ProductionTrustV1,
+  phase10HashV1,
+  phase10PreflightSourceModeV1,
+  phase10VerifierBindingV1,
+} from './lib/phase10-evidence.mjs'
 import { perceptualRasterSha256V1, perceptualRasterSha256V2 } from './lib/perceptual-raster.mjs'
 
 const CHROME = process.env.EGOLENS_CHROME
   ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const COUNTED_BROWSER_PROFILE = path.join(TOOL_ROOT, 'scripts/phase10-counted-browser.sb')
+
+function gitRead(argv, encoding = 'utf8') {
+  return execFileSync('/usr/bin/git', [
+    '-c', 'core.hooksPath=/dev/null', '-C', TOOL_ROOT, ...argv,
+  ], {
+    encoding,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    env: {
+      PATH: '/usr/bin:/bin',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    },
+  })
+}
 
 function args(argv) {
   const result = {}
@@ -76,6 +114,12 @@ const adapterRecipe = adapterRecipePath
   ? JSON.parse(await readFile(adapterRecipePath, 'utf8'))
   : null
 const adapterAmnesia = options['adapter-amnesia'] === true
+const preflightRecipePath = options['preflight-recipe']
+  ? path.resolve(String(options['preflight-recipe']))
+  : null
+const preflightRecipe = preflightRecipePath
+  ? JSON.parse(await readFile(preflightRecipePath, 'utf8'))
+  : null
 const localSourceRoot = options['local-source']
   ? path.resolve(String(options['local-source']))
   : null
@@ -89,6 +133,16 @@ const preflightPresentation = options.presentation
 const expectedPreflightIdentity = options['expected-preflight-identity']
   ? JSON.parse(await readFile(path.resolve(String(options['expected-preflight-identity'])), 'utf8'))
   : null
+const expectedCandidateCommit = options['expected-commit'] ? String(options['expected-commit']) : null
+const expectedSourceTreeHash = options['expected-source-tree-hash']
+  ? String(options['expected-source-tree-hash'])
+  : null
+const appBuildRootInput = options['app-build-root']
+  ? path.resolve(String(options['app-build-root']))
+  : null
+const expectedAppBuildInventoryHash = options['expected-app-build-inventory-hash']
+  ? String(options['expected-app-build-inventory-hash'])
+  : null
 const preflightIdentityKeys = [
   'datasetId', 'caseId', 'sourceManifestHash', 'catalogHash', 'shareDescriptorHash',
   'recipeHash', 'formatFingerprint', 'operatorSetFingerprint',
@@ -97,11 +151,41 @@ if (expectedPreflightIdentity
   && JSON.stringify(Object.keys(expectedPreflightIdentity).sort()) !== JSON.stringify([...preflightIdentityKeys].sort())) {
   throw new Error('--expected-preflight-identity must contain the closed Phase 10 identity shape')
 }
+if (expectedCandidateCommit && !/^[0-9a-f]{40}$/u.test(expectedCandidateCommit)) {
+  throw new Error('--expected-commit must be a full lowercase Git SHA')
+}
+if (expectedSourceTreeHash && !/^sha256:[0-9a-f]{64}$/u.test(expectedSourceTreeHash)) {
+  throw new Error('--expected-source-tree-hash must be a lowercase sha256: digest')
+}
+if (expectedPreflightIdentity && (!expectedCandidateCommit || !expectedSourceTreeHash)) {
+  throw new Error('Counted preflight requires --expected-commit and --expected-source-tree-hash')
+}
 if (expectedSourceManifestHash && !/^sha256:[0-9a-f]{64}$/u.test(expectedSourceManifestHash)) {
   throw new Error('--expected-source-manifest-hash must be a lowercase sha256: digest')
 }
 if (localSourceRoot && !expectedSourceManifestHash) {
   throw new Error('--local-source requires --expected-source-manifest-hash for counted identity verification')
+}
+if (preflightRecipe && !localSourceRoot) {
+  throw new Error('--preflight-recipe is accepted only with --local-source')
+}
+if (localSourceRoot && expectedPreflightIdentity && !preflightRecipe) {
+  throw new Error('Counted local preflight requires --preflight-recipe')
+}
+if (preflightRecipe && recipeSemanticHash(preflightRecipe) !== expectedPreflightIdentity?.recipeHash) {
+  throw new Error('--preflight-recipe does not match the expected Phase 9 recipe hash')
+}
+if (adapterRecipe && preflightRecipe) {
+  throw new Error('--adapter-recipe and --preflight-recipe are distinct capture modes')
+}
+if (Boolean(appBuildRootInput) !== Boolean(expectedAppBuildInventoryHash)) {
+  throw new Error('--app-build-root and --expected-app-build-inventory-hash must be provided together')
+}
+if (expectedAppBuildInventoryHash && !/^sha256:[0-9a-f]{64}$/u.test(expectedAppBuildInventoryHash)) {
+  throw new Error('--expected-app-build-inventory-hash must be a lowercase sha256: digest')
+}
+if (expectedPreflightIdentity && !appBuildRootInput) {
+  throw new Error('Counted preflight requires --app-build-root and its expected inventory hash')
 }
 if (expectedPreflightIdentity && localSourceRoot
   && expectedPreflightIdentity.sourceManifestHash !== expectedSourceManifestHash) {
@@ -116,11 +200,18 @@ if (adapterAmnesia !== Boolean(adapterRecipe)) {
 if (adapterAmnesia && !conformanceConfig) {
   throw new Error('Adapter Amnesia is available only for a one-shot conformance capture')
 }
-if (localSourceRoot && (() => {
-  const params = new URL(String(options.url)).searchParams
-  return params.has('share') || params.get('shareVersion') === '1'
-})()) {
-  throw new Error('--local-source cannot be combined with a portable share URL')
+const preflightSourceMode = phase10PreflightSourceModeV1(
+  String(options.url),
+  Boolean(localSourceRoot),
+)
+const countedSourceBoundary = expectedPreflightIdentity
+  ? countedSourceBoundaryV1(String(options.url), preflightSourceMode)
+  : null
+if (expectedPreflightIdentity && process.platform !== 'darwin') {
+  throw new Error('Counted Phase 10 browser evidence requires macOS Seatbelt')
+}
+if (expectedPreflightIdentity && process.env.EGOLENS_CHROME !== undefined) {
+  throw new Error('Counted Phase 10 browser evidence does not accept an environment-selected Chrome executable')
 }
 if (conformanceConfig && (warmupCount !== 0 || runCount !== 1)) {
   throw new Error('conformance capture requires --warmups 0 --runs 1')
@@ -144,6 +235,14 @@ for (const [index, scenario] of switchScenarios.entries()) {
   if (!scenario || typeof scenario.dataset !== 'string' || typeof scenario.data !== 'string') {
     throw new Error(`Cross-dataset switch scenario ${index} requires string dataset and data fields`)
   }
+}
+const verifierToolCommit = gitRead(['rev-parse', 'HEAD']).trim()
+const verifierToolClean = gitRead(['status', '--porcelain', '--untracked-files=all']).trim().length === 0
+const verifierSourceTreeHash = `sha256:${createHash('sha256').update(
+  gitRead(['ls-files', '--stage', '-z'], null),
+).digest('hex')}`
+if (expectedPreflightIdentity && !verifierToolClean) {
+  throw new Error('Counted preflight requires a clean external verifier-tool checkout')
 }
 
 function withPerf(urlString) {
@@ -286,6 +385,268 @@ async function enumerateLocalSourceFiles(root) {
   return files
 }
 
+const APP_BUILD_CONTENT_TYPES = Object.freeze({
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.wasm': 'application/wasm',
+  '.webp': 'image/webp',
+})
+
+async function readAppBuildSnapshot(root, retainBytes) {
+  const rootDetails = await lstat(root)
+  if (rootDetails.isSymbolicLink() || !rootDetails.isDirectory()) {
+    throw new Error('--app-build-root must be a real directory, not a symbolic link')
+  }
+  const canonicalRoot = await realpath(root)
+  const files = []
+  const responses = new Map()
+  let totalBytes = 0
+  const visit = async (directory, prefix) => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))
+    for (const entry of entries) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+      const absolute = path.join(directory, entry.name)
+      if (entry.isSymbolicLink()) throw new Error(`App build contains a symbolic link: ${relative}`)
+      if (entry.isDirectory()) {
+        await visit(absolute, relative)
+      } else if (entry.isFile()) {
+        const bytes = await readFile(absolute)
+        totalBytes += bytes.byteLength
+        if (files.length >= 20_000 || totalBytes > 1024 * 1024 * 1024) {
+          throw new Error('App build exceeds the immutable serving limit')
+        }
+        files.push({
+          path: relative,
+          size: bytes.byteLength,
+          sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+        })
+        if (retainBytes) responses.set(relative, bytes)
+      } else {
+        throw new Error(`App build contains a non-regular entry: ${relative}`)
+      }
+    }
+  }
+  await visit(canonicalRoot, '')
+  if (files.length === 0 || !responses.has('index.html') && retainBytes) {
+    throw new Error('App build must contain index.html and at least one regular file')
+  }
+  return {
+    canonicalRoot,
+    files,
+    responses,
+    inventoryHash: phase10HashV1(files),
+  }
+}
+
+function requestBuildPath(requestUrl) {
+  let decoded
+  try {
+    decoded = decodeURIComponent(new URL(requestUrl ?? '/', 'http://127.0.0.1/').pathname)
+  } catch {
+    return null
+  }
+  if (decoded.includes('\\') || decoded.includes('\0')) return null
+  const parts = decoded.split('/').filter(Boolean)
+  if (parts.some((part) => part === '.' || part === '..')) return null
+  return parts.length === 0 ? 'index.html' : parts.join('/')
+}
+
+async function createImmutableAppBuildServer(root, expectedInventoryHash) {
+  const snapshot = await readAppBuildSnapshot(root, true)
+  if (snapshot.inventoryHash !== expectedInventoryHash) {
+    throw new Error('App build inventory does not match the reproduced production build')
+  }
+  const server = createServer((request, response) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      response.writeHead(405, { Allow: 'GET, HEAD' })
+      response.end()
+      return
+    }
+    const requested = requestBuildPath(request.url)
+    const bytes = requested ? snapshot.responses.get(requested) : null
+    if (!requested || !bytes) {
+      response.writeHead(404, { 'Cache-Control': 'no-store' })
+      response.end()
+      return
+    }
+    response.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Length': bytes.byteLength,
+      'Content-Type': APP_BUILD_CONTENT_TYPES[path.extname(requested).toLowerCase()]
+        ?? 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    response.end(request.method === 'HEAD' ? undefined : bytes)
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Immutable app server has no TCP address')
+  return {
+    canonicalRoot: snapshot.canonicalRoot,
+    inventoryHash: snapshot.inventoryHash,
+    origin: `http://127.0.0.1:${address.port}`,
+    async diskInventoryHash() {
+      return (await readAppBuildSnapshot(snapshot.canonicalRoot, false)).inventoryHash
+    },
+    async close() {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    },
+  }
+}
+
+function pathsOverlap(left, right) {
+  return left === right || left.startsWith(`${right}${path.sep}`) || right.startsWith(`${left}${path.sep}`)
+}
+
+async function waitForChromeSelectedEndpoint(profileDir, processHandle) {
+  const activePort = path.join(profileDir, 'DevToolsActivePort')
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    if (processHandle.exitCode !== null) {
+      throw new Error(`Seatbelt-confined Chrome exited with code ${processHandle.exitCode}`)
+    }
+    try {
+      const [portLine, browserPath, extra] = (await readFile(activePort, 'utf8')).trim().split('\n')
+      const port = Number(portLine)
+      if (!Number.isSafeInteger(port) || port < 1024 || port > 65_535 || extra !== undefined
+        || !/^\/devtools\/browser\/[0-9a-f-]+$/iu.test(browserPath ?? '')) {
+        throw new Error('Chrome emitted an invalid DevToolsActivePort file')
+      }
+      const endpoint = await waitForEndpoint(port, processHandle)
+      if (new URL(endpoint.webSocketDebuggerUrl).port !== String(port)) {
+        throw new Error('Chrome debugging endpoint disagrees with its self-selected port')
+      }
+      return { endpoint, port }
+    } catch (error) {
+      if (!['ENOENT', 'EBUSY'].includes(error?.code)) {
+        if (/invalid DevToolsActivePort|disagrees/u.test(String(error?.message))) throw error
+      }
+    }
+    await delay(100)
+  }
+  throw new Error('Timed out waiting for Chrome to select its debugging port')
+}
+
+async function liveProbeServer(hostname) {
+  let hits = 0
+  const server = createServer((_request, response) => {
+    hits += 1
+    response.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': '2' })
+    response.end('ok')
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, hostname, resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Negative-probe server has no TCP address')
+  const literal = address.family === 'IPv6' ? `[${address.address}]` : address.address
+  return {
+    url: `http://${literal}:${address.port}/live-denial-sentinel`,
+    hits: () => hits,
+    async close() {
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    },
+  }
+}
+
+function nonLoopbackIpv4Address() {
+  return Object.values(os.networkInterfaces()).flat()
+    .find((entry) => entry?.family === 'IPv4' && !entry.internal && entry.address !== '0.0.0.0')?.address ?? null
+}
+
+async function fetchFromProbePage(client, sessionId, url) {
+  return evaluate(client, sessionId, `(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    try {
+      await fetch(${JSON.stringify(url)}, {
+        cache: 'no-store', credentials: 'omit', mode: 'no-cors', redirect: 'error', signal: controller.signal,
+      });
+      return { resolved: true };
+    } catch (error) {
+      return { resolved: false, errorName: error?.name ?? 'Error' };
+    } finally {
+      clearTimeout(timer);
+    }
+  })()`, 5_000)
+}
+
+async function runCountedBrowserNegativeProbe(client, appOrigin, forbiddenFile) {
+  const forbiddenLoopback = await liveProbeServer('127.0.0.1')
+  const nonLoopbackAddress = nonLoopbackIpv4Address()
+  if (!nonLoopbackAddress) {
+    await forbiddenLoopback.close()
+    throw new Error('A live non-loopback interface is required for counted external-egress denial evidence')
+  }
+  const externalEgress = await liveProbeServer(nonLoopbackAddress)
+  const target = await client.send('Target.createTarget', { url: 'about:blank' })
+  const attached = await client.send('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+  const session = attached.sessionId
+  try {
+    await Promise.all([
+      client.send('Page.enable', {}, session),
+      client.send('DOM.enable', {}, session),
+      client.send('Runtime.enable', {}, session),
+    ])
+    const app = await fetchFromProbePage(client, session, `${appOrigin}/index.html`)
+    const forbidden = await fetchFromProbePage(client, session, forbiddenLoopback.url)
+    const external = await fetchFromProbePage(client, session, externalEgress.url)
+
+    await evaluate(client, session, `document.body.innerHTML = '<input id="ambient" type="file">'; true`)
+    const document = await client.send('DOM.getDocument', { depth: 2 }, session)
+    const input = await client.send('DOM.querySelector', {
+      nodeId: document.root.nodeId,
+      selector: '#ambient',
+    }, session)
+    let ambientRead = false
+    try {
+      await client.send('DOM.setFileInputFiles', { files: [forbiddenFile], nodeId: input.nodeId }, session, 5_000)
+      ambientRead = await evaluate(client, session, `(async () => {
+        try {
+          const file = document.querySelector('#ambient')?.files?.[0];
+          return file ? (await file.text()).includes('EGOLENS_FORBIDDEN_SENTINEL') : false;
+        } catch { return false; }
+      })()`, 5_000)
+    } catch { /* Seatbelt can reject before Chromium creates the File handle. */ }
+
+    const checks = [
+      { name: 'ambient-file-read-denied', passed: ambientRead === false, evidence: 'live-browser-file-read-rejected' },
+      { name: 'app-loopback-allowed', passed: app.resolved === true, evidence: 'immutable-app-fetch-resolved' },
+      {
+        name: 'external-network-denied',
+        passed: external.resolved === false && externalEgress.hits() === 0,
+        evidence: 'live-non-loopback-listener-unreached',
+      },
+      {
+        name: 'forbidden-loopback-denied',
+        passed: forbidden.resolved === false && forbiddenLoopback.hits() === 0,
+        evidence: 'live-nonallowlisted-loopback-listener-unreached',
+      },
+    ]
+    if (checks.some((check) => !check.passed)) {
+      throw new Error(`Counted browser negative probe failed: ${JSON.stringify(checks)}`)
+    }
+    return checks
+  } finally {
+    await client.send('Target.closeTarget', { targetId: target.targetId }, undefined, 5_000).catch(() => {})
+    await Promise.all([forbiddenLoopback.close(), externalEgress.close()])
+  }
+}
+
 async function exerciseFeatureToggles(client, pageSession) {
   await evaluate(client, pageSession, `(async () => {
     const pause = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -359,6 +720,8 @@ async function captureConformanceArtifact(client, pageSession) {
   )
   const expectedCapabilities = [...conformanceConfig.requiredCapabilities].sort()
   if (!descriptor || descriptor.datasetId !== conformanceConfig.datasetId
+    || !/^[0-9a-f]{40}$/u.test(descriptor.buildCommit)
+    || !/^sha256:[0-9a-f]{64}$/u.test(descriptor.sourceTreeHash)
     || (preflightScene && descriptor.sceneId !== preflightScene)
     || JSON.stringify(descriptor.capabilities) !== JSON.stringify(expectedCapabilities)
     || (adapterAmnesia && (descriptor.mode !== 'adapter-amnesia'
@@ -477,6 +840,8 @@ async function captureConformanceArtifact(client, pageSession) {
     artifactHash: artifact.artifactHash,
     generatorCommit: artifact.provenance?.generatorCommit ?? null,
     runtimeId: artifact.provenance?.runtimeId ?? null,
+    buildCommit: descriptor.buildCommit,
+    sourceTreeHash: descriptor.sourceTreeHash,
     recipeHash: descriptor.recipeHash,
     identity: descriptor.preflightIdentity,
     presentation,
@@ -577,6 +942,38 @@ function aggregate(runs) {
       p95: quantile(values(key), 0.95),
       samples: values(key),
     }])),
+  }
+}
+
+async function observedPreflight(client, pageSession) {
+  if (!expectedPreflightIdentity) return null
+  return evaluate(client, pageSession, `(async () => {
+    const descriptor = globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor();
+    const presentation = globalThis.__EGOLENS_ORACLE_CAPTURE__?.presentation();
+    const renderedFrame = await globalThis.__EGOLENS_ORACLE_CAPTURE__?.renderedFrame();
+    const agentActivity = globalThis.__EGOLENS_ORACLE_CAPTURE__?.agentActivity?.() ?? null;
+    return descriptor ? {
+      datasetId: descriptor.datasetId,
+      sceneId: descriptor.sceneId,
+      buildCommit: descriptor.buildCommit,
+      sourceTreeHash: descriptor.sourceTreeHash,
+      identity: descriptor.preflightIdentity,
+      presentation,
+      renderedFrame,
+      agentActivity,
+    } : null;
+  })()`)
+}
+
+function assertObservedPreflight(preflight, label, expectedScene = null) {
+  const expectedRuntimeIdentity = Object.fromEntries(preflightIdentityKeys.slice(2)
+    .map((key) => [key, expectedPreflightIdentity[key]]))
+  if (!preflight || preflight.datasetId !== expectedPreflightIdentity.datasetId
+    || (expectedScene && preflight.sceneId !== expectedScene)
+    || preflight.buildCommit !== expectedCandidateCommit
+    || preflight.sourceTreeHash !== expectedSourceTreeHash
+    || JSON.stringify(preflight.identity) !== JSON.stringify(expectedRuntimeIdentity)) {
+    throw new Error(`${label} does not match the counted preflight identity: ${JSON.stringify(preflight)}`)
   }
 }
 
@@ -682,6 +1079,7 @@ async function runScenario(client, browserVersion, runIndex) {
         __EGOLENS_ORACLE_CAPTURE_REQUESTED__: { value: ${Boolean(conformanceConfig || expectedPreflightIdentity)}, configurable: false, enumerable: false, writable: false },
         __EGOLENS_ADAPTER_AMNESIA_CAPTURE__: { value: ${adapterAmnesia}, configurable: false, enumerable: false, writable: false },
         __EGOLENS_EXPECTED_SOURCE_MANIFEST_HASH__: { value: ${JSON.stringify(expectedSourceManifestHash)}, configurable: false, enumerable: false, writable: false },
+        __EGOLENS_PREFLIGHT_RECIPE__: { value: ${JSON.stringify(preflightRecipe)}, configurable: false, enumerable: false, writable: false },
         __EGOLENS_PREFLIGHT_SCENE__: { value: ${JSON.stringify(preflightScene)}, configurable: false, enumerable: false, writable: false },
         __EGOLENS_PREFLIGHT_PRESENTATION__: { value: ${JSON.stringify(preflightPresentation)}, configurable: false, enumerable: false, writable: false },
       });
@@ -765,7 +1163,7 @@ async function runScenario(client, browserVersion, runIndex) {
       bufferUsageReportingInterval: 1000,
     }, pageSession)
   }
-  await client.send('Page.navigate', { url: withPerf(options.url) }, pageSession, timeoutMs)
+  await client.send('Page.navigate', { url: withPerf(benchmarkUrl) }, pageSession, timeoutMs)
   await waitFor(client, pageSession, 'Boolean(globalThis.__EGOLENS_PERF__)')
   await waitFor(client, pageSession, 'globalThis.__EGOLENS_BENCHMARK_READY__ === true')
   // The pre-scene comparison point must represent a committed, naturally
@@ -779,7 +1177,7 @@ async function runScenario(client, browserVersion, runIndex) {
     // A webkitdirectory input itself must receive the directory path; passing
     // the enumerated leaves loses webkitRelativePath in Chromium and no
     // change event is dispatched.
-    await enumerateLocalSourceFiles(localSourceRoot)
+    if (!countedLocalSourceFiles) await enumerateLocalSourceFiles(localSourceRoot)
     const document = await client.send('DOM.getDocument', { depth: 2, pierce: true }, pageSession)
     const input = await client.send('DOM.querySelector', {
       nodeId: document.root.nodeId,
@@ -801,30 +1199,8 @@ async function runScenario(client, browserVersion, runIndex) {
   }
   await delay(settleMs)
   snapshots.afterWarmup = await capture('after-warmup-settle')
-  const preflight = expectedPreflightIdentity
-    ? await evaluate(client, pageSession, `(async () => {
-        const descriptor = globalThis.__EGOLENS_ORACLE_CAPTURE__?.descriptor();
-        const presentation = globalThis.__EGOLENS_ORACLE_CAPTURE__?.presentation();
-        const renderedFrame = await globalThis.__EGOLENS_ORACLE_CAPTURE__?.renderedFrame();
-        return descriptor ? {
-          datasetId: descriptor.datasetId,
-          sceneId: descriptor.sceneId,
-          identity: descriptor.preflightIdentity,
-          presentation,
-          renderedFrame,
-        } : null;
-      })()`)
-    : null
-  if (expectedPreflightIdentity) {
-    const actualIdentity = preflight?.identity
-    const expectedRuntimeIdentity = Object.fromEntries(preflightIdentityKeys.slice(2)
-      .map((key) => [key, expectedPreflightIdentity[key]]))
-    if (!preflight || preflight.datasetId !== expectedPreflightIdentity.datasetId
-      || (preflightScene && preflight.sceneId !== preflightScene)
-      || JSON.stringify(actualIdentity) !== JSON.stringify(expectedRuntimeIdentity)) {
-      throw new Error(`Observed preflight identity does not match the counted mode: ${JSON.stringify(preflight)}`)
-    }
-  }
+  const preflight = await observedPreflight(client, pageSession)
+  if (expectedPreflightIdentity) assertObservedPreflight(preflight, 'Initial managed scene', preflightScene)
   const conformance = conformanceConfig
     ? await captureConformanceArtifact(client, pageSession)
     : null
@@ -886,6 +1262,10 @@ async function runScenario(client, browserVersion, runIndex) {
 
   await delay(settleMs)
   snapshots.afterSoak = await capture('after-soak-settle')
+  const postSoakPreflight = await observedPreflight(client, pageSession)
+  if (expectedPreflightIdentity) {
+    assertObservedPreflight(postSoakPreflight, 'Managed scene after lifecycle/performance exercise')
+  }
   await evaluate(client, pageSession, `window.dispatchEvent(new Event('egolens:benchmark-dispose')); true`)
   await waitFor(client, pageSession, 'globalThis.__EGOLENS_PERF__?.snapshot().scene === null')
   snapshots.afterDispose = await capture('immediately-after-dispose')
@@ -933,6 +1313,7 @@ async function runScenario(client, browserVersion, runIndex) {
     heapSnapshot,
     conformance,
     preflight,
+    postSoakPreflight,
     adapterAmnesia: adapterAmnesia ? {
       recipeFile: path.basename(adapterRecipePath),
       recipeHash: conformance?.recipeHash ?? null,
@@ -949,7 +1330,7 @@ async function runScenario(client, browserVersion, runIndex) {
   }
 }
 
-async function launchBrowser() {
+async function launchOrdinaryBrowser() {
   const workspace = await createFreshProcessWorkspaceV1('egolens-phase6-chrome-')
   const { profileDir } = workspace
   const port = 9222 + Math.floor(Math.random() * 500)
@@ -977,7 +1358,174 @@ async function launchBrowser() {
   }
 }
 
+async function signalProcessGroup(processHandle, signal) {
+  if (!processHandle?.pid) return
+  try {
+    process.kill(-processHandle.pid, signal)
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error
+  }
+}
+
+async function closeCountedBrowserWorkspace(isolatedBrowser) {
+  const { chrome, client, runtimeScratch, forbiddenRoot } = isolatedBrowser
+  client?.close()
+  await signalProcessGroup(chrome, 'SIGTERM')
+  await delay(100)
+  if (chrome.exitCode === null && chrome.signalCode === null) await signalProcessGroup(chrome, 'SIGKILL')
+  let evidence
+  try {
+    evidence = await closeFreshProcessWorkspaceV1(isolatedBrowser, chrome)
+  } finally {
+    await Promise.all([
+      rm(runtimeScratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+      rm(forbiddenRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+    ])
+  }
+  return evidence
+}
+
+async function launchCountedBrowser() {
+  if (!browserBoundaryEnvironment || !appBuildServer) {
+    throw new Error('Counted browser boundary was not initialized from the immutable app server')
+  }
+  const workspace = await createFreshProcessWorkspaceV1('egolens-phase10-browser-profile-')
+  const runtimeScratch = await mkdtemp(path.join(os.tmpdir(), 'egolens-phase10-browser-scratch-'))
+  const forbiddenRoot = await mkdtemp(path.join(os.tmpdir(), 'egolens-phase10-browser-forbidden-'))
+  const forbiddenFile = path.join(forbiddenRoot, 'ambient-secret.txt')
+  await writeFile(forbiddenFile, 'EGOLENS_FORBIDDEN_SENTINEL\n', { mode: 0o600, flag: 'wx' })
+  let chrome = null
+  let client = null
+  try {
+    const [profileReal, scratchReal, forbiddenReal, chromeExecutable, chromeRoot, systemSocketReal] = await Promise.all([
+      realpath(workspace.profileDir),
+      realpath(runtimeScratch),
+      realpath(forbiddenRoot),
+      realpath(CHROME),
+      realpath(path.resolve(CHROME, '../../..')),
+      realpath(os.tmpdir()),
+    ])
+    const sourceRoot = localSourceRoot ?? workspace.profileDir
+    const sourceRealRoot = localSourceRoot ? await realpath(localSourceRoot) : profileReal
+    for (const [leftName, left, rightName, right] of [
+      ['source root', sourceRealRoot, 'browser profile', profileReal],
+      ['source root', sourceRealRoot, 'runtime scratch', scratchReal],
+      ['source root', sourceRealRoot, 'ambient probe', forbiddenReal],
+      ['browser profile', profileReal, 'runtime scratch', scratchReal],
+      ['browser profile', profileReal, 'ambient probe', forbiddenReal],
+      ['runtime scratch', scratchReal, 'ambient probe', forbiddenReal],
+    ]) {
+      if (pathsOverlap(left, right)) throw new Error(`${leftName} and ${rightName} must be disjoint`)
+    }
+    if (!chromeExecutable.startsWith(`${chromeRoot}${path.sep}`)) {
+      throw new Error('Counted Chrome executable escapes its canonical application bundle')
+    }
+    const parameters = {
+      APP_REMOTE_ENDPOINT: endpointForOriginV1(appBuildServer.origin),
+      BROWSER_PROFILE: workspace.profileDir,
+      BROWSER_PROFILE_REAL: profileReal,
+      CHROME_ROOT: chromeRoot,
+      RUNTIME_SCRATCH: runtimeScratch,
+      RUNTIME_SCRATCH_REAL: scratchReal,
+      SOURCE_REAL_ROOT: sourceRealRoot,
+      SOURCE_REMOTE_ENDPOINT: endpointForOriginV1(
+        countedSourceBoundary.sourceOrigin ?? appBuildServer.origin,
+      ),
+      SOURCE_ROOT: sourceRoot,
+      SYSTEM_SOCKET_REAL_ROOT: systemSocketReal,
+      SYSTEM_SOCKET_ROOT: os.tmpdir(),
+    }
+    const chromeArguments = [
+      '--remote-debugging-address=127.0.0.1',
+      '--remote-debugging-port=0',
+      `--user-data-dir=${workspace.profileDir}`,
+      `--crash-dumps-dir=${runtimeScratch}`,
+      `--disk-cache-dir=${path.join(runtimeScratch, 'cache')}`,
+      '--headless=new',
+      '--disable-background-networking',
+      '--disable-breakpad',
+      '--disable-component-update',
+      '--disable-crash-reporter',
+      '--disable-default-apps',
+      '--disable-domain-reliability',
+      '--disable-extensions',
+      '--disable-sync',
+      '--metrics-recording-only',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--no-pings',
+      '--password-store=basic',
+      '--use-mock-keychain',
+      '--enable-precise-memory-info',
+      '--use-angle=metal',
+      // The deny-default outer Seatbelt profile is the enforced counted
+      // boundary. Chrome's own nested helper sandbox cannot initialize inside
+      // it ("sandbox initialization failed: Operation not permitted"), which
+      // kills the GPU and network services and aborts the browser, so the
+      // inner sandbox is disabled exactly as the Phase 9 counted broker does.
+      '--no-sandbox',
+      'about:blank',
+    ]
+    chrome = spawn('/usr/bin/sandbox-exec', countedBrowserSeatbeltArgumentsV1(
+      COUNTED_BROWSER_PROFILE,
+      parameters,
+      [chromeExecutable, ...chromeArguments],
+    ), {
+      detached: true,
+      stdio: 'ignore',
+      env: {
+        HOME: workspace.profileDir,
+        LANG: 'C',
+        LC_ALL: 'C',
+        PATH: '/usr/bin:/bin',
+        TMPDIR: runtimeScratch,
+      },
+    })
+    const { endpoint, port } = await waitForChromeSelectedEndpoint(workspace.profileDir, chrome)
+    client = await CdpClient.connect(endpoint.webSocketDebuggerUrl)
+    const browserVersion = await client.send('Browser.getVersion')
+    const boundaryChecks = await runCountedBrowserNegativeProbe(
+      client,
+      appBuildServer.origin,
+      forbiddenFile,
+    )
+    return {
+      ...workspace,
+      chrome,
+      client,
+      browserVersion,
+      runtimeScratch,
+      forbiddenRoot,
+      boundaryChecks,
+      boundaryDebugPort: port,
+      boundaryParametersHash: boundaryHashV1({
+        parameters,
+        processNonce: workspace.processNonce,
+        profileNonce: workspace.profileNonce,
+      }),
+    }
+  } catch (error) {
+    if (chrome) {
+      await signalProcessGroup(chrome, 'SIGKILL').catch(() => {})
+      await closeFreshProcessWorkspaceV1(workspace, chrome).catch(() => {})
+    } else {
+      await rm(workspace.profileDir, { recursive: true, force: true })
+    }
+    client?.close()
+    await Promise.all([
+      rm(runtimeScratch, { recursive: true, force: true }),
+      rm(forbiddenRoot, { recursive: true, force: true }),
+    ])
+    throw error
+  }
+}
+
+async function launchBrowser() {
+  return expectedPreflightIdentity ? launchCountedBrowser() : launchOrdinaryBrowser()
+}
+
 async function closeBrowser(isolatedBrowser) {
+  if (expectedPreflightIdentity) return closeCountedBrowserWorkspace(isolatedBrowser)
   const { chrome, client } = isolatedBrowser
   client.close()
   return closeFreshProcessWorkspaceV1(isolatedBrowser, chrome)
@@ -986,31 +1534,134 @@ async function closeBrowser(isolatedBrowser) {
 const warmups = []
 const samples = []
 let recordedBrowserVersion = null
-for (let index = 0; index < warmupCount + runCount; index++) {
-  const isolatedBrowser = await launchBrowser()
-  recordedBrowserVersion ??= isolatedBrowser.browserVersion
-  const startedAt = Date.now()
-  process.stderr.write(`[phase6] ${index < warmupCount ? 'warmup' : 'sample'} ${index + 1}/${warmupCount + runCount} started\n`)
-  let run
-  try {
-    run = await runScenario(isolatedBrowser.client, isolatedBrowser.browserVersion, index)
-  } finally {
-    const browserProcess = await closeBrowser(isolatedBrowser)
-    if (run) run.browserProcess = browserProcess
+let benchmarkUrl = String(options.url)
+let appBuildServer = null
+let appBuildInitialDiskHash = null
+let appBuildFinalDiskHash = null
+let trustedVerifierBinding = null
+let browserBoundaryEnvironment = null
+let countedLocalSourceFiles = null
+let initialBrowserBinaryIdentity = null
+try {
+  if (appBuildRootInput) {
+    const requestedUrl = new URL(String(options.url))
+    if (requestedUrl.protocol !== 'http:' || requestedUrl.hostname !== '127.0.0.1') {
+      throw new Error('Counted app URL must use an exact 127.0.0.1 HTTP origin')
+    }
+    appBuildServer = await createImmutableAppBuildServer(
+      appBuildRootInput,
+      expectedAppBuildInventoryHash,
+    )
+    appBuildInitialDiskHash = await appBuildServer.diskInventoryHash()
+    if (appBuildInitialDiskHash !== appBuildServer.inventoryHash) {
+      throw new Error('App build changed while its immutable serving snapshot was created')
+    }
+    if (expectedPreflightIdentity) {
+      trustedVerifierBinding = phase10VerifierBindingV1(await loadPhase10ProductionTrustV1())
+      if (trustedVerifierBinding.verifierToolCommit !== verifierToolCommit
+        || trustedVerifierBinding.verifierSourceTreeHash !== verifierSourceTreeHash) {
+        throw new Error('Loaded verifier trust does not describe this benchmark checkout')
+      }
+    }
+    const servedUrl = new URL(requestedUrl.pathname + requestedUrl.search + requestedUrl.hash, appBuildServer.origin)
+    benchmarkUrl = servedUrl.href
+    if (expectedPreflightIdentity) {
+      initialBrowserBinaryIdentity = await inspectOfficialChromeIdentityV1(CHROME)
+      const profileTemplateHash = `sha256:${createHash('sha256')
+        .update(await readFile(COUNTED_BROWSER_PROFILE)).digest('hex')}`
+      if (localSourceRoot) {
+        const sourceDetails = await lstat(localSourceRoot)
+        if (sourceDetails.isSymbolicLink() || !sourceDetails.isDirectory()) {
+          throw new Error('Counted local source must be one real directory')
+        }
+        countedLocalSourceFiles = await enumerateLocalSourceFiles(localSourceRoot)
+      }
+      browserBoundaryEnvironment = makeBoundaryEnvironmentV1({
+        profileTemplateHash,
+        sourceMode: preflightSourceMode,
+        appOrigin: appBuildServer.origin,
+        sourceOrigin: countedSourceBoundary.sourceOrigin,
+        localSourceRootCommitment: localSourceRoot
+          ? sourceRootCommitmentV1(await realpath(localSourceRoot))
+          : boundaryHashV1({ kind: 'no-local-source-root' }),
+        browserBinary: initialBrowserBinaryIdentity,
+      })
+    }
   }
-  if (index < warmupCount) warmups.push(run)
-  else samples.push(run)
-  process.stderr.write(`[phase6] run ${index + 1}/${warmupCount + runCount} completed in ${Math.round((Date.now() - startedAt) / 1000)}s\n`)
-}
 
-validateFreshProcessEvidenceSetV1([...warmups, ...samples].map((run) => run.browserProcess))
+  for (let index = 0; index < warmupCount + runCount; index++) {
+    const preRunInventoryHash = appBuildServer ? await appBuildServer.diskInventoryHash() : null
+    if (appBuildServer && preRunInventoryHash !== appBuildServer.inventoryHash) {
+      throw new Error(`App build changed before browser run ${index}`)
+    }
+    const browserBinaryIdentityBefore = expectedPreflightIdentity
+      ? await inspectOfficialChromeIdentityV1(CHROME)
+      : null
+    if (browserBinaryIdentityBefore?.identityHash !== initialBrowserBinaryIdentity?.identityHash) {
+      throw new Error(`Official Chrome identity changed before browser run ${index}`)
+    }
+    const isolatedBrowser = await launchBrowser()
+    recordedBrowserVersion ??= isolatedBrowser.browserVersion
+    const startedAt = Date.now()
+    process.stderr.write(`[phase6] ${index < warmupCount ? 'warmup' : 'sample'} ${index + 1}/${warmupCount + runCount} started\n`)
+    let run
+    try {
+      run = await runScenario(isolatedBrowser.client, isolatedBrowser.browserVersion, index)
+    } finally {
+      const browserProcess = await closeBrowser(isolatedBrowser)
+      if (run) run.browserProcess = browserProcess
+    }
+    const browserBinaryIdentityAfter = expectedPreflightIdentity
+      ? await inspectOfficialChromeIdentityV1(CHROME)
+      : null
+    if (browserBinaryIdentityAfter?.identityHash !== initialBrowserBinaryIdentity?.identityHash) {
+      throw new Error(`Official Chrome identity changed during browser run ${index}`)
+    }
+    if (expectedPreflightIdentity) {
+      const requestAudit = requestAuditV1(
+        run.network,
+        browserBoundaryEnvironment,
+        countedSourceBoundary.allowedPaths,
+      )
+      run.browserBoundary = makeBoundaryRunEvidenceV1({
+        boundary: browserBoundaryEnvironment,
+        parametersHash: isolatedBrowser.boundaryParametersHash,
+        debugPort: isolatedBrowser.boundaryDebugPort,
+        checks: isolatedBrowser.boundaryChecks,
+        requestAudit,
+        browserBinaryIdentityHashBefore: browserBinaryIdentityBefore.identityHash,
+        browserBinaryIdentityHashAfter: browserBinaryIdentityAfter.identityHash,
+      })
+    }
+    const postRunInventoryHash = appBuildServer ? await appBuildServer.diskInventoryHash() : null
+    if (appBuildServer && postRunInventoryHash !== appBuildServer.inventoryHash) {
+      throw new Error(`App build changed during browser run ${index}`)
+    }
+    if (appBuildServer) {
+      run.appBuild = {
+        immutableSnapshotServed: true,
+        loopbackOnly: true,
+        servedInventoryHash: appBuildServer.inventoryHash,
+        preRunInventoryHash,
+        postRunInventoryHash,
+      }
+    }
+    if (index < warmupCount) warmups.push(run)
+    else samples.push(run)
+    process.stderr.write(`[phase6] run ${index + 1}/${warmupCount + runCount} completed in ${Math.round((Date.now() - startedAt) / 1000)}s\n`)
+  }
 
-{
+  validateFreshProcessEvidenceSetV1([...warmups, ...samples].map((run) => run.browserProcess))
+  appBuildFinalDiskHash = appBuildServer ? await appBuildServer.diskInventoryHash() : null
+  if (appBuildServer && appBuildFinalDiskHash !== appBuildServer.inventoryHash) {
+    throw new Error('App build changed before the benchmark artifact was finalized')
+  }
+
   const output = {
     schemaVersion: 1,
     scenario: {
       dataset: options.dataset ?? 'unspecified',
-      url: withPerf(options.url),
+      url: withPerf(benchmarkUrl),
       warmupRuns: warmupCount,
       measuredRuns: runCount,
       seeks: seekCount,
@@ -1023,17 +1674,30 @@ validateFreshProcessEvidenceSetV1([...warmups, ...samples].map((run) => run.brow
       traceEnabled,
       browserIsolation: 'per-run',
       freshProcessEvidence: 'egolens-fresh-browser-process-v1',
-      sourceMode: localSourceRoot
-        ? 'local-directory-input'
-        : (new URL(String(options.url)).searchParams.has('share')
-            || new URL(String(options.url)).searchParams.get('shareVersion') === '1')
-          ? 'portable-share'
-          : 'remote-url',
+      countedBrowserBoundary: expectedPreflightIdentity
+        ? 'egolens-counted-browser-boundary-v1'
+        : null,
+      preflightRecipeHash: preflightRecipe ? recipeSemanticHash(preflightRecipe) : null,
+      sourceMode: preflightSourceMode,
       viewport: { width: viewport[0], height: viewport[1] },
     },
     environment: {
-      commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-      dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
+      commit: expectedCandidateCommit ?? verifierToolCommit,
+      dirty: expectedCandidateCommit ? false : !verifierToolClean,
+      sourceTreeHash: expectedSourceTreeHash ?? verifierSourceTreeHash,
+      candidateIdentitySource: expectedCandidateCommit
+        ? 'reviewed-build-boundary-inputs'
+        : 'verifier-checkout',
+      verifierToolCommit,
+      verifierToolClean,
+      verifierSourceTreeHash,
+      verifierBinding: trustedVerifierBinding,
+      browserBoundary: browserBoundaryEnvironment,
+      servedBuildInventoryHash: appBuildServer?.inventoryHash ?? null,
+      appBuildInitialDiskHash,
+      appBuildFinalDiskHash,
+      immutableAppBuildSnapshotServed: appBuildServer !== null,
+      appBuildLoopbackOnly: appBuildServer !== null,
       capturedAt: new Date().toISOString(),
       platform: process.platform,
       architecture: process.arch,
@@ -1048,4 +1712,6 @@ validateFreshProcessEvidenceSetV1([...warmups, ...samples].map((run) => run.brow
     summary: aggregate(samples),
   }
   await writeFile(path.resolve(String(options.output)), `${JSON.stringify(output, null, 2)}\n`)
+} finally {
+  if (appBuildServer) await appBuildServer.close()
 }

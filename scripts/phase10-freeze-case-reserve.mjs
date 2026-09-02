@@ -3,7 +3,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
+  loadPhase10ProductionTrustV1,
   phase10HashV1,
+  phase10VerifierBindingV1,
   validateCaseReserveManifestSemanticsV1,
   validateSourceCaseManifestSemanticsV1,
 } from './lib/phase10-evidence.mjs'
@@ -43,16 +45,21 @@ for (const filename of options.case) {
   protectedManifests.push(value)
 }
 const [first] = protectedManifests
+const verifierBinding = phase10VerifierBindingV1(await loadPhase10ProductionTrustV1())
 for (const manifest of protectedManifests) {
   if (manifest.release.datasetId !== first.release.datasetId
     || manifest.release.releaseId !== first.release.releaseId
     || manifest.release.officialSourceUrl !== first.release.officialSourceUrl) {
     throw new Error('Every precommitted case must come from the same official release')
   }
+  if (phase10HashV1(manifest.verifierBinding) !== phase10HashV1(verifierBinding)) {
+    throw new Error('Every source case must use this exact externally reviewed verifier')
+  }
 }
 protectedManifests.sort((left, right) => left.case.order - right.case.order)
 const payload = {
   schema: 'egolens-case-reserve-manifest-v1',
+  verifierBinding,
   rung,
   datasetId: first.release.datasetId,
   releaseId: first.release.releaseId,

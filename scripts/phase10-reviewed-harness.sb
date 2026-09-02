@@ -1,0 +1,77 @@
+(version 1)
+(deny default)
+
+; The evidence harness itself is exact reviewed verifier code. It needs to
+; create its own fresh-process and nested fail-closed CLI fixtures, so child
+; execution is allowed here. Candidate Vitest code never runs under this
+; profile; its nested gates use phase10-reviewed-test.sb.
+(allow process*)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+(allow mach*)
+(allow ipc-posix*)
+(allow iokit*)
+
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/ColorSync")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone")
+  ; The harness fixtures drive /usr/bin/git, which is Apple's xcode-select
+  ; shim: it resolves the active developer directory through these links,
+  ; checks the Xcode license receipt, and executes the git inside the
+  ; selected developer directory. All of them are immutable Apple-signed
+  ; software or system preferences, never candidate or operator data.
+  (literal "/var")
+  (literal "/private/var")
+  (literal "/private/var/select")
+  (literal "/private/var/select/developer_dir")
+  (literal "/private/var/db")
+  (literal "/private/var/db/xcode_select_link")
+  (literal "/Library/Preferences")
+  (literal "/Library/Preferences/com.apple.dt.Xcode.plist")
+  (subpath "/Applications/Xcode.app")
+  (subpath "/Library/Developer/CommandLineTools")
+  (subpath (param "NODE_RUNTIME_ROOT"))
+  (subpath (param "VERIFIER_ROOT"))
+  (subpath (param "CANDIDATE_STAGE_ROOT")))
+
+(allow file-read* file-write* file-test-existence file-map-executable
+  (subpath (param "WRITE_ROOT")))
+
+; Apple's xcrun shim behind /usr/bin/git keeps its lookup cache in the
+; per-user Darwin temporary directory (confstr, not $TMPDIR) and its license
+; check writes an xcodebuild result bundle there. Only those two names are
+; writable; unrelated entries in that directory stay unreadable.
+(allow file-read-metadata file-test-existence
+  (subpath (param "SYSTEM_TEMP_ROOT")))
+(allow file-read* file-write*
+  (require-all
+    (subpath (param "SYSTEM_TEMP_ROOT"))
+    (regex "/(xcrun_db(-[A-Za-z0-9]+)?|ResultBundle_[^/]+(/.*)?)$")))
+
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "NODE_RUNTIME_ROOT"))
+  (path-ancestors (param "VERIFIER_ROOT"))
+  (path-ancestors (param "CANDIDATE_STAGE_ROOT"))
+  (path-ancestors (param "WRITE_ROOT")))
+
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+(allow network-bind network-inbound (local ip "localhost:*"))
+(allow network-outbound (remote ip "localhost:*"))

@@ -1,20 +1,42 @@
 #!/usr/bin/env node
 
+import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
-import { phase10HashV1, sourceManifestHashFromFilesV1 } from './lib/phase10-evidence.mjs'
+import { recipeSemanticHash } from './lib/amnesia-evidence.mjs'
+import {
+  phase10HashV1,
+  phase10ProtectedConformanceConfigV1,
+  phase10VerifierBindingV1,
+  phase9AdapterAmnesiaBindingV1,
+  loadPhase10ProductionTrustV1,
+  sourceManifestHashFromFilesV1,
+  validateSourceCaseManifestSemanticsV1,
+} from './lib/phase10-evidence.mjs'
+import { validatePhase10SchemaV1 } from './lib/phase10-schema.mjs'
+
+const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 function args(argv) {
-  const result = {}
+  const allowed = new Set([
+    'source-case', 'catalog', 'recipe', 'dataset-id', 'host-origin', 'phase9-attestation',
+    'phase9-gate', 'phase9-receipt', 'expected-commit', 'app-url', 'scene', 'output-dir',
+  ])
+  const result = { 'phase9-receipt': [] }
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index]
     const next = argv[index + 1]
     if (!key.startsWith('--') || !next || next.startsWith('--')) throw new Error(`Invalid argument: ${key}`)
     const name = key.slice(2)
-    if (result[name] !== undefined) throw new Error(`Duplicate --${name}`)
-    result[name] = argv[++index]
+    if (!allowed.has(name)) throw new Error(`Unknown option: --${name}`)
+    if (name === 'phase9-receipt') result[name].push(argv[++index])
+    else {
+      if (result[name] !== undefined) throw new Error(`Duplicate --${name}`)
+      result[name] = argv[++index]
+    }
   }
   return result
 }
@@ -30,14 +52,6 @@ function extensionOf(value) {
   const leaf = value.split('/').at(-1) ?? ''
   const index = leaf.lastIndexOf('.')
   return index > 0 ? leaf.slice(index).toLowerCase() : ''
-}
-
-function semanticRecipeHash(recipe) {
-  const semantic = structuredClone(recipe)
-  delete semantic.identity
-  delete semantic.provenance
-  delete semantic.hashes
-  return phase10HashV1(semantic)
 }
 
 function formatFingerprint(recipe, files) {
@@ -102,24 +116,55 @@ function inlineUrl(appUrl, descriptor) {
 
 const options = args(process.argv.slice(2))
 for (const name of [
-  'source-case', 'catalog', 'recipe', 'requirements', 'dataset-id', 'host-origin',
-  'app-url', 'scene', 'output-dir',
+  'source-case', 'catalog', 'recipe', 'dataset-id', 'host-origin',
+  'phase9-attestation', 'phase9-gate', 'expected-commit', 'app-url', 'scene', 'output-dir',
 ]) if (!options[name]) throw new Error(`Missing --${name}`)
-const [sourceCase, catalog, recipe, requirements, shareSchema] = await Promise.all([
+if (options['phase9-receipt'].length !== 3) throw new Error('Exactly three --phase9-receipt files are required')
+const [sourceCase, catalog, recipe, phase9Attestation, phase9Gate, trust, shareSchema, ...phase9Receipts] = await Promise.all([
   readFile(path.resolve(options['source-case']), 'utf8').then(JSON.parse),
   readFile(path.resolve(options.catalog), 'utf8').then(JSON.parse),
   readFile(path.resolve(options.recipe), 'utf8').then(JSON.parse),
-  readFile(path.resolve(options.requirements), 'utf8').then(JSON.parse),
-  readFile(path.resolve('src/teachable/schema/egolens-share-v1.schema.json'), 'utf8').then(JSON.parse),
+  readFile(path.resolve(options['phase9-attestation']), 'utf8').then(JSON.parse),
+  readFile(path.resolve(options['phase9-gate']), 'utf8').then(JSON.parse),
+  loadPhase10ProductionTrustV1(),
+  readFile(path.join(TOOL_ROOT, 'src/teachable/schema/egolens-share-v1.schema.json'), 'utf8').then(JSON.parse),
+  ...options['phase9-receipt'].map((filename) => readFile(path.resolve(filename), 'utf8').then(JSON.parse)),
 ])
+const requirements = trust.phase10Requirements
+const verifierBinding = phase10VerifierBindingV1(trust)
+await validatePhase10SchemaV1(sourceCase)
+validateSourceCaseManifestSemanticsV1(sourceCase)
+if (phase10HashV1(sourceCase.verifierBinding) !== phase10HashV1(verifierBinding)) {
+  throw new Error('Source case verifier binding does not match the external operator anchor')
+}
+const phase9Binding = phase9AdapterAmnesiaBindingV1(
+  phase9Attestation,
+  phase9Gate,
+  phase9Receipts,
+  options['expected-commit'],
+  trust,
+)
 const requirement = requirements.datasets?.find((entry) => entry.datasetId === options['dataset-id'])
 if (!requirement) throw new Error('Dataset is absent from preflight requirements')
+const conformanceTemplate = JSON.parse(await readFile(
+  path.join(TOOL_ROOT, 'benchmarks/phase10/conformance', `${requirement.datasetId}.json`),
+  'utf8',
+))
+const phase9Recipe = phase9Binding.recipeBindings.find((entry) => entry.datasetId === requirement.datasetId)
+if (phase9Recipe?.caseId !== requirement.caseId) {
+  throw new Error('Phase 9 signed target does not match the reviewed preflight requirement')
+}
 if (sourceCase.release.datasetId !== requirement.datasetId || sourceCase.case.caseId !== requirement.caseId) {
   throw new Error('Source case does not match the reviewed preflight requirement')
 }
 if (sourceManifestHashFromFilesV1(sourceCase.files) !== sourceCase.sourceManifestHash) {
   throw new Error('Source case manifest integrity failed')
 }
+const conformanceConfig = phase10ProtectedConformanceConfigV1(
+  conformanceTemplate,
+  requirement,
+  sourceCase.sourceManifestHash,
+)
 const catalogPayload = { schema: catalog.schema, entries: catalog.entries }
 if (catalog.schema !== 'egolens-source-catalog-v1' || catalog.catalogHash !== phase10HashV1(catalogPayload)) {
   throw new Error('Source catalog integrity failed')
@@ -128,14 +173,19 @@ const catalogFiles = catalog.entries.map(({ path: relative, size, sha256 }) => (
 if (sourceManifestHashFromFilesV1(catalogFiles) !== sourceCase.sourceManifestHash) {
   throw new Error('Catalog and protected source case do not describe the same bytes')
 }
-const recipeHash = semanticRecipeHash(recipe)
-if (recipeHash !== requirement.recipeHash) throw new Error('Reviewed semantic recipe hash mismatch')
+const recipeHash = recipeSemanticHash(recipe)
+if (recipeHash !== phase9Recipe.recipeHash) throw new Error('Phase 9 author-attested semantic recipe hash mismatch')
 const host = new URL(options['host-origin'])
 if (host.protocol !== 'http:' || host.hostname !== '127.0.0.1' || host.pathname !== '/' || host.search || host.hash) {
   throw new Error('--host-origin must be an exact loopback HTTP origin')
 }
 const appUrl = new URL(options['app-url'])
 if (appUrl.protocol !== 'http:' || appUrl.hostname !== '127.0.0.1') throw new Error('--app-url must be loopback HTTP')
+// This bearer capability remains only in protected preparation/runtime files.
+// It prevents another local or external page from reading a long-lived P7
+// range host even if it can guess the operator-selected loopback port.
+const sourceCapability = randomBytes(32).toString('hex')
+const protectedHost = new URL(`access/${sourceCapability}/`, host)
 const presentation = {
   cameraStrip: Boolean(recipe.outputs.cameraImages),
   coordinateMode: 'ego',
@@ -159,10 +209,10 @@ const presentation = {
 const descriptor = {
   schema: 'egolens-share-v1',
   source: {
-    rootUrl: `${host.href}source/`, catalogUrl: `${host.href}catalog.json`,
+    rootUrl: `${protectedHost.href}source/`, catalogUrl: `${protectedHost.href}catalog.json`,
     catalogHash: catalog.catalogHash, sourceManifestHash: sourceCase.sourceManifestHash,
   },
-  recipe: { url: `${host.href}recipe.json`, recipeHash },
+  recipe: { url: `${protectedHost.href}recipe.json`, recipeHash },
   view: { sceneId: options.scene, frameIndex: 0 },
   presentation,
 }
@@ -173,7 +223,7 @@ if (!validate(descriptor)) throw new Error(`Generated descriptor is invalid: ${a
 const shareDescriptorHash = phase10HashV1(descriptor)
 const remoteUrl = inlineUrl(appUrl.href, descriptor)
 const referenced = new URL(appUrl.href)
-referenced.searchParams.set('share', `${host.href}share.json`)
+referenced.searchParams.set('share', `${protectedHost.href}share.json`)
 referenced.searchParams.set('shareHash', shareDescriptorHash)
 const common = {
   datasetId: requirement.datasetId,
@@ -199,18 +249,23 @@ const writes = [
   ['runtime.json', {
     schema: 'egolens-phase10-preflight-runtime-v1', datasetId: requirement.datasetId,
     caseId: requirement.caseId, sceneId: options.scene, localUrl: appUrl.href,
-    remoteUrl, shareUrl: referenced.href, shareDescriptorHash,
+    remoteUrl, shareUrl: referenced.href, shareDescriptorHash, verifierBinding,
   }, 0o600],
+  ['conformance-config.json', conformanceConfig, 0o600],
 ]
 await Promise.all(writes.map(([filename, value, mode]) =>
   writeFile(path.join(output, filename), `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode })))
 process.stdout.write(`${JSON.stringify({
   schema: 'egolens-phase10-preflight-preparation-summary-v1',
+  verifierBinding,
   datasetId: requirement.datasetId,
   caseId: requirement.caseId,
   sourceManifestHash: common.sourceManifestHash,
   catalogHash: catalog.catalogHash,
   recipeHash,
+  phase9AttestationHash: phase9Binding.attestationHash,
+  phase9GateReportHash: phase9Binding.gateReportHash,
+  phase9ReceiptHash: phase9Recipe.receiptHash,
   formatFingerprint: common.formatFingerprint,
   operatorSetFingerprint: common.operatorSetFingerprint,
   shareDescriptorHash,

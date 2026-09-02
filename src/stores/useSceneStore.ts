@@ -180,7 +180,10 @@ export interface FrameData {
 }
 
 interface SceneActions {
-  loadDataset: (sources: Map<string, File | string>) => Promise<void>
+  loadDataset: (
+    sources: Map<string, File | string>,
+    countedRecipe?: CompiledRecipeV1,
+  ) => Promise<void>
   /** Empty-profile portable v1 share path; never consults a dataset enum. */
   loadPortableShare: (
     url: string,
@@ -212,7 +215,10 @@ interface SceneActions {
   setHoveredBox: (id: string | null, source: 'laser' | 'camera' | null) => void
   setAvailableSegments: (segments: string[]) => void
   selectSegment: (segmentId: string) => Promise<void>
-  loadFromFiles: (segments: Map<string, Map<string, File>>) => Promise<void>
+  loadFromFiles: (
+    segments: Map<string, Map<string, File>>,
+    countedRecipe?: CompiledRecipeV1,
+  ) => Promise<void>
   /** Load dataset from a remote URL. Optional initialScene to auto-select a specific scene. */
   loadFromUrl: (dataset: string, baseUrl: string, initialScene?: string) => Promise<void>
   toggleWorldMode: () => void
@@ -227,7 +233,7 @@ interface SceneActions {
   setPointSize: (size: number) => void
   setFollowCam: (follow: boolean) => void
   setPinCamera: (pin: boolean) => void
-  reset: () => void
+  reset: (preserveLocalRecipe?: boolean) => void
 }
 
 export type LoadStep = 'opening' | 'parsing' | 'workers' | 'first-frame'
@@ -358,15 +364,75 @@ export interface SceneState {
 const WORKER_CONCURRENCY = 3
 
 function activateAdapter(id: string): void {
+  const localRecipe = internal.localCompiledRecipe
+  if (localRecipe) {
+    if (localRecipe.normalizedManifest.id !== id) {
+      throw new DataLoadError(
+        `Counted local recipe targets "${localRecipe.normalizedManifest.id}", not "${id}".`,
+        'MANIFEST',
+      )
+    }
+    setAdapter(new RecipeBackedDatasetAdapter(
+      localRecipe.recipe,
+      bundledPhase2OperatorRegistry,
+      localRecipe,
+    ))
+    return
+  }
   const adapter = getAdapterById(id)
   if (!adapter) throw new DataLoadError(`Dataset adapter "${id}" is not registered.`, 'MANIFEST')
   setAdapter(adapter)
+}
+
+function bundledCompiledRecipe(id: string): CompiledRecipeV1 {
+  if (id === 'waymo') return waymoCompiledRecipe
+  if (id === 'nuscenes') return nuScenesCompiledRecipe
+  if (id === 'argoverse2') return argoverse2CompiledRecipe
+  throw new DataLoadError(`Dataset adapter "${id}" has no bundled recipe.`, 'MANIFEST')
+}
+
+/**
+ * Counted local runs install the Phase 9 author recipe once, before source
+ * binding. Segment reloads must keep using that same compiled graph; falling
+ * back to a bundled recipe would make lifecycle evidence describe a different
+ * runtime after the first dispose/load generation.
+ */
+function activeCompiledRecipe(id: string): CompiledRecipeV1 {
+  const compiled = internal.localCompiledRecipe ?? bundledCompiledRecipe(id)
+  if (compiled.normalizedManifest.id !== id) {
+    throw new DataLoadError(
+      `Active recipe targets "${compiled.normalizedManifest.id}", not "${id}".`,
+      'MANIFEST',
+    )
+  }
+  return compiled
+}
+
+function workerReaderParams(
+  compiledRecipe: CompiledRecipeV1,
+  reader: string,
+  pathPrefix: string,
+): unknown {
+  const matches = Object.values(compiledRecipe.recipe.sources).filter((source) => {
+    const selector = source.files.exact ?? source.files.glob ?? ''
+    return source.reader === reader
+      && (selector === pathPrefix || selector.startsWith(`${pathPrefix}/`))
+  })
+  if (matches.length !== 1 || !matches[0].params) {
+    throw new DataLoadError(
+      `Active recipe must bind exactly one ${reader} source under ${pathPrefix}.`,
+      'MANIFEST',
+    )
+  }
+  return matches[0].params
 }
 
 const internal = {
   /** Transport-neutral bytes passed to the recipe executor. */
   recipeByteSource: null as ByteSourceV1 | null,
   recipeInventoryEntries: [] as RecipeInventoryEntryV1[],
+  /** Phase 9 author recipe bound to one counted local source session. */
+  localCompiledRecipe: null as CompiledRecipeV1 | null,
   timestamps: [] as bigint[],
   /** Reverse lookup: timestamp → frame index */
   timestampToFrame: new Map<bigint, number>(),
@@ -449,14 +515,17 @@ const internal = {
   preflightRuntimeIdentity: null as PreflightRuntimeIdentityV1 | null,
 }
 
-function resetInternal() {
+function resetInternal(options: { preserveLocalRecipe?: boolean } = {}) {
   internal.normalizedScene?.dispose()
   internal.normalizedScene = null
   internal.conformanceSceneFactory = null
   internal.recipeByteSource = null
   internal.recipeInventoryEntries = []
+  if (!options.preserveLocalRecipe) {
+    internal.localCompiledRecipe = null
+    internal.preflightRuntimeIdentity = null
+  }
   internal.portableShareDescriptor = null
-  internal.preflightRuntimeIdentity = null
   internal.timestamps = []
   internal.pendingSeekFrame = null
   internal.cameraLoadedBatchesEver.clear()
@@ -893,8 +962,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
     },
 
-    loadDataset: async (sources) => {
-      resetInternal()
+    loadDataset: async (sources, countedRecipe) => {
+      if (countedRecipe) {
+        if (countedRecipe.normalizedManifest.id !== 'waymo') {
+          throw new DataLoadError('Counted component-table recipe must target waymo.', 'MANIFEST')
+        }
+        internal.localCompiledRecipe = countedRecipe
+        activateAdapter('waymo')
+      }
+      resetInternal({ preserveLocalRecipe: true })
       const recipeEntries = [...sources].map(([component, source]) => {
         const sourceName = typeof source === 'string'
           ? source.split(/[?#]/u, 1)[0].split('/').at(-1) || `${component}.parquet`
@@ -1222,7 +1298,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     selectSegment: async (segmentId: string) => {
       const prev = get()
       trackSegmentSwitch(internal.datasetId ?? segmentId)
-      prev.actions.reset()
+      prev.actions.reset(true)
 
       // After reset, UI prefs are already preserved. Just set the segment.
       // If the dataset type changed, visibleSensors IDs may be stale — validate them.
@@ -1349,10 +1425,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     setPointSize: (size: number) => set({ pointSize: size }),
     setFollowCam: (follow: boolean) => set({ followCam: follow }),
     setPinCamera: (pin: boolean) => set({ pinCamera: pin }),
-    loadFromFiles: async (segments: Map<string, Map<string, File>>) => {
+    loadFromFiles: async (
+      segments: Map<string, Map<string, File>>,
+      countedRecipe?: CompiledRecipeV1,
+    ) => {
       // Local files — clear URL source so segment changes don't sync to URL bar
       clearUrlSource()
       const datasetHint = segments.has('__nuscenes__') ? 'nuscenes' : segments.has('__argoverse2__') ? 'argoverse2' : 'waymo'
+      if (countedRecipe && countedRecipe.normalizedManifest.id !== datasetHint) {
+        failLoad(set, new DataLoadError(
+          `Counted local recipe targets "${countedRecipe.normalizedManifest.id}", not "${datasetHint}".`,
+          'MANIFEST',
+        ), 'loadFromFiles:countedRecipe')
+        return
+      }
+      internal.localCompiledRecipe = countedRecipe ?? null
       trackDatasetLoad(datasetHint, 'local')
 
       // Local loading sets status to "loading" before it parses anything, which
@@ -1368,6 +1455,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     },
 
     loadFromUrl: async (dataset: string, baseUrl: string, initialScene?: string) => {
+      internal.localCompiledRecipe = null
       // Track URL source for auto-sync on segment change
       setUrlSource(dataset, baseUrl)
 
@@ -1607,10 +1695,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       failLoad(set, new DataLoadError(`URL loading for "${dataset}" is not supported.`, 'UNKNOWN'), 'loadFromUrl')
     },
 
-    reset: () => {
+    reset: (preserveLocalRecipe = false) => {
       const prev = get()
       prev.actions.pause()
-      resetInternal()
+      resetInternal({ preserveLocalRecipe })
       set({
         status: 'idle',
         error: null,
@@ -1797,16 +1885,17 @@ async function loadAndCacheRowGroup(
 async function bindParquetComponentScene(set: (partial: Partial<SceneState>) => void, get: () => SceneState) {
   // Read the lightweight metadata tables before the managed worker path starts.
   if (!internal.recipeByteSource) throw new Error('RECIPE_BYTE_SOURCE_MISSING: Waymo source was not initialized.')
+  const compiledRecipe = activeCompiledRecipe('waymo')
   const binding = await bindRecipeSceneV1({
-    compiledRecipe: waymoCompiledRecipe,
+    compiledRecipe,
     source: internal.recipeByteSource,
     inventoryEntries: internal.recipeInventoryEntries,
   })
   const bundle = binding.metadata
   const conformanceSource = internal.recipeByteSource
   const conformanceInventory = [...internal.recipeInventoryEntries]
-  internal.conformanceSceneFactory = async (compiledRecipe = waymoCompiledRecipe) => (await bindRecipeSceneV1({
-    compiledRecipe,
+  internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+    compiledRecipe: candidateRecipe,
     source: conformanceSource,
     inventoryEntries: conformanceInventory,
   })).scene
@@ -1918,13 +2007,22 @@ async function initDataWorker(
   owner.attachPointPool(pool, 0)
   // Pass segmentation parquet URL if available (Phase A worker protocol)
   const segSource = sources.get('lidar_segmentation')
+  const compiledRecipe = activeCompiledRecipe('waymo')
   const { numBatches } = await pool.init({
     lidarUrl: lidarSource,
     calibrationEntries: [...get().lidarCalibrations.entries()],
-    lidarReaderParams: waymoCompiledRecipe.recipe.sources.lidarRows.params as unknown as ParquetColumnsParamsV1,
+    lidarReaderParams: workerReaderParams(
+      compiledRecipe,
+      'parquet.columns',
+      'lidar',
+    ) as ParquetColumnsParamsV1,
     ...(segSource ? {
       segUrl: segSource,
-      segReaderParams: waymoCompiledRecipe.recipe.sources.lidarSegmentationRows.params as unknown as ParquetColumnsParamsV1,
+      segReaderParams: workerReaderParams(
+        compiledRecipe,
+        'parquet.columns',
+        'lidar_segmentation',
+      ) as ParquetColumnsParamsV1,
     } : {}),
   })
 
@@ -1944,22 +2042,27 @@ async function initCameraWorker(
   if (!cameraSource || !owner) return
 
   const start = async () => {
-  const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-    2,
-    () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
-  )
-  owner.attachCameraPool(pool, 0)
-  const { numBatches } = await pool.init({
-    cameraUrl: cameraSource,
-    cameraReaderParams: waymoCompiledRecipe.recipe.sources.cameraImageRows.params as unknown as ParquetColumnsParamsV1,
-  })
+    const compiledRecipe = activeCompiledRecipe('waymo')
+    const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
+      2,
+      () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
+    )
+    owner.attachCameraPool(pool, 0)
+    const { numBatches } = await pool.init({
+      cameraUrl: cameraSource,
+      cameraReaderParams: workerReaderParams(
+        compiledRecipe,
+        'parquet.columns',
+        'camera_image',
+      ) as ParquetColumnsParamsV1,
+    })
 
-  if (owner !== internal.normalizedScene || owner.disposed) {
-    pool.terminate()
-    return
-  }
-  owner.attachCameraPool(pool, numBatches)
-  useSceneStore.setState({ cameraTotalCount: numBatches })
+    if (owner !== internal.normalizedScene || owner.disposed) {
+      pool.terminate()
+      return
+    }
+    owner.attachCameraPool(pool, numBatches)
+    useSceneStore.setState({ cameraTotalCount: numBatches })
   }
 
   internal.cameraPoolInit = start
@@ -2051,12 +2154,13 @@ function graphInventoryEntries(files: ReadonlyMap<string, File | string>) {
   }))
 }
 
-/** Execute the bundled graph to discover its public segment index. */
+/** Execute the active graph to discover its public segment index. */
 async function inspectNuScenesGraphSegments(
   sourceFiles: ReadonlyMap<string, File | string>,
 ): Promise<readonly GraphSegmentDescriptorV1[]> {
+  const compiledRecipe = activeCompiledRecipe('nuscenes')
   const binding = await bindRecipeSceneV1({
-    compiledRecipe: nuScenesCompiledRecipe,
+    compiledRecipe,
     source: new MappedByteSourceV1(sourceFiles),
     inventoryEntries: graphInventoryEntries(sourceFiles),
   })
@@ -2191,8 +2295,9 @@ async function loadRelationalGraphScene(
 
     // 1. Execute the public graph and assemble its selected scene.
     const inventoryEntries = graphInventoryEntries(internal.nuScenesSampleFiles)
+    const compiledRecipe = activeCompiledRecipe('nuscenes')
     const binding = await bindRecipeSceneV1({
-      compiledRecipe: nuScenesCompiledRecipe,
+      compiledRecipe,
       source: new MappedByteSourceV1(internal.nuScenesSampleFiles),
       sceneId: sceneName,
       inventoryEntries,
@@ -2200,8 +2305,8 @@ async function loadRelationalGraphScene(
     const bundle = binding.metadata
     const conformanceFiles = new Map(internal.nuScenesSampleFiles)
     const conformanceSource = new MappedByteSourceV1(conformanceFiles)
-    internal.conformanceSceneFactory = async (compiledRecipe = nuScenesCompiledRecipe) => (await bindRecipeSceneV1({
-      compiledRecipe,
+    internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+      compiledRecipe: candidateRecipe,
       source: conformanceSource,
       sceneId: sceneName,
       inventoryEntries: graphInventoryEntries(conformanceFiles),
@@ -2460,8 +2565,9 @@ async function loadFeatherLogScene(
       path,
       size: typeof value === 'string' ? null : value.size,
     }))
+    const compiledRecipe = activeCompiledRecipe('argoverse2')
     const binding = await bindRecipeSceneV1({
-      compiledRecipe: argoverse2CompiledRecipe,
+      compiledRecipe,
       source: new MappedByteSourceV1(internal.av2SampleFiles),
       sceneId: logId,
       inventoryEntries,
@@ -2469,8 +2575,8 @@ async function loadFeatherLogScene(
     const bundle = binding.metadata
     const conformanceFiles = new Map(internal.av2SampleFiles)
     const conformanceSource = new MappedByteSourceV1(conformanceFiles)
-    internal.conformanceSceneFactory = async (compiledRecipe = argoverse2CompiledRecipe) => (await bindRecipeSceneV1({
-      compiledRecipe,
+    internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+      compiledRecipe: candidateRecipe,
       source: conformanceSource,
       sceneId: logId,
       inventoryEntries,
@@ -2591,7 +2697,11 @@ async function initAV2LidarWorker(batches: AV2LidarFrameDescriptor[][]) {
   const { numBatches } = await pool.init({
     frameBatches: batches,
     fileEntries,
-    readerParams: argoverse2CompiledRecipe.recipe.sources.lidarFrames.params as unknown as FeatherColumnsParamsV1,
+    readerParams: workerReaderParams(
+      activeCompiledRecipe('argoverse2'),
+      'feather.columns',
+      'sensors/lidar',
+    ) as FeatherColumnsParamsV1,
   })
 
   if (owner !== internal.normalizedScene || owner.disposed) {

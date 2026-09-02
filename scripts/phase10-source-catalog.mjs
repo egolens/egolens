@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto'
 import { lstat, open, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
+  loadPhase10ProductionTrustV1,
   normalizeContentBlindPathV1,
   phase10HashV1,
+  phase10VerifierBindingV1,
   validateSourceCaseManifestSemanticsV1,
 } from './lib/phase10-evidence.mjs'
 import { validatePhase10SchemaV1 } from './lib/phase10-schema.mjs'
@@ -81,6 +83,10 @@ if (rootDetails.isSymbolicLink() || !rootDetails.isDirectory()) {
 const sourceCase = JSON.parse(await readFile(path.resolve(options['source-case']), 'utf8'))
 await validatePhase10SchemaV1(sourceCase)
 validateSourceCaseManifestSemanticsV1(sourceCase)
+const verifierBinding = phase10VerifierBindingV1(await loadPhase10ProductionTrustV1())
+if (phase10HashV1(sourceCase.verifierBinding) !== phase10HashV1(verifierBinding)) {
+  throw new Error('Source case verifier binding does not match the external operator anchor')
+}
 if (sourceCase.files.length > MAX_ENTRIES) throw new Error('Source catalog exceeds the entry limit')
 
 const entries = []
@@ -107,6 +113,7 @@ const summaryPayload = {
   entryCount: entries.length,
   totalBytes: sourceCase.aggregate.totalBytes,
   transportChunkSize: chunkSize,
+  verifierBinding: sourceCase.verifierBinding,
 }
 const summary = { ...summaryPayload, summaryHash: phase10HashV1(summaryPayload) }
 await writeFile(path.resolve(options['public-output']), `${JSON.stringify(summary, null, 2)}\n`, { flag: 'wx', mode: 0o644 })

@@ -5,13 +5,14 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema", "ledgerId", "sequence", "previousEntryHash", "event", "occurredAt",
+    "schema", "verifierBinding", "ledgerId", "sequence", "previousEntryHash", "event", "occurredAt",
     "sourceCaseManifestHash", "attemptHash", "firstFailureHash", "classification",
     "chosenLayer", "genericChangeCommit", "consumedCaseIdHash",
     "replacementCaseManifestHash", "regressionEvidenceHashes", "detailsHash", "entryHash"
   ],
   "properties": {
     "schema": { "const": "egolens-decision-ledger-entry-v1" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
     "ledgerId": { "$ref": "#/$defs/id" },
     "sequence": { "type": "integer", "minimum": 0 },
     "previousEntryHash": { "$ref": "#/$defs/nullableHash" },
@@ -44,6 +45,27 @@
     "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "nullableHash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "verifierBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash",
+        "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash",
+        "verifierTrustManifestHash", "verifierTrustReviewId", "verifierRequirement"
+      ],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" },
+        "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 },
+        "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" },
+        "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    },
     "classification": {
       "enum": [
         "source-limitation", "generic-reader-operator-gap", "extension-security-gap",

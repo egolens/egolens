@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           umask 077
           evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
-          mkdir -p "${evidence_dir}/receipts" "${evidence_dir}/trusted-reports"
+          mkdir -p "${evidence_dir}/receipt-staging" "${evidence_dir}/trusted-reports"
           test "${EVIDENCE_PARTS}" -ge 1
           test "${EVIDENCE_PARTS}" -le 24
           encoded=''
@@ -87,10 +87,17 @@ jobs:
           actual_hash="sha256-$(sha256sum "${evidence_dir}/archive.json.gz" | awk '{print $1}')"
           test "${actual_hash}" = "${EVIDENCE_ARCHIVE_SHA256}"
           gzip -d -c "${evidence_dir}/archive.json.gz" > "${evidence_dir}/archive.json"
-          jq -e '.schemaVersion == 1 and (.datasets | keys | sort == ["argoverse2", "nuscenes", "waymo"])' \
+          jq -e '
+            .schemaVersion == 3
+            and (.datasets | keys | sort == ["argoverse2", "nuscenes", "waymo"])
+            and (.boundaryCaseArtifacts | keys | sort == ["argoverse2", "nuscenes", "waymo"])
+          ' \
             "${evidence_dir}/archive.json" >/dev/null
           jq -c '.attestation' "${evidence_dir}/archive.json" > "${evidence_dir}/attestation.json"
+          jq -c '.boundaryReport' "${evidence_dir}/archive.json" > "${evidence_dir}/boundary-report.json"
           for dataset in waymo nuscenes argoverse2; do
+            jq -c --arg dataset "${dataset}" '.boundaryCaseArtifacts[$dataset]' \
+              "${evidence_dir}/archive.json" > "${evidence_dir}/${dataset}.boundary-case.json"
             jq -c --arg dataset "${dataset}" '.datasets[$dataset].oracle' \
               "${evidence_dir}/archive.json" > "${evidence_dir}/${dataset}.oracle.json"
             jq -c --arg dataset "${dataset}" '.datasets[$dataset].candidate' \
@@ -109,11 +116,14 @@ jobs:
               --oracle "${evidence_dir}/${dataset}.oracle.json" \
               --candidate "${evidence_dir}/${dataset}.candidate.json" \
               --attestation "${evidence_dir}/attestation.json" \
+              --boundary-report "${evidence_dir}/boundary-report.json" \
+              --boundary-case "${evidence_dir}/${dataset}.boundary-case.json" \
               --private-key "${evidence_dir}/judge-private.pem" \
               --key-id "${JUDGE_KEY_ID}" \
               --judge-version "${JUDGE_VERSION}" \
               --expected-candidate-commit "${EXPECTED_CANDIDATE_COMMIT}" \
-              --output "${evidence_dir}/receipts/${dataset}.json" \
+              --expected-judge-tool-commit "${JUDGE_TOOL_COMMIT}" \
+              --output "${evidence_dir}/receipt-staging/${dataset}.json" \
               --trusted-report "${evidence_dir}/trusted-reports/${dataset}.json"
           done
 
@@ -123,33 +133,49 @@ jobs:
           set -euo pipefail
           evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
           node scripts/phase9-oracle-receipt-gate.mjs \
-            --receipt "${evidence_dir}/receipts/waymo.json" \
-            --receipt "${evidence_dir}/receipts/nuscenes.json" \
-            --receipt "${evidence_dir}/receipts/argoverse2.json" \
+            --receipt "${evidence_dir}/receipt-staging/waymo.json" \
+            --receipt "${evidence_dir}/receipt-staging/nuscenes.json" \
+            --receipt "${evidence_dir}/receipt-staging/argoverse2.json" \
             --requirements benchmarks/oracle/phase9-requirements.json \
             --attestation "${evidence_dir}/attestation.json" \
             --public-key benchmarks/oracle/keys/phase6-2026-08-public.pem \
             --key-id "${JUDGE_KEY_ID}" \
             --expected-generator-commit "${EXPECTED_PRODUCER_COMMIT}" \
             --expected-candidate-commit "${EXPECTED_CANDIDATE_COMMIT}" \
-            --output "${evidence_dir}/receipts/gate.json"
-          cp "${evidence_dir}/attestation.json" "${evidence_dir}/receipts/attestation.json"
+            --expected-judge-tool-commit "${JUDGE_TOOL_COMMIT}" \
+            --output "${evidence_dir}/receipt-staging/gate.json"
+          cp "${evidence_dir}/attestation.json" "${evidence_dir}/receipt-staging/attestation.json"
+          for public_file in "${evidence_dir}"/receipt-staging/*.json; do
+            jq -e '
+              [.. | objects
+                | (has("sourceFingerprint")
+                  or has("sourceContentHash")
+                  or has("policyHash")
+                  or has("negativeProbeReportHash")
+                  or has("canonicalPath"))]
+              | any | not
+            ' "${public_file}" >/dev/null
+          done
           {
             echo '## Phase 9 Adapter Amnesia gate'
             echo
-            jq -r '"Passed: **\(.passed)**\n\nCandidate commit: `\(.expectedCandidateCommit)`\n\nAttestation: `\(.amnesiaAttestationHash)`\n\n" + (.checks | map("- \(.datasetId)/\(.caseId): `\(.receiptHash)`") | join("\n"))' \
-              "${evidence_dir}/receipts/gate.json"
+            jq -r '"Passed: **\(.passed)**\n\nCandidate commit: `\(.expectedCandidateCommit)`\n\nJudge tool commit: `\(.judgeToolCommit)` (`\(.judgeVersion)`)\n\nAttestation: `\(.amnesiaAttestationHash)`\n\n" + (.checks | map("- \(.datasetId)/\(.caseId): `\(.receiptHash)`") | join("\n"))' \
+              "${evidence_dir}/receipt-staging/gate.json"
           } >> "${GITHUB_STEP_SUMMARY}"
+          mv "${evidence_dir}/receipt-staging" "${evidence_dir}/receipts"
 
       - name: Destroy hidden inputs and trusted reports
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
           evidence_dir="${RUNNER_TEMP}/phase9-amnesia-evidence"
           rm -f "${evidence_dir}/archive.json.gz" "${evidence_dir}/archive.json" "${evidence_dir}/judge-private.pem"
-          rm -rf "${evidence_dir}/trusted-reports"
+          rm -f "${evidence_dir}/boundary-report.json"
+          rm -rf "${evidence_dir}/trusted-reports" "${evidence_dir}/receipt-staging"
           for dataset in waymo nuscenes argoverse2; do
-            rm -f "${evidence_dir}/${dataset}.oracle.json" "${evidence_dir}/${dataset}.candidate.json"
+            rm -f "${evidence_dir}/${dataset}.oracle.json" "${evidence_dir}/${dataset}.candidate.json" \
+              "${evidence_dir}/${dataset}.boundary-case.json"
           done
 
       - name: Retain public signed evidence only

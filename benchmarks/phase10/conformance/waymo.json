@@ -1,7 +1,6 @@
 {
   "datasetId": "waymo",
   "caseId": "phase6-waymo-rich-001",
-  "sourceFingerprint": "sha256-dc9b8680e1500c4305b01a5129b484bd827b6b50f8ec993786f7b7b2cca2e7a5",
   "requiredCapabilities": [
     "boxes2d",
     "boxes3d",

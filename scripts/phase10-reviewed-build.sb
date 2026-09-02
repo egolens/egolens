@@ -1,0 +1,54 @@
+(version 1)
+(deny default)
+
+; Reviewed Phase 10 candidate-build boundary. Candidate TypeScript and Vite
+; configuration execute only inside this profile. The detached standalone
+; checkout and pinned runtime are readable; writes are limited to dependency
+; caches, the two predetermined build outputs, and a fresh private home.
+(allow process*)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+(allow sysctl-read)
+(allow mach*)
+(allow ipc-posix*)
+(allow iokit*)
+
+(allow file-read* file-test-existence file-map-executable
+  (literal "/")
+  (literal "/tmp")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/ColorSync")
+  (subpath "/bin")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/private/etc")
+  (literal "/private/var/select/sh")
+  (subpath "/private/var/db/timezone")
+  (subpath (param "NODE_RUNTIME_ROOT"))
+  (subpath (param "SOURCE_ROOT")))
+
+(allow file-read* file-test-existence file-map-executable
+  (subpath (param "NODE_MODULES_ROOT")))
+
+(allow file-read* file-write* file-test-existence file-map-executable
+  (subpath (param "OUTPUT_ROOT"))
+  (subpath (param "BUILD_HOME")))
+
+(allow file-read-metadata file-test-existence
+  (path-ancestors (param "NODE_RUNTIME_ROOT"))
+  (path-ancestors (param "SOURCE_ROOT"))
+  (path-ancestors (param "NODE_MODULES_ROOT"))
+  (path-ancestors (param "OUTPUT_ROOT"))
+  (path-ancestors (param "BUILD_HOME")))
+
+(allow file-read* (regex "^/dev/fd/(0|1|2)$"))
+(allow file-write* (regex "^/dev/fd/(1|2)$"))
+(allow file-read* file-write* (literal "/dev/null"))
+(allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
+
+; Intentionally no network allow rule.

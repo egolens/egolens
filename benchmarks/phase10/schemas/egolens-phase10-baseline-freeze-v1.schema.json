@@ -5,13 +5,22 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema", "candidateCommit", "requirementsHash", "frozenAt", "heldOutState",
+    "schema", "candidateCommit", "requirementsHash", "sourceTreeHash",
+    "productionBuildInventoryHash", "authorBuildInventoryHash", "buildBoundaryReportHash",
+    "verifierBinding", "phase6Binding", "phase9Binding", "frozenAt", "heldOutState",
     "datasets", "gates", "allPassed", "freezeHash"
   ],
   "properties": {
     "schema": { "const": "egolens-phase10-baseline-freeze-v1" },
     "candidateCommit": { "$ref": "#/$defs/commit" },
-    "requirementsHash": { "$ref": "#/$defs/hash" },
+    "requirementsHash": { "const": "sha256:856f633a7d2aad8c219ba20f7bd1ba3672afc12e9d0b47861b7f92cebab1c92a" },
+    "sourceTreeHash": { "$ref": "#/$defs/hash" },
+    "productionBuildInventoryHash": { "$ref": "#/$defs/hash" },
+    "authorBuildInventoryHash": { "$ref": "#/$defs/hash" },
+    "buildBoundaryReportHash": { "$ref": "#/$defs/hash" },
+    "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
+    "phase6Binding": { "$ref": "#/$defs/phase6Binding" },
+    "phase9Binding": { "$ref": "#/$defs/phase9Binding" },
     "frozenAt": { "type": "string", "format": "date-time" },
     "heldOutState": {
       "type": "object",
@@ -67,7 +76,7 @@
           "properties": {
             "passed": { "const": true },
             "evidenceHash": { "$ref": "#/$defs/hash" },
-            "schemaHashes": { "type": "array", "minItems": 6, "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } },
+            "schemaHashes": { "type": "array", "minItems": 11, "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } },
             "freshProcessSelfTest": { "const": true }
           }
         }
@@ -79,6 +88,7 @@
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
     "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "oracleHash": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" },
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "nullableHash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
     "gate": {
@@ -90,26 +100,140 @@
         "evidenceHash": { "$ref": "#/$defs/hash" }
       }
     },
+    "verifierBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash",
+        "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash",
+        "verifierTrustManifestHash", "verifierTrustReviewId",
+        "verifierRequirement"
+      ],
+      "properties": {
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" },
+        "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 },
+        "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" },
+        "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" }
+      }
+    },
+    "phase6Binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gateReportHash", "requirementsHash", "producerCommit", "signingKeyId",
+        "publicKeyHash", "judgeVersion", "receipts"
+      ],
+      "properties": {
+        "gateReportHash": { "$ref": "#/$defs/hash" },
+        "requirementsHash": { "const": "sha256-7a019c72453b8b7fd6d03c54f2921911a6ebd8cd68a5a6ce590f98a6ededb720" },
+        "producerCommit": { "const": "a42f658e27fce118789d3648e2612f5d25b99488" },
+        "signingKeyId": { "const": "phase6-2026-08" },
+        "publicKeyHash": { "const": "sha256:fc10af03bc437c7133157ec1a4e647df409f41fff33254f6896e866d88003135" },
+        "judgeVersion": { "const": "spec013-v1" },
+        "receipts": {
+          "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["datasetId", "caseId", "receiptHash"],
+            "properties": {
+              "datasetId": { "enum": ["waymo", "nuscenes", "argoverse2"] },
+              "caseId": { "$ref": "#/$defs/id" },
+              "receiptHash": { "$ref": "#/$defs/oracleHash" }
+            }
+          }
+        }
+      }
+    },
+    "phase9Binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attestationHash", "boundaryReportHash", "gateReportHash", "phase9RequirementsHash",
+        "phase10RequirementsHash", "producerCommit", "signingKeyId", "publicKeyHash",
+        "judgeVersion", "judgeToolCommit",
+        "verifierId", "verifierToolCommit", "verifierSourceTreeHash", "verifierClosureHash",
+        "verifierClosureVersion", "verifierDependencyClosureHash", "verifierNodeRuntimeHash",
+        "verifierTrustManifestHash", "verifierTrustReviewId",
+        "verifierRequirement", "trustAnchorSetHash", "authorApplicationBuildHash", "recipeBindings"
+      ],
+      "properties": {
+        "attestationHash": { "$ref": "#/$defs/oracleHash" },
+        "boundaryReportHash": { "$ref": "#/$defs/oracleHash" },
+        "gateReportHash": { "$ref": "#/$defs/hash" },
+        "phase9RequirementsHash": { "const": "sha256-2f75957b0b257b44d893f031db55c86bebae6cd78cd955dfdd353e1ea9491c77" },
+        "phase10RequirementsHash": { "const": "sha256:856f633a7d2aad8c219ba20f7bd1ba3672afc12e9d0b47861b7f92cebab1c92a" },
+        "producerCommit": { "const": "a42f658e27fce118789d3648e2612f5d25b99488" },
+        "signingKeyId": { "const": "phase6-2026-08" },
+        "publicKeyHash": { "const": "sha256:fc10af03bc437c7133157ec1a4e647df409f41fff33254f6896e866d88003135" },
+        "judgeVersion": { "const": "spec013-phase9-v1" },
+        "judgeToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierId": { "const": "egolens-phase10-p7-reviewed-verifier-v1" },
+        "verifierToolCommit": { "$ref": "#/$defs/commit" },
+        "verifierSourceTreeHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierClosureVersion": { "const": 2 },
+        "verifierDependencyClosureHash": { "$ref": "#/$defs/hash" },
+        "verifierNodeRuntimeHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustManifestHash": { "$ref": "#/$defs/hash" },
+        "verifierTrustReviewId": { "$ref": "#/$defs/id" },
+        "verifierRequirement": { "const": "external-reviewed-tool-checkout-required" },
+        "trustAnchorSetHash": { "const": "sha256:32be1b43d2b046e1bbcedb00cf420c5a705498f57df29f13483ab4c29f7f3dd6" },
+        "authorApplicationBuildHash": { "$ref": "#/$defs/hash" },
+        "recipeBindings": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "datasetId", "caseId", "recipeHash", "receiptHash", "boundaryReportHash",
+              "boundaryCaseArtifactHash"
+            ],
+            "properties": {
+              "datasetId": { "enum": ["waymo", "nuscenes", "argoverse2"] },
+              "caseId": { "$ref": "#/$defs/id" },
+              "recipeHash": { "$ref": "#/$defs/hash" },
+              "receiptHash": { "$ref": "#/$defs/oracleHash" },
+              "boundaryReportHash": { "$ref": "#/$defs/oracleHash" },
+              "boundaryCaseArtifactHash": { "$ref": "#/$defs/oracleHash" }
+            }
+          }
+        }
+      }
+    },
     "modeEvidence": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "mode", "noAgent", "emptyProfile", "sourceManifestHash", "catalogHash",
-        "shareDescriptorHash", "recipeHash", "formatFingerprint", "operatorSetFingerprint",
+        "verifierBinding", "mode", "noAgent", "emptyProfile", "sourceTreeHash", "productionBuildInventoryHash",
+        "sourceManifestHash", "catalogHash",
+        "shareDescriptorHash", "recipeHash", "formatFingerprint", "operatorSetFingerprint", "coverageHash",
         "capabilityHash", "structuralHash", "numericHash", "rendererFrameHash", "perceptualAlgorithm", "perceptualHash",
-        "presentationHash", "performanceHash", "lifecycleHash", "browserRunHash",
+        "presentationHash", "performanceHash", "lifecycleHash", "browserBoundaryHash", "browserRunHash",
         "paused", "passed"
       ],
       "properties": {
+        "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
         "mode": { "enum": ["local", "remote", "share"] },
         "noAgent": { "const": true },
         "emptyProfile": { "type": "boolean" },
+        "sourceTreeHash": { "$ref": "#/$defs/hash" },
+        "productionBuildInventoryHash": { "$ref": "#/$defs/hash" },
         "sourceManifestHash": { "$ref": "#/$defs/hash" },
         "catalogHash": { "$ref": "#/$defs/nullableHash" },
         "shareDescriptorHash": { "$ref": "#/$defs/nullableHash" },
         "recipeHash": { "$ref": "#/$defs/hash" },
         "formatFingerprint": { "$ref": "#/$defs/hash" },
         "operatorSetFingerprint": { "$ref": "#/$defs/hash" },
+        "coverageHash": { "$ref": "#/$defs/hash" },
         "capabilityHash": { "$ref": "#/$defs/hash" },
         "structuralHash": { "$ref": "#/$defs/hash" },
         "numericHash": { "$ref": "#/$defs/hash" },
@@ -119,6 +243,7 @@
         "presentationHash": { "$ref": "#/$defs/hash" },
         "performanceHash": { "$ref": "#/$defs/hash" },
         "lifecycleHash": { "$ref": "#/$defs/hash" },
+        "browserBoundaryHash": { "$ref": "#/$defs/hash" },
         "browserRunHash": { "$ref": "#/$defs/hash" },
         "paused": { "const": true },
         "passed": { "const": true }
@@ -128,25 +253,41 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "datasetId", "caseId", "candidateCommit", "sourceCaseManifestHash",
+        "verifierBinding", "datasetId", "caseId", "candidateCommit", "sourceTreeHash", "productionBuildInventoryHash", "sourceCaseManifestHash",
         "sourceManifestHash", "recipeHash", "formatFingerprint", "operatorSetFingerprint",
-        "capabilities", "local", "remote", "share", "parityPassed", "evidenceHash"
+        "coverage", "coverageHash", "capabilities", "local", "remote", "share", "parityPassed", "evidenceHash"
       ],
       "properties": {
+        "verifierBinding": { "$ref": "#/$defs/verifierBinding" },
         "datasetId": { "enum": ["waymo", "nuscenes", "argoverse2"] },
         "caseId": { "$ref": "#/$defs/id" },
         "candidateCommit": { "$ref": "#/$defs/commit" },
+        "sourceTreeHash": { "$ref": "#/$defs/hash" },
+        "productionBuildInventoryHash": { "$ref": "#/$defs/hash" },
         "sourceCaseManifestHash": { "$ref": "#/$defs/hash" },
         "sourceManifestHash": { "$ref": "#/$defs/hash" },
         "recipeHash": { "$ref": "#/$defs/hash" },
         "formatFingerprint": { "$ref": "#/$defs/hash" },
         "operatorSetFingerprint": { "$ref": "#/$defs/hash" },
+        "coverage": { "$ref": "#/$defs/coverage" },
+        "coverageHash": { "$ref": "#/$defs/hash" },
         "capabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
         "local": { "$ref": "#/$defs/modeEvidence" },
         "remote": { "$ref": "#/$defs/modeEvidence" },
         "share": { "$ref": "#/$defs/modeEvidence" },
         "parityPassed": { "const": true },
         "evidenceHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredCapabilities", "frameIndices", "completeTimeline", "perceptualReferenceIds"],
+      "properties": {
+        "requiredCapabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "frameIndices": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } },
+        "completeTimeline": { "type": "boolean" },
+        "perceptualReferenceIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
       }
     }
   }

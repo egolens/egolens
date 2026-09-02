@@ -1,6 +1,7 @@
 {
   "kind": "egolens-adapter-amnesia-gate-requirements",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "recipeBinding": "author-attestation",
   "review": {
     "selectedBy": "Codex",
     "approvedBy": "happyhj",
@@ -10,7 +11,6 @@
     {
       "datasetId": "waymo",
       "caseId": "phase6-waymo-rich-001",
-      "recipeHash": "sha256:7f691f45d660440da504e2d1fe74b87b91d98edf62cddfc7b2cc5d6b36f8e2c4",
       "coverage": {
         "requiredCapabilities": [
           "boxes2d", "boxes3d", "cameraImages", "cameraSegmentation",
@@ -28,7 +28,6 @@
     {
       "datasetId": "nuscenes",
       "caseId": "phase6-nuscenes-urban-vru-001",
-      "recipeHash": "sha256:244268a28844062f768b2d434020fd32e8753380141d6dd0f85f3b525acd7b9a",
       "coverage": {
         "requiredCapabilities": [
           "boxes2d", "boxes3d", "cameraImages", "egoPoses",
@@ -46,7 +45,6 @@
     {
       "datasetId": "argoverse2",
       "caseId": "phase6-av2-urban-001",
-      "recipeHash": "sha256:fcd31b4e6a5fc0f51b487c90ca0fa1d9804809f8d1ba1befb687bd3bdcc7f568",
       "coverage": {
         "requiredCapabilities": [
           "boxes2d", "boxes3d", "cameraImages", "egoPoses", "pointClouds",

@@ -9,8 +9,18 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
+import { tableFromArrays, tableToIPC } from '@uwdata/flechette'
 import type { NuScenesFrameDescriptor } from '../../workers/nuScenesLidarWorker'
 import type { NuScenesCameraFrameDescriptor } from '../../workers/nuScenesCameraWorker'
+
+const workerInitPayloads = vi.hoisted(() => [] as Record<string, unknown>[])
+
+interface MutableRecipeFixture {
+  identity: { name: string }
+  match: { inventory: { rootEntries: unknown[] } }
+  sources: Record<string, { params?: unknown }>
+  pipelines: Record<string, { nodes: Array<{ inputs?: Record<string, string> }> }>
+}
 
 // ---------------------------------------------------------------------------
 // Mock WorkerPool — handles nuScenes init payloads (frameBatches + fileEntries)
@@ -25,6 +35,7 @@ vi.mock('../../workers/workerPool', () => ({
     constructor(public readonly concurrency: number, _workerFactory?: () => Worker) {}
 
     async init(opts: Record<string, unknown>) {
+      workerInitPayloads.push(opts)
       if ('frameBatches' in opts) {
         this.batches = opts.frameBatches as unknown[][]
         this._isReady = true
@@ -86,6 +97,9 @@ import {
   useSceneStore,
 } from '../useSceneStore'
 import { getManifest } from '../../adapters/registry'
+import { argoverse2CompiledRecipe, nuScenesCompiledRecipe } from '../../adapters/recipes/bundled'
+import { bundledPhase2OperatorRegistry } from '../../teachable/operators/bundledPhase2'
+import { compileRecipeV1 } from '../../teachable/recipe/compiler'
 
 // ---------------------------------------------------------------------------
 // Synthetic nuScenes data factory
@@ -179,6 +193,49 @@ function createSyntheticNuScenesSegments(): Map<string, Map<string, File>> {
 
   // Wrap in sentinel key format (same as folderScan produces)
   return new Map([['__nuscenes__', allFiles]])
+}
+
+function feather(columns: Record<string, unknown>): ArrayBuffer {
+  const bytes = tableToIPC(tableFromArrays(columns as never))
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+}
+
+function createSyntheticAV2Segments(): Map<string, Map<string, File>> {
+  const timestamp = 1_000_000n
+  const files = new Map<string, File>([
+    ['__logId__', new File([], 'av2-log')],
+    [`sensors/lidar/${timestamp}.feather`, new File([feather({
+      x: new Float64Array([1, 2]), y: new Float64Array([3, 4]),
+      z: new Float64Array([5, 6]), intensity: new Uint8Array([7, 8]),
+    })], `${timestamp}.feather`)],
+    ['city_SE3_egovehicle.feather', new File([feather({
+      timestamp_ns: new BigInt64Array([timestamp]), qw: new Float64Array([1]),
+      qx: new Float64Array([0]), qy: new Float64Array([0]), qz: new Float64Array([0]),
+      tx_m: new Float64Array([0]), ty_m: new Float64Array([0]), tz_m: new Float64Array([0]),
+    })], 'city_SE3_egovehicle.feather')],
+    ['calibration/egovehicle_SE3_sensor.feather', new File([feather({
+      sensor_name: ['ring_front_center'], qw: new Float64Array([0.5]),
+      qx: new Float64Array([-0.5]), qy: new Float64Array([0.5]), qz: new Float64Array([-0.5]),
+      tx_m: new Float64Array([0]), ty_m: new Float64Array([0]), tz_m: new Float64Array([0]),
+    })], 'egovehicle_SE3_sensor.feather')],
+    ['calibration/intrinsics.feather', new File([feather({
+      sensor_name: ['ring_front_center'], fx_px: new Float64Array([100]),
+      fy_px: new Float64Array([100]), cx_px: new Float64Array([50]), cy_px: new Float64Array([50]),
+      k1: new Float64Array([0]), k2: new Float64Array([0]), k3: new Float64Array([0]),
+      height_px: new Uint16Array([100]), width_px: new Uint16Array([100]),
+    })], 'intrinsics.feather')],
+    ['sensors/cameras/ring_front_center/1000100.jpg', new File([
+      new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+    ], '1000100.jpg')],
+    ['annotations.feather', new File([feather({
+      timestamp_ns: new BigInt64Array([timestamp]), category: ['REGULAR_VEHICLE'],
+      track_uuid: ['track'], qw: new Float64Array([1]), qx: new Float64Array([0]),
+      qy: new Float64Array([0]), qz: new Float64Array([0]), tx_m: new Float64Array([10]),
+      ty_m: new Float64Array([0]), tz_m: new Float64Array([0]), length_m: new Float64Array([4]),
+      width_m: new Float64Array([2]), height_m: new Float64Array([2]),
+    })], 'annotations.feather')],
+  ])
+  return new Map([['__argoverse2__', files]])
 }
 
 function installClassicRemoteFetch(files: ReadonlyMap<string, File>, baseUrl: string) {
@@ -361,6 +418,35 @@ describe('nuScenes store integration', () => {
   })
 
   describe('scene switching', () => {
+    it('keeps a fresh Phase 9 author recipe on the managed scene and every reload', async () => {
+      const authored = structuredClone(nuScenesCompiledRecipe.recipe) as unknown as MutableRecipeFixture
+      authored.identity.name = 'Fresh Phase 9 nuScenes recipe'
+      authored.match.inventory.rootEntries.reverse()
+      authored.sources.blindAuthoredSamples = authored.sources.samples
+      delete authored.sources.samples
+      for (const pipeline of Object.values(authored.pipelines)) {
+        for (const node of pipeline.nodes) {
+          for (const [name, value] of Object.entries(node.inputs ?? {})) {
+            if (typeof value === 'string' && value.startsWith('samples.')) {
+              node.inputs[name] = `blindAuthoredSamples.${value.slice('samples.'.length)}`
+            }
+          }
+        }
+      }
+      const compiled = compileRecipeV1(authored as never, bundledPhase2OperatorRegistry)
+
+      await actions().loadFromFiles(createSyntheticNuScenesSegments(), compiled)
+      expect(getManifest().name).toBe('Fresh Phase 9 nuScenes recipe')
+      expect(getActiveConformanceDescriptor()).toMatchObject({ datasetId: 'nuscenes', frameCount: 2 })
+
+      await actions().selectSegment('scene-0002')
+      expect(getManifest().name).toBe('Fresh Phase 9 nuScenes recipe')
+      expect(getActiveConformanceDescriptor()).toMatchObject({ datasetId: 'nuscenes', frameCount: 1 })
+      const reloaded = await createActiveConformanceScene()
+      expect(reloaded.index.segments).toMatchObject([{ id: 'scene-0002', frameCount: 1 }])
+      reloaded.dispose()
+    }, 15000)
+
     it('can switch to scene-0002', async () => {
       const segments = createSyntheticNuScenesSegments()
       await actions().loadFromFiles(segments)
@@ -462,6 +548,43 @@ describe('nuScenes store integration', () => {
       expect(scene.index.segments).toMatchObject([{ id: 'scene-0001', frameCount: 2 }])
       scene.dispose()
     }, 10000)
+  })
+
+  describe('Argoverse 2 counted external recipe', () => {
+    it('keeps renamed author sources on the managed scene, worker, conformance, and reload paths', async () => {
+      const authored = structuredClone(argoverse2CompiledRecipe.recipe) as unknown as MutableRecipeFixture
+      authored.identity.name = 'Fresh Phase 9 Argoverse 2 recipe'
+      const lidarParams = authored.sources.lidarFrames.params as { columns: Array<{ name: string; type: string }> }
+      for (const column of lidarParams.columns) {
+        if (column.name === 'x' || column.name === 'y' || column.name === 'z') column.type = 'float64'
+      }
+      authored.sources.blindAuthoredLidarFrames = authored.sources.lidarFrames
+      delete authored.sources.lidarFrames
+      for (const pipeline of Object.values(authored.pipelines)) {
+        for (const node of pipeline.nodes) {
+          for (const [name, value] of Object.entries(node.inputs ?? {})) {
+            if (typeof value === 'string' && value.startsWith('lidarFrames.')) {
+              node.inputs[name] = `blindAuthoredLidarFrames.${value.slice('lidarFrames.'.length)}`
+            }
+          }
+        }
+      }
+      const compiled = compileRecipeV1(authored as never, bundledPhase2OperatorRegistry)
+      workerInitPayloads.length = 0
+
+      await actions().loadFromFiles(createSyntheticAV2Segments(), compiled)
+      expect(state()).toMatchObject({ status: 'ready', currentSegment: 'av2-log', totalFrames: 1 })
+      expect(getManifest().name).toBe('Fresh Phase 9 Argoverse 2 recipe')
+      expect(workerInitPayloads.find((payload) => 'readerParams' in payload)?.readerParams)
+        .toEqual(authored.sources.blindAuthoredLidarFrames.params)
+      const conformance = await createActiveConformanceScene()
+      expect(conformance.manifest.name).toBe('Fresh Phase 9 Argoverse 2 recipe')
+      conformance.dispose()
+
+      await actions().selectSegment('av2-log')
+      expect(getManifest().name).toBe('Fresh Phase 9 Argoverse 2 recipe')
+      expect(getActiveConformanceDescriptor()).toMatchObject({ datasetId: 'argoverse2', frameCount: 1 })
+    }, 15000)
   })
 
   describe('classic URL source', () => {
