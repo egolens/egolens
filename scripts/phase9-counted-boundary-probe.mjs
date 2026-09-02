@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { constants } from 'node:fs'
+import { constants, createReadStream, createWriteStream } from 'node:fs'
 import { open, readFile, unlink, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
+import { pipeline } from 'node:stream/promises'
 
 const ARGUMENT_NAMES = Object.freeze([
   'application-probe', 'dataset-probe', 'output-root', 'forbidden-probe',
@@ -124,6 +125,23 @@ try {
 const outputRead = await denied(async () => await readFile(sentinel))
 check('output-read-denied', outputWritten && outputRead.denied, `read-${outputRead.code.toLowerCase()}`)
 if (outputWritten) await unlink(sentinel).catch(() => {})
+
+// The candidate export is a streamed exclusive create into the write-only
+// output mount (the broker never uses copyfile(3) there); prove that exact
+// primitive under this profile.
+const streamed = path.join(options['output-root'], `.boundary-probe-stream-${process.pid}`)
+let streamWritten = false
+try {
+  await pipeline(
+    createReadStream(options['application-probe']),
+    createWriteStream(streamed, { flags: 'wx', mode: 0o600 }),
+  )
+  streamWritten = true
+  check('output-stream-copy-allowed', true, 'streamed')
+} catch (error) {
+  check('output-stream-copy-allowed', false, `unexpected-${error.code ?? 'error'}`)
+}
+if (streamWritten) await unlink(streamed).catch(() => {})
 
 const forbiddenRead = await denied(async () => await canRead(options['forbidden-probe']))
 check('forbidden-resource-read-denied', forbiddenRead.denied, `read-${forbiddenRead.code.toLowerCase()}`)

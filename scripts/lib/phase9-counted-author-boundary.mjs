@@ -26,6 +26,7 @@ export const REQUIRED_PROBE_CHECKS = Object.freeze([
   'dataset-write-denied',
   'output-write-allowed',
   'output-read-denied',
+  'output-stream-copy-allowed',
   'forbidden-resource-read-denied',
   'broker-external-network-denied',
   'broker-loopback-allowed',

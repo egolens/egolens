@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -24,6 +24,7 @@ import { sha256Canonical } from './lib/oracle-receipts.mjs'
 import {
   COUNTED_PUBLIC_TOOLS,
   createBrokerHttpServer,
+  writeCandidateExport,
 } from './phase9-counted-author-broker.mjs'
 import {
   COUNTED_TARGETS,
@@ -454,4 +455,25 @@ test('macOS build profile reads only staged source and denies protected source a
     '/usr/bin/curl', '--connect-timeout', '1', '--max-time', '2', '-sS', '-o', '/dev/null', 'http://1.1.1.1/',
   ]), { cwd: source, env: environment, timeoutMs: 10_000 })
   assert.notEqual(network.code, 0)
+})
+
+test('candidate export is an exclusive write-only copy of the download', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'egolens-export-'))
+  t.after(async () => { await rm(root, { recursive: true, force: true }) })
+  const source = path.join(root, 'download.bin')
+  const body = JSON.stringify({ recipe: 'x'.repeat(70_000) })
+  await writeFile(source, body)
+  const outputFile = path.join(root, 'waymo.egolens-adapter.json')
+  const download = { failure: async () => null, path: async () => source }
+
+  await writeCandidateExport(download, outputFile)
+  assert.equal(await readFile(outputFile, 'utf8'), body)
+  assert.equal((await stat(outputFile)).mode & 0o777, 0o600)
+
+  await assert.rejects(writeCandidateExport(download, outputFile), { code: 'EEXIST' })
+  await assert.rejects(
+    writeCandidateExport({ failure: async () => 'canceled', path: async () => source }, path.join(root, 'other.json')),
+    /download failed: canceled/,
+  )
+  await assert.rejects(access(path.join(root, 'other.json')), { code: 'ENOENT' })
 })
