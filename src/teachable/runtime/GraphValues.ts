@@ -3,7 +3,7 @@ import type { ParquetColumnsParamsV1 } from '../operators/parquetColumns'
 import type {
   DecodedNumericRecordsV1,
   InterleavedRecordsParamsV1,
-  NpzUint16ParamsV1,
+  NpzUint16ParamsV1, NpzRecordsParamsV1,
   PcdRecordsParamsV1,
 } from '../operators/binaryReaders'
 import type { ParquetRow } from '../../utils/merge'
@@ -127,6 +127,7 @@ export type GraphBinaryDecoderV1 =
   | { readonly kind: 'interleaved'; readonly params: InterleavedRecordsParamsV1 }
   | { readonly kind: 'pcd'; readonly params: PcdRecordsParamsV1 }
   | { readonly kind: 'npz-uint16'; readonly params: NpzUint16ParamsV1 }
+  | { readonly kind: 'npz-records'; readonly params: NpzRecordsParamsV1 }
 
 export type GraphDecodedBinaryV1 = DecodedNumericRecordsV1 | Uint16Array
 

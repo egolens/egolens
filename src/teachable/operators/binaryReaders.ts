@@ -403,6 +403,129 @@ async function expandZipEntry(entry: ZipEntryV1, signal?: AbortSignal): Promise<
   return expanded
 }
 
+export interface NpzRecordsArraySpecV1 {
+  /** `.npy` entry name inside the archive (without extension). */
+  readonly name: string
+  /** Attribute name for a 1-D array, or one name per column for a 2-D array. */
+  readonly fields: readonly string[]
+}
+
+export interface NpzRecordsParamsV1 {
+  readonly arrays: readonly NpzRecordsArraySpecV1[]
+  readonly maxEntries?: number
+  readonly maxExpandedBytes?: number
+  readonly maxCompressionRatio?: number
+  readonly maxElements?: number
+  readonly maxRank?: number
+}
+
+interface NpyHeaderV1 {
+  readonly dtype: string
+  readonly shape: readonly number[]
+  readonly dataOffset: number
+}
+
+function parseNpyHeader(bytes: Uint8Array, maxRank: number, maxElements: number): NpyHeaderV1 {
+  if (bytes.byteLength < 10 || bytes[0] !== 0x93 || new TextDecoder().decode(bytes.subarray(1, 6)) !== 'NUMPY') {
+    throw new Error('Invalid .npy magic bytes.')
+  }
+  const major = bytes[6]!
+  const minor = bytes[7]!
+  if (!((major === 1 || major === 2) && minor === 0)) throw new Error(`Unsupported NPY version ${major}.${minor}.`)
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const headerLength = major === 1 ? view.getUint16(8, true) : view.getUint32(8, true)
+  const headerStart = major === 1 ? 10 : 12
+  if (headerLength > DEFAULT_MAX_HEADER_BYTES || headerStart + headerLength > bytes.byteLength) throw new Error('Invalid or oversized NPY header.')
+  const header = new TextDecoder().decode(bytes.subarray(headerStart, headerStart + headerLength))
+  const dtype = header.match(/['"]descr['"]\s*:\s*['"]([^'"]+)['"]/u)?.[1]
+  const fortran = header.match(/['"]fortran_order['"]\s*:\s*(True|False)/u)?.[1]
+  const shapeText = header.match(/['"]shape['"]\s*:\s*\(([^)]*)\)/u)?.[1]
+  if (!dtype) throw new Error('NPY dtype is missing.')
+  if (fortran !== 'False') throw new Error('Fortran-order NPY arrays are not supported.')
+  if (shapeText === undefined) throw new Error('NPY shape is missing.')
+  const shape = shapeText.split(',').map((part) => part.trim()).filter(Boolean).map(Number)
+  if (shape.length === 0 || shape.length > maxRank || shape.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    throw new Error(`NPY shape is invalid or exceeds rank ${maxRank}.`)
+  }
+  const elements = shape.reduce((product, value) => product * value, 1)
+  if (!Number.isSafeInteger(elements) || elements > maxElements) throw new Error(`NPY element count exceeds limit ${maxElements}.`)
+  return { dtype, shape, dataOffset: headerStart + headerLength }
+}
+
+const NPY_SCALARS: Readonly<Record<string, { readonly bytes: number; readonly read: (view: DataView, offset: number, little: boolean) => number }>> = {
+  f4: { bytes: 4, read: (view, offset, little) => view.getFloat32(offset, little) },
+  f8: { bytes: 8, read: (view, offset, little) => view.getFloat64(offset, little) },
+  i1: { bytes: 1, read: (view, offset) => view.getInt8(offset) },
+  u1: { bytes: 1, read: (view, offset) => view.getUint8(offset) },
+  i2: { bytes: 2, read: (view, offset, little) => view.getInt16(offset, little) },
+  u2: { bytes: 2, read: (view, offset, little) => view.getUint16(offset, little) },
+  i4: { bytes: 4, read: (view, offset, little) => view.getInt32(offset, little) },
+  u4: { bytes: 4, read: (view, offset, little) => view.getUint32(offset, little) },
+  i8: { bytes: 8, read: (view, offset, little) => Number(view.getBigInt64(offset, little)) },
+  u8: { bytes: 8, read: (view, offset, little) => Number(view.getBigUint64(offset, little)) },
+}
+
+/** Reads a numeric NPY array as rows × columns of JS numbers (int64 loses precision beyond 2^53). */
+function decodeNpyNumeric(bytes: Uint8Array, maxRank: number, maxElements: number): { readonly rows: number; readonly columns: number; readonly at: (row: number, column: number) => number } {
+  const header = parseNpyHeader(bytes, maxRank, maxElements)
+  const match = /^([<>|=])([fiu][1248])$/u.exec(header.dtype)
+  if (!match) throw new Error(`Unsupported NPY dtype ${header.dtype}; numeric little-endian arrays only.`)
+  const little = match[1] !== '>'
+  const scalar = NPY_SCALARS[match[2]!]!
+  if (header.shape.length > 2) throw new Error('NPY arrays of rank above 2 are not supported for records.')
+  const rows = header.shape[0] ?? 0
+  const columns = header.shape.length === 2 ? header.shape[1]! : 1
+  if (bytes.byteLength - header.dataOffset !== rows * columns * scalar.bytes) throw new Error('NPY payload length does not match shape.')
+  const view = new DataView(bytes.buffer, bytes.byteOffset + header.dataOffset, rows * columns * scalar.bytes)
+  return { rows, columns, at: (row, column) => scalar.read(view, (row * columns + column) * scalar.bytes, little) }
+}
+
+/**
+ * Decode several numeric NPY arrays of one NPZ archive into interleaved
+ * per-point records: every array contributes its 1-D values or its 2-D
+ * columns as attributes, and all arrays must agree on the record count.
+ */
+export async function decodeNpzRecordsV1(
+  buffer: ArrayBuffer,
+  params: NpzRecordsParamsV1,
+  signal?: AbortSignal,
+): Promise<DecodedNumericRecordsV1> {
+  if (!Array.isArray(params.arrays) || params.arrays.length === 0) throw new Error('npz records need at least one array.')
+  const resolved = {
+    arrayName: '',
+    maxEntries: params.maxEntries ?? DEFAULT_MAX_ARCHIVE_ENTRIES,
+    maxExpandedBytes: params.maxExpandedBytes ?? DEFAULT_MAX_EXPANDED_BYTES,
+    maxCompressionRatio: params.maxCompressionRatio ?? DEFAULT_MAX_COMPRESSION_RATIO,
+    maxElements: params.maxElements ?? DEFAULT_MAX_EXPANDED_BYTES / 2,
+    maxRank: params.maxRank ?? DEFAULT_MAX_RANK,
+  }
+  const entries = parseBoundedZipEntries(buffer, resolved)
+  const decoded: { readonly fields: readonly string[]; readonly array: ReturnType<typeof decodeNpyNumeric> }[] = []
+  for (const spec of params.arrays) {
+    const target = entries.find((entry) => entry.name === `${spec.name}.npy`)
+    if (!target) throw new Error(`NPZ array was not found: ${spec.name}`)
+    const array = decodeNpyNumeric(await expandZipEntry(target, signal), resolved.maxRank, resolved.maxElements)
+    if (array.columns !== spec.fields.length) {
+      throw new Error(`NPZ array ${spec.name} has ${array.columns} column${array.columns === 1 ? '' : 's'}; ${spec.fields.length} field name${spec.fields.length === 1 ? '' : 's'} were given.`)
+    }
+    decoded.push({ fields: spec.fields, array })
+  }
+  const pointCount = decoded[0]!.array.rows
+  if (decoded.some((entry) => entry.array.rows !== pointCount)) throw new Error('NPZ arrays disagree on the record count.')
+  const attributes = decoded.flatMap((entry) => entry.fields)
+  const stride = attributes.length
+  const values = new Float32Array(pointCount * stride)
+  let column = 0
+  for (const entry of decoded) {
+    for (let field = 0; field < entry.fields.length; field += 1) {
+      for (let row = 0; row < pointCount; row += 1) values[row * stride + column] = entry.array.at(row, field)
+      column += 1
+    }
+    throwIfAborted(signal)
+  }
+  return { values, pointCount, stride, attributes }
+}
+
 function decodeNpyUint16(bytes: Uint8Array, params: Required<NpzUint16ParamsV1>): Uint16Array {
   if (bytes.byteLength < 10 || bytes[0] !== 0x93 || new TextDecoder('ascii').decode(bytes.subarray(1, 6)) !== 'NUMPY') {
     throw new Error('Invalid .npy magic bytes.')

@@ -89,6 +89,31 @@ const npzParamsContract: OperatorJsonSchema = {
   additionalProperties: false,
 }
 
+const npzRecordsParamsContract: OperatorJsonSchema = {
+  type: 'object',
+  properties: {
+    arrays: {
+      type: 'array', minItems: 1, maxItems: 32,
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,95}$' },
+          fields: { type: 'array', minItems: 1, maxItems: 16, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 64 } },
+        },
+        required: ['name', 'fields'],
+        additionalProperties: false,
+      },
+    },
+    maxEntries: positiveLimit,
+    maxExpandedBytes: positiveLimit,
+    maxCompressionRatio: { type: 'number', exclusiveMinimum: 0 },
+    maxElements: positiveLimit,
+    maxRank: { type: 'integer', minimum: 1, maximum: 16 },
+  },
+  required: ['arrays'],
+  additionalProperties: false,
+}
+
 const featherParamsContract: OperatorJsonSchema = {
   type: 'object',
   properties: {
@@ -141,11 +166,6 @@ const parquetParamsContract: OperatorJsonSchema = {
   additionalProperties: false,
 }
 
-const emptyParamsContract: OperatorJsonSchema = {
-  type: 'object',
-  properties: {},
-  additionalProperties: false,
-}
 
 function closedParams(
   properties: Readonly<Record<string, unknown>>,
@@ -265,6 +285,8 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         intrinsicMatrixField: { type: 'string', minLength: 1, maxLength: 256 },
         quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
         translationField: { type: 'string', minLength: 1, maxLength: 256 },
+        rotationForm: { enum: ['quaternion', 'axes'] },
+        axisFields: fieldNames(2),
         frameIdSuffix: { type: 'string', minLength: 1, maxLength: 32 },
         defaultWidth: positiveLimit,
         defaultHeight: positiveLimit,
@@ -304,7 +326,28 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['image.encoded_bytes', byteInputContract, closedParams({
     mimeType: { enum: ['image/jpeg', 'image/png', 'image/webp'] },
   }, ['mimeType']), recordContract(['bytes'])],
-  ['json.records', byteInputContract, emptyParamsContract, recordContract(['rows'])],
+  ['json.records', byteInputContract, closedParams({
+    layout: { enum: ['array', 'object-rows', 'file-row'] },
+    pathField: { type: 'string', minLength: 1, maxLength: 256 },
+    keyField: { type: 'string', minLength: 1, maxLength: 256 },
+  }, []), recordContract(['rows'])],
+  ['records.derive', recordContract(['rows']), closedParams({
+    derive: {
+      type: 'array', minItems: 1, maxItems: 32,
+      items: {
+        type: 'object',
+        properties: {
+          field: { type: 'string', minLength: 1, maxLength: 256 },
+          from: { type: 'string', minLength: 1, maxLength: 256 },
+          pattern: { type: 'string', minLength: 1, maxLength: 512 },
+          replacement: { type: 'string', maxLength: 512 },
+          required: { type: 'boolean' },
+        },
+        required: ['field', 'from', 'pattern', 'replacement'],
+        additionalProperties: false,
+      },
+    },
+  }, ['derive']), recordContract(['rows'])],
   ['labels.attach_by_point_index', {
     oneOf: [
       recordContract(['pointClouds', 'labels']),
@@ -441,6 +484,8 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
         quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
         translationField: { type: 'string', minLength: 1, maxLength: 256 },
+        rotationForm: { enum: ['quaternion', 'axes'] },
+        axisFields: fieldNames(2),
       }, [
         'output', 'sampleDataCalibrationKeyField', 'calibrationKeyField', 'calibrationSensorKeyField',
         'sensorKeyField', 'sensorIdField', 'preferredSensorId', 'poseReferenceField', 'poseKeyField',
@@ -476,6 +521,8 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         keyframeField: { type: 'string', minLength: 1, maxLength: 256 },
         quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
         translationField: { type: 'string', minLength: 1, maxLength: 256 },
+        rotationForm: { enum: ['quaternion', 'axes'] },
+        axisFields: fieldNames(2),
         outputFrame: { type: 'string', minLength: 1, maxLength: 96 },
       }, [
         'mode', 'pathField', 'frameKeyField', 'recordKeyField', 'timestampField', 'recordCalibrationKeyField',
@@ -536,6 +583,18 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
     execution: 'worker',
     deterministic: true,
     execute: coreGraphOperatorImplementationsV1['archive.npz_array'],
+  },
+  {
+    name: 'archive.npz_records',
+    majorVersion: 1,
+    provider: 'core',
+    tier: 1,
+    inputContract: byteInputContract,
+    paramsContract: npzRecordsParamsContract,
+    outputContract: recordContract(['records']),
+    execution: 'worker',
+    deterministic: true,
+    execute: coreGraphOperatorImplementationsV1['archive.npz_records'],
   },
   {
     name: 'binary.interleaved_records',
