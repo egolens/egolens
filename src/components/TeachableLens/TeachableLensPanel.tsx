@@ -173,7 +173,7 @@ export default function TeachableLensPanel({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {declaredSensorSummaryV1(state.currentArtifact).map(({ modality, ids }) => {
                 const expected = state.sensorConfiguration?.[modality]
-                const mismatch = expected !== undefined && expected !== ids.length
+                const mismatch = Boolean(state.currentArtifact) && expected !== undefined && expected !== ids.length
                 return <div key={modality} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
                   <span style={{ fontWeight: 600, minWidth: 64 }}>{modality}</span>
                   <span>{state.currentArtifact ? `${ids.length}${expected !== undefined ? ` / ${expected} expected` : ''}` : `${expected ?? 0} expected`}</span>
