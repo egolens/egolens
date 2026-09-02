@@ -1004,6 +1004,7 @@ export function buildAuthorPrompt({ datasetId, caseId, capabilities, port, contr
   return [
     'You are the fresh isolated EgoLens Adapter Amnesia author for one counted source case.',
     `Dataset identity: ${datasetId}. Public case identity: ${caseId}.`,
+    `Set scene.formatId to exactly "${datasetId}": the counted capture installs the recipe against that source case and rejects any other format identity.`,
     `Public required capabilities: ${[...capabilities].sort().join(', ')}.`,
     '',
     'You have no application, source-path, repository, existing-recipe, oracle, judge, or candidate-output mount.',
@@ -1478,6 +1479,11 @@ async function runCase(options) {
     if (recipe?.kind !== 'egolens-adapter' || recipe?.schemaVersion !== 1
       || recipe?.provenance?.author !== 'codex') {
       throw new Error('Candidate export is not a Codex-authored EgoLens adapter recipe.')
+    }
+    // The capture installs the recipe against the active source case and
+    // rejects any other format identity, so fail here with the exact reason.
+    if (recipe?.scene?.formatId !== datasetId) {
+      throw new Error(`Candidate export targets format "${recipe?.scene?.formatId}" instead of the counted dataset identity "${datasetId}".`)
     }
     const recipeHash = recipeSemanticHash(recipe)
     if (!SHA256_PATTERN.test(recipeHash)) throw new Error('Candidate recipe semantic hash is invalid.')
