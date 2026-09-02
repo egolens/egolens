@@ -498,6 +498,56 @@ Body outline (claim only what is listed in
 - Explicitly not included: any P7 evidence or baseline freeze; held-out bytes
   unopened.
 
+## PR B run log
+
+- 2026-09-02: PR A (#34) and the PR B preparation fix (#35) merged; main is
+  `c1302038df0f740e149cc1b605ceba4356e663bc`. The reviewed verifier checkout
+  (`PHASE10_TOOL`) and the trust manifest are pinned to that commit; its
+  manifest hash is
+  `sha256:42c2d82bdd2b7bad9a86ce142280e5838d7c07e665d5041319eed98c263a36df`.
+  `PHASE9_AMNESIA_JUDGE_TOOL_COMMIT` must be pinned to the same commit.
+- 2026-09-02: the first Waymo `run-case` failed at the coordinator's isolated
+  `npm ci` (npm rejects `/dev/null` as both user and global config); fixed and
+  merged as #37. The verifier and trust manifest stay pinned to `c130203`; the
+  coordinator runs from the candidate checkout, which now includes the fix.
+- 2026-09-02: the second Waymo `run-case` failed at the build boundary probe
+  because the external egress target `93.184.216.34` no longer answers HTTP;
+  the reachability control failed closed as designed. Fixed and merged as #38
+  (probe `1.1.1.1` / `1.0.0.1`).
+- 2026-09-02: the third Waymo `run-case` reached the isolated Codex author,
+  which aborted because the controller profile denied the `/etc` symlink that
+  Codex probes at startup; fixed and merged as #39 together with an explicit
+  `web_search="disabled"` for the author.
+- 2026-09-02: the fourth Waymo `run-case` completed its Codex session but the
+  author stopped with `authoring-observability-gap` because every broker
+  `/call` timed out: the bridge's invoke button sits in a 1px hidden host and
+  Playwright's pointer click never reached it. Fixed and merged as #40
+  (`dispatchEvent('click')`).
+- 2026-09-02, candidate `c20c3d6`: the counted Waymo author session finally
+  ran end to end (20 inspects, 4 contract reads, 5 transactional revisions).
+  The fifth revision passed structural validation, then the headless Chrome
+  renderer crashed (`Target crashed`) during graph preview sampling; the page
+  never recovered and the author correctly stopped with
+  `authoring-observability-gap` without exporting. **Root cause (confirmed
+  outside Seatbelt with the reconstructed recipe):** the author's `lidar`
+  `parquet.columns` source declares both `range_image_return1` and
+  `range_image_return2` `number-list` columns (165 MB parquet); with both
+  declared the preview exhausts renderer memory even when the converter uses
+  one return, while either column alone previews in about 10 to 13 s. The
+  declared `maxInputBytes` / `maxOutputBytes` limits did not fail closed
+  before the crash, and a crashed page ends the counted session. This is a
+  runtime/resource gap in the shipped authoring path, not a tooling defect:
+  the reader/preview must enforce a byte budget per sampled frame (or reject
+  the column set with a `RESOURCE_LIMIT` diagnostic) before materializing wide
+  list columns. Reconstructed recipe and transcript:
+  `~/Workspace/egolens-p7/debug-evidence/` (local, protected). Fixed and
+  merged as #41: wide Parquet columns are read one at a time, a metadata
+  estimate enforces a 2 GiB per-read decode ceiling before any page is read,
+  and list validation no longer copies. The crashing recipe now previews.
+- PR B's candidate commit is this branch's head at the time each counted run
+  starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
+  Phase 9 judging must complete before any evidence commit is pushed here.
+
 ## Creating PR B after PR A merges
 
 1. Fetch the latest `origin/main` and create a clean PR B candidate checkout
