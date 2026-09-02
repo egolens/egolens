@@ -269,6 +269,15 @@ Additional defects found by two review passes over the dirty tree and fixed:
   pins are reviewed again.
 - Failure messages from the test gate can include absolute run-root paths
   (operator terminal only). `phase10-ledger.mjs` appends without a lock.
+- Late review addendum (after the PR A commit): in remote/share modes
+  `phase6-cdp-benchmark.mjs` records range-host capability URLs
+  (`scenario.url`, `network[].url`, `location.href`) in 0644 benchmark JSON,
+  contradicting `prepare-preflight`'s claim that the capability lives only in
+  0600 files; redact `/access/<hex>/` or write protected before PR B retains
+  artifacts. `phase10-baseline-gate.mjs --ledger` is optional, so a freeze never
+  recorded in the ledger still passes; make it required. The CDP benchmark's
+  `ambient-file-read-denied` probe passes when no attach was attempted. Value-
+  less flags in `phase10-source-case-manifest.mjs` become the string `"true"`.
 
 ## Required next work
 
