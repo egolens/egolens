@@ -668,6 +668,25 @@ Body outline (claim only what is listed in
   knowledge of the AV2 schema. Fixed by decoding the leading Arrow IPC schema
   message from a bounded prefix (record batches are never read) and exposing
   column names, logical types, and nullability through the same inspect mode.
+- 2026-09-02, candidate `ad8608d` (includes #55): all three counted runs
+  passed (`phase9-waymo-27945bca87271ff7`, `phase9-nuscenes-b8502585447184e6`,
+  `phase9-argoverse2-ac967e88534c5e68`), the report assembled, the build
+  boundary reproduced, and the Waymo recipe was captured from a loopback-served
+  source. Comparing that capture with the hidden oracle showed the real gap:
+  every blind recipe collapses sensors (Waymo 1 lidar + 1 camera instead of
+  5 + 5; nuScenes 1 radar + 1 camera instead of 5 + 6; AV2 1 camera instead of
+  7), so capabilities validate and human review accepts while the exact
+  structural/numeric parity judge can never pass. **Decision (owner):** the
+  "public tools only" purity claim is not required; efficient human + Codex
+  collaboration is the goal. PR B is on hold. Product loop first: the author
+  workspace now asks the human to confirm the sensor layout (counts per
+  modality, defaults inferred from the folder), the session publishes it in
+  the public contract and rejects revisions that declare a different count
+  (`SENSOR_CONFIGURATION_UNMET`), and the review panel shows declared sensors
+  per modality against the confirmed layout. Feedback to the author flows
+  through the Codex chat, not a new review channel. Remaining for PR B: carry
+  the same layout in `phase9-requirements.json`, relax the judge on
+  presentation-only fields, rerun.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
