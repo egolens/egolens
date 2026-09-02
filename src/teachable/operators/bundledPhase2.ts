@@ -333,6 +333,26 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     rootPath: { type: 'string', minLength: 1, maxLength: 512 },
     flatten: { type: 'boolean' },
   }, []), recordContract(['rows'])],
+  ['text.table', byteInputContract, closedParams({
+    layout: { enum: ['delimited', 'key-values', 'lines'] },
+    delimiter: { type: 'string', minLength: 1, maxLength: 16 },
+    columns: { type: 'array', minItems: 1, maxItems: 512, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 128 } },
+    header: { type: 'boolean' },
+    field: { type: 'string', minLength: 1, maxLength: 128 },
+    keySeparator: { type: 'string', minLength: 1, maxLength: 8 },
+    numeric: { type: 'boolean' },
+    indexField: { type: 'string', minLength: 1, maxLength: 128 },
+    pathField: { type: 'string', minLength: 1, maxLength: 256 },
+    maxRows: positiveLimit,
+    maxColumns: positiveLimit,
+  }, ['layout']), recordContract(['rows'])],
+  ['xml.records', byteInputContract, closedParams({
+    recordPath: { type: 'string', minLength: 1, maxLength: 512 },
+    pathField: { type: 'string', minLength: 1, maxLength: 256 },
+    numeric: { type: 'boolean' },
+    maxRecords: positiveLimit,
+    maxDepth: { type: 'integer', minimum: 1, maximum: 256 },
+  }, ['recordPath']), recordContract(['rows'])],
   ['records.derive', recordContract(['rows']), closedParams({
     derive: {
       type: 'array', minItems: 1, maxItems: 32,

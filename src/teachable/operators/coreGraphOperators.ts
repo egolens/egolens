@@ -46,6 +46,8 @@ import {
 } from './binaryReaders'
 import { decodeFeatherColumnsV1, interleaveFeatherNumericColumnsV1 } from './featherColumns'
 import { decodeJsonRecordsV1 } from './jsonRecords'
+import { decodeTextTableV1, type TextTableParamsV1 } from './textTable'
+import { decodeXmlRecordsV1, type XmlRecordsParamsV1 } from './xmlRecords'
 import { readParquetColumnsV1 } from './parquetColumns'
 import type { CoreOperatorImplementationV1 } from './registry'
 import { headingFromQuaternionWxyzV1 } from './sceneGeometry'
@@ -478,6 +480,42 @@ const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
   }
   return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
 }
+
+async function readTextRows(
+  inputs: Readonly<Record<string, unknown>>,
+  context: Parameters<CoreOperatorImplementationV1>[2],
+  decode: (text: string, path: string) => Record<string, unknown>[],
+  pathField: string | null,
+  label: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  if (!Array.isArray(inputs.files)) throw new Error('GRAPH_READER_FILES_INVALID')
+  const rows: Readonly<Record<string, unknown>>[] = []
+  for (const file of inputs.files as readonly { path: string }[]) {
+    const bytes = await context.read(file.path)
+    let fileRows: Record<string, unknown>[]
+    try {
+      fileRows = decode(new TextDecoder().decode(bytes), file.path)
+    } catch (error) {
+      throw new Error(`${label}: ${file.path}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    for (const row of fileRows) rows.push(pathField ? { ...row, [pathField]: file.path } : row)
+  }
+  return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
+}
+
+const textTable: CoreOperatorImplementationV1 = async (inputs, params, context) => await readTextRows(
+  inputs, context,
+  (text) => decodeTextTableV1(text, params as unknown as TextTableParamsV1),
+  typeof params.pathField === 'string' ? params.pathField : null,
+  'GRAPH_TEXT_DECODE_FAILED',
+)
+
+const xmlRecords: CoreOperatorImplementationV1 = async (inputs, params, context) => await readTextRows(
+  inputs, context,
+  (text) => decodeXmlRecordsV1(text, params as unknown as XmlRecordsParamsV1),
+  typeof params.pathField === 'string' ? params.pathField : null,
+  'GRAPH_XML_DECODE_FAILED',
+)
 
 const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
   const candidate = inputs.lidar ?? inputs.rows ?? inputs.samples
@@ -1292,6 +1330,8 @@ export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOpe
   'parquet.columns': parquetColumns,
   'image.encoded_bytes': encodedBytes,
   'json.records': jsonRecords,
+  'text.table': textTable,
+  'xml.records': xmlRecords,
   'records.derive': recordsDerive,
   'timeline.sort': timelineSort,
   'geometry.relative_poses': relativePoses,
