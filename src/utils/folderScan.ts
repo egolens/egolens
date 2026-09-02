@@ -17,6 +17,7 @@
 import { getAllKnownComponents, detectDataset } from '../adapters/registry'
 import { nuScenesRecipe } from '../adapters/nuscenes/manifest'
 import { selectVersionRootV1 } from '../teachable/runtime/versionRoot'
+import { selectedFileSelectionV1 } from '../teachable/authoring/selectedFileKeys'
 import {
   MAX_SOURCE_INVENTORY_ENTRIES_V1,
   SourceInventoryV1,
@@ -517,26 +518,12 @@ export async function scanDataTransfer(
  * preserves the browser-authorized File objects under canonical relative keys.
  */
 export function scanSelectedFiles(files: FileList | readonly File[]): ScanResult {
-  const selected = Array.from(files)
-  const raw = selected.map((file) => ({
-    file,
-    path: (file.webkitRelativePath || file.name).replaceAll('\\', '/'),
-  })).filter((entry) => entry.path.length > 0)
-  const firstSegments = raw.map((entry) => entry.path.split('/'))
-  const commonFirst = firstSegments.length > 0
-    && firstSegments.every((segments) => segments.length > 1 && segments[0] === firstSegments[0]?.[0])
-    ? firstSegments[0]![0]
-    : null
   const policyCandidates = new Set(nuScenesRecipe.match.versionRoot?.candidates ?? [])
-  const preserveFirst = commonFirst !== null && (
-    getAllKnownComponents().has(commonFirst)
-    || policyCandidates.has(commonFirst)
-    || ['samples', 'sweeps', 'lidarseg', 'panoptic', 'sensors', 'calibration'].includes(commonFirst)
-  )
-  const entries = raw.map((entry) => ({
-    file: entry.file,
-    path: commonFirst && !preserveFirst ? entry.path.split('/').slice(1).join('/') : entry.path,
-  })).sort((left, right) => left.path.localeCompare(right.path, 'en'))
+  const selection = selectedFileSelectionV1(files, {
+    preserveFirstSegment: (segment) => getAllKnownComponents().has(segment) || policyCandidates.has(segment),
+  })
+  const commonFirst = selection.strippedRoot
+  const entries = selection.entries.map(([path, file]) => ({ file, path }))
   const inventory = sourceInventoryFromFilesV1(
     entries.map((entry) => [entry.path, entry.file] as [string, File]),
   )

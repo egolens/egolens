@@ -62,6 +62,7 @@ export const REVIEWED_AUTHOR_SOURCE_PATHS = Object.freeze([
   'src/teachable/authoring/portability.ts',
   'src/teachable/authoring/previewStore.ts',
   'src/teachable/authoring/review.ts',
+  'src/teachable/authoring/selectedFileKeys.ts',
   'src/teachable/authoring/semanticDiff.ts',
   'src/teachable/authoring/sourceSelectors.ts',
   'src/teachable/authoring/webMcp.ts',

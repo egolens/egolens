@@ -574,6 +574,21 @@ Body outline (claim only what is listed in
   absolute paths. They live outside the repo under the local P7 work root
   (`protected/<dataset>/`, `public/<dataset>/`) and must be regenerated
   (delete first; creation is exclusive) if the verifier is re-pinned.
+- 2026-09-02, candidate `4b98462`: the Waymo counted run passed end to end
+  after #47 (`phase9-waymo-edfef07cb97a3e26`, recipe
+  `sha256:7f2adfc2…0dc279`). The nuScenes counted run then stopped with
+  `authoring-observability-gap`: every path-joined output (pointClouds,
+  radarPointClouds, cameraImages, boxes2d, lidarSegmentation) was disabled as
+  `OPTIONAL_OUTPUT_UNBOUND` while the token-joined outputs validated. **Root
+  cause:** the isolated author workspace keyed its inventory by raw
+  `webkitRelativePath` (`nuscenes/samples/...`) while the ordinary viewer's
+  `scanSelectedFiles` drops the selected wrapper folder (`samples/...`), so
+  `sample_data.filename` never matched a source path inside the author build,
+  and the blind-authored recipes (including the passed Waymo recipe, which used
+  `waymo/<component>/*.parquet` globs) would not bind at capture time in the
+  viewer either. Fixed by sharing one canonical relative-key rule
+  (`selectedFileKeys.ts`, reviewed author source) between both inputs. All
+  three counted runs must be redone from a candidate that includes the fix.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
