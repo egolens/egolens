@@ -658,6 +658,16 @@ Body outline (claim only what is listed in
   told the author that; fixed by stating it in the prompt and failing the
   coordinator's post-export check with the exact reason. All three counted
   runs are redone because the coordinator is part of the trusted tool manifest.
+- 2026-09-02, candidate `fa1fa62` (includes #54): Waymo
+  (`phase9-waymo-a1a43d6279d8678a`, `scene.formatId` now `waymo`) and nuScenes
+  (`phase9-nuscenes-463a001688c1c649`) passed; the Argoverse 2 author stopped
+  after 24 rejected revisions because the public `table-schema` inspection
+  refused `.feather` files (`CAPABILITY_GAP`), so it could not learn the
+  calibration and annotation column names and fell back to guessing the
+  camera binding form. Earlier AV2 authors had succeeded only from prior
+  knowledge of the AV2 schema. Fixed by decoding the leading Arrow IPC schema
+  message from a bounded prefix (record batches are never read) and exposing
+  column names, logical types, and nullability through the same inspect mode.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.

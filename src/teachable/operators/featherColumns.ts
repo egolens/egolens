@@ -34,7 +34,8 @@ export interface DecodedFeatherColumnsV1 {
   readonly numRows: number
 }
 
-interface FlechetteFieldLike {
+export interface FlechetteFieldLike {
+  readonly nullable?: boolean
   readonly name: string
   readonly type: {
     readonly typeId: number
@@ -71,6 +72,11 @@ export function assertValidFeatherColumnsParamsV1(params: FeatherColumnsParamsV1
   assertPositiveSafeInteger(params.maxInputBytes, 'maxInputBytes')
   assertPositiveSafeInteger(params.maxRows, 'maxRows')
   assertPositiveSafeInteger(params.maxOutputBytes, 'maxOutputBytes')
+}
+
+/** Public logical type of an Arrow field as this reader understands it (null when unsupported). */
+export function featherLogicalTypeV1(field: FlechetteFieldLike): FeatherLogicalTypeV1 | null {
+  return logicalType(field)
 }
 
 function logicalType(field: FlechetteFieldLike): FeatherLogicalTypeV1 | null {

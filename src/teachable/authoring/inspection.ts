@@ -1,3 +1,5 @@
+import { tableFromIPC } from '@uwdata/flechette'
+import { featherLogicalTypeV1, type FeatherLogicalTypeV1, type FlechetteFieldLike } from '../operators/featherColumns'
 import { openParquetFile } from '../../utils/parquet'
 import type { SourceInventoryEntryV1 } from './SourceInventory'
 import { SourceInventoryV1 } from './SourceInventory'
@@ -127,6 +129,38 @@ function metadata(entry: SourceInventoryEntryV1): SourceInventoryEntryV1 {
   return entry
 }
 
+const ARROW_FILE_MAGIC = 'ARROW1'
+
+/** Decodes only the leading Arrow IPC schema message from a bounded file prefix. */
+export function featherSchemaFromPrefixV1(prefix: Uint8Array, maxBytes: number): readonly {
+  readonly name: string
+  readonly logicalType: FeatherLogicalTypeV1 | null
+  readonly arrowTypeId: number
+  readonly nullable: boolean
+}[] {
+  let offset = 0
+  if (prefix.length >= 8 && new TextDecoder().decode(prefix.subarray(0, ARROW_FILE_MAGIC.length)) === ARROW_FILE_MAGIC) offset = 8
+  if (prefix.length < offset + 8) throw new Error('Feather schema inspection needs at least the leading IPC message header.')
+  const view = new DataView(prefix.buffer, prefix.byteOffset, prefix.byteLength)
+  let metadataLength = view.getInt32(offset, true)
+  let metadataOffset = offset + 4
+  if (metadataLength === -1) {
+    metadataLength = view.getInt32(offset + 4, true)
+    metadataOffset = offset + 8
+  }
+  const end = metadataOffset + metadataLength
+  if (metadataLength <= 0 || end > prefix.length) {
+    throw new Error(`Feather schema message does not fit within maxBytes (${maxBytes}); raise maxBytes for this file.`)
+  }
+  const table = tableFromIPC(prefix.subarray(offset, end), { useProxy: false })
+  return (table.schema.fields as readonly FlechetteFieldLike[]).map((field) => ({
+    name: field.name,
+    logicalType: featherLogicalTypeV1(field),
+    arrowTypeId: field.type.typeId,
+    nullable: field.nullable !== false,
+  }))
+}
+
 export async function inspectSourceInventoryV1(
   inventory: SourceInventoryV1,
   request: SourceInspectionRequestV1,
@@ -168,6 +202,19 @@ export async function inspectSourceInventoryV1(
       path: entry.path,
       truncated: false,
       data: { numRows: parquet.numRows, rowGroups: parquet.rowGroups, schema },
+    }
+  }
+  if (request.mode === 'table-schema' && entry.extension === '.feather') {
+    // Arrow IPC (file or stream): the schema is the first message, so a
+    // bounded prefix is enough; the record batches are never read here.
+    const prefix = new Uint8Array(await byteSource.read(entry.path, { end: Math.min(entry.size, maxBytes), signal }))
+    abortIfNeeded(signal)
+    return {
+      mode: request.mode,
+      sessionId: inventory.sessionId,
+      path: entry.path,
+      truncated: false,
+      data: { byteLength: entry.size, schema: featherSchemaFromPrefixV1(prefix, maxBytes) },
     }
   }
   if (request.mode === 'table-schema') {
