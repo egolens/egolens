@@ -435,6 +435,16 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     timestampField: { type: 'string', minLength: 1, maxLength: 256 },
     matrixField: { type: 'string', minLength: 1, maxLength: 512 },
   }, ['timestampField', 'matrixField']), recordContract(['poses'])],
+  ['geometry.geodetic_poses', recordContract(['rows']), closedParams({
+    timestampField: { type: 'string', minLength: 1, maxLength: 256 },
+    latitudeField: { type: 'string', minLength: 1, maxLength: 256 },
+    longitudeField: { type: 'string', minLength: 1, maxLength: 256 },
+    altitudeField: { type: 'string', minLength: 1, maxLength: 256 },
+    rollField: { type: 'string', minLength: 1, maxLength: 256 },
+    pitchField: { type: 'string', minLength: 1, maxLength: 256 },
+    yawField: { type: 'string', minLength: 1, maxLength: 256 },
+    angleUnit: { enum: ['radians', 'degrees'] },
+  }, ['timestampField', 'latitudeField', 'longitudeField', 'yawField']), recordContract(['poses'])],
   ['records.select', {
     oneOf: [recordContract(['rows']), recordContract(['scenes', 'logs'])],
   }, {

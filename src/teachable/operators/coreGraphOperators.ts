@@ -583,6 +583,67 @@ const relativePoses: CoreOperatorImplementationV1 = async (inputs, params) => {
   }
 }
 
+/**
+ * Ego poses from raw navigation rows (GPS latitude/longitude/altitude plus
+ * roll/pitch/yaw, as in KITTI OXTS or a vehicle bus): each fix becomes an
+ * absolute pose on the local East-North-Up tangent plane of the first fix,
+ * then the timeline is re-based on the first pose like geometry.relative_poses.
+ */
+const geodeticPoses: CoreOperatorImplementationV1 = async (inputs, params) => {
+  const rows = await materialize(inputs.rows)
+  const timestampField = String(params.timestampField)
+  const latField = String(params.latitudeField)
+  const lonField = String(params.longitudeField)
+  const altField = typeof params.altitudeField === 'string' ? params.altitudeField : null
+  const rollField = typeof params.rollField === 'string' ? params.rollField : null
+  const pitchField = typeof params.pitchField === 'string' ? params.pitchField : null
+  const yawField = String(params.yawField)
+  const degrees = params.angleUnit === 'degrees'
+  const toRadians = (value: number) => (degrees ? value * Math.PI / 180 : value)
+  const EARTH_RADIUS = 6_378_137
+  const absolute = new Map<bigint, number[]>()
+  let origin: { lat: number; lon: number; alt: number } | null = null
+  const sorted = rows
+    .map((row) => ({ row, timestamp: integerTimestamp(row[timestampField], timestampField) }))
+    .sort((left, right) => left.timestamp < right.timestamp ? -1 : left.timestamp > right.timestamp ? 1 : 0)
+  for (const { row, timestamp } of sorted) {
+    const lat = finite(row[latField], latField) * Math.PI / 180
+    const lon = finite(row[lonField], lonField) * Math.PI / 180
+    const alt = altField ? finite(row[altField], altField) : 0
+    origin ??= { lat, lon, alt }
+    const east = EARTH_RADIUS * (lon - origin.lon) * Math.cos(origin.lat)
+    const north = EARTH_RADIUS * (lat - origin.lat)
+    const up = alt - origin.alt
+    const roll = rollField ? toRadians(finite(row[rollField], rollField)) : 0
+    const pitch = pitchField ? toRadians(finite(row[pitchField], pitchField)) : 0
+    const yaw = toRadians(finite(row[yawField], yawField))
+    const cr = Math.cos(roll), sr = Math.sin(roll), cp = Math.cos(pitch), sp = Math.sin(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw)
+    // R = Rz(yaw) · Ry(pitch) · Rx(roll); x forward, y left, z up in the ENU world.
+    absolute.set(timestamp, [
+      cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, east,
+      sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, north,
+      -sp, cp * sr, cp * cr, up,
+      0, 0, 0, 1,
+    ])
+  }
+  const timestamps = [...absolute.keys()]
+  const first = timestamps.length > 0 ? absolute.get(timestamps[0]!) : undefined
+  const originInverse = first ? invertRowMajor4x4(first) : null
+  const worldFromEgoByTimestamp = new Map<bigint, Float64Array>()
+  if (originInverse) {
+    for (const timestamp of timestamps) {
+      worldFromEgoByTimestamp.set(timestamp, new Float64Array(multiplyRowMajor4x4(originInverse, absolute.get(timestamp)!)))
+    }
+  }
+  return {
+    poses: {
+      kind: 'pose-timeline',
+      worldOriginInverse: originInverse ? new Float64Array(originInverse) : null,
+      worldFromEgoByTimestamp,
+    } satisfies GraphPoseTimelineV1,
+  }
+}
+
 const rangeImageToCartesian: CoreOperatorImplementationV1 = async (inputs, params) => {
   if (!isParquet(inputs.rangeImages) || !isParquet(inputs.calibration)) {
     throw new Error('GRAPH_RANGE_IMAGE_INPUT_INVALID')
@@ -1335,6 +1396,7 @@ export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOpe
   'records.derive': recordsDerive,
   'timeline.sort': timelineSort,
   'geometry.relative_poses': relativePoses,
+  'geometry.geodetic_poses': geodeticPoses,
   'geometry.range_image_to_cartesian': rangeImageToCartesian,
   'relations.token_join': tokenJoin,
   'timeline.join': timelineJoin,
