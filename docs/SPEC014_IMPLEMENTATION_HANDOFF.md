@@ -550,6 +550,20 @@ Body outline (claim only what is listed in
   #44 (controller transcript bound) are merged. Verifier and judge pin move to
   the current main head for every counted run because the reviewed author
   source list includes the changed runtime files.
+- 2026-09-02 (later): #43 broker invoke closure, #44 controller transcript
+  bound (64 MiB), #45 protected-local retention of the author transcript and
+  broker audit (`evidence/<dataset>.<runToken>.author-transcript.txt`), and
+  #46 capability-addressable human-review controls are merged. The counted
+  Waymo author reached an engine-valid recipe with all ten capabilities
+  validated on five frames (sparse segmentation frames 29 and 79 found via
+  `OUTPUT_ABSENT_ON_SAMPLED_FRAMES`) before #46; the full apply → review →
+  finalize → export path is verified through the real broker adapter.
+  **Blocked:** the operator's Codex usage limit is exhausted
+  (`You've hit your usage limit … try again at Sep 6th, 2026 7:39 PM`), so no
+  counted author session can run until then or until credits are added.
+  Resume with `~/Workspace/egolens-p7/repin-and-run-waymo.sh` (re-pins the
+  verifier/judge to main, creates a fresh candidate commit, starts Waymo),
+  then nuScenes and Argoverse 2 with the same candidate commit.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
