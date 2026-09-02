@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { sourceInventoryFromFilesV1 } from './teachable/authoring/SourceInventory'
+import { selectedFileKeysV1 } from './teachable/authoring/selectedFileKeys'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
 import { colors, fonts } from './theme'
 
@@ -18,8 +19,9 @@ export default function AmnesiaAuthorApp() {
   const selectFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return
     try {
-      const entries = [...files].map((file) => [file.webkitRelativePath || file.name, file] as const)
-      teachableAuthoringSession.start(sourceInventoryFromFilesV1(entries))
+      // Same canonical relative keys as the ordinary viewer's directory input,
+      // so an authored recipe binds identically at capture time.
+      teachableAuthoringSession.start(sourceInventoryFromFilesV1(selectedFileKeysV1(files)))
       setStarted(true)
       setError(null)
     } catch (cause) {
