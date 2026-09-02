@@ -1,4 +1,5 @@
 import { declaredSensorSummaryV1 } from '../../teachable/authoring/sensorConfiguration'
+import { revisionRequestTextV1 } from '../../teachable/authoring/revisionRequest'
 import { HUMAN_REVIEW_ISSUES_V1, type HumanReviewIssueV1 } from '../../teachable/authoring/review'
 import { useRef, useState, useSyncExternalStore } from 'react'
 import { colors, fonts, radius, alpha } from '../../theme'
@@ -240,7 +241,7 @@ export default function TeachableLensPanel({
         <div style={{ padding: 14, background: colors.bgOverlay, borderRadius: radius.md, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ color: colors.textSecondary, fontSize: 12 }}>After reviewing a preview, ask Codex to use your feedback.</span>
           <button onClick={() => {
-            void navigator.clipboard.writeText('Revise the adapter using my latest Teachable Lens review.')
+            void navigator.clipboard.writeText(revisionRequestTextV1({ reviews: state.reviews, diagnostics: state.diagnostics, currentArtifact: state.currentArtifact, sensorConfiguration: state.sensorConfiguration, sensorSamples: preview?.sensorSamples }))
             setCopied(true)
             setTimeout(() => setCopied(false), 1500)
           }} style={{ padding: '7px 10px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgSurface, color: colors.textPrimary, cursor: 'pointer' }}>

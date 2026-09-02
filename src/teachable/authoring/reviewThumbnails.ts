@@ -1,3 +1,4 @@
+import { alpha, colors } from '../../theme'
 import { invertRowMajor4x4 } from '../../utils/matrix'
 import type { NormalizedCameraCalibrationV1, NormalizedFrameV1, NormalizedPointCloudV1 } from '../runtime/normalizedScene'
 
@@ -110,6 +111,40 @@ export async function renderReviewThumbnailV1(
   }
 }
 
+/** Top-down raster of the ego-frame points of one frame (x forward → up, y left → left). */
+export function renderBevThumbnailV1(frame: NormalizedFrameV1, size = 240, rangeMeters = 50): ReviewThumbnailV1 | null {
+  if (!canRenderReviewThumbnailsV1()) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const context = canvas.getContext('2d')
+  if (!context) return null
+  context.fillStyle = '#0b0f1a'
+  context.fillRect(0, 0, size, size)
+  context.strokeStyle = alpha(colors.textPrimary, 0.15)
+  context.beginPath(); context.moveTo(size / 2, 0); context.lineTo(size / 2, size); context.moveTo(0, size / 2); context.lineTo(size, size / 2); context.stroke()
+  const scale = size / (2 * rangeMeters)
+  let drawn = 0
+  for (const cloud of frame.pointClouds) {
+    if (cloud.frameId !== 'ego') continue
+    const step = Math.max(1, Math.ceil(cloud.pointCount / REVIEW_THUMBNAIL_MAX_POINTS_V1))
+    for (let index = 0; index < cloud.pointCount; index += step) {
+      const base = index * cloud.stride
+      const x = cloud.values[base]!, y = cloud.values[base + 1]!, z = cloud.values[base + 2]!
+      const px = size / 2 - y * scale
+      const py = size / 2 - x * scale
+      if (px < 0 || py < 0 || px >= size || py >= size) continue
+      const t = Math.min(1, Math.max(0, (z + 2) / 5))
+      context.fillStyle = `hsl(${Math.round(200 - 160 * t)}, 85%, 60%)`
+      context.fillRect(px, py, 1, 1)
+      drawn += 1
+    }
+  }
+  context.fillStyle = '#ffffff'
+  context.fillRect(size / 2 - 2, size / 2 - 4, 4, 8)
+  return { frameIndex: frame.index, sensorId: 'bev', width: size, height: size, projectedPoints: drawn, dataUrl: canvas.toDataURL('image/png') }
+}
+
 /** Thumbnails for every camera of every sampled frame, bounded to keep the panel light. */
 export async function renderReviewThumbnailsV1(
   frames: readonly NormalizedFrameV1[],
@@ -118,6 +153,10 @@ export async function renderReviewThumbnailsV1(
 ): Promise<readonly ReviewThumbnailV1[]> {
   const thumbnails: ReviewThumbnailV1[] = []
   for (const frame of frames) {
+    if (frame.pointClouds.some((cloud) => cloud.frameId === 'ego' && cloud.pointCount > 0)) {
+      const bev = renderBevThumbnailV1(frame)
+      if (bev && thumbnails.length < maxThumbnails) thumbnails.push(bev)
+    }
     for (const image of frame.cameraImages) {
       if (thumbnails.length >= maxThumbnails) return thumbnails
       const thumbnail = await renderReviewThumbnailV1(frame, image.sensorId, calibrations)
