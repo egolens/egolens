@@ -1,3 +1,4 @@
+import { renderReviewThumbnailsV1 } from './reviewThumbnails'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
@@ -174,6 +175,7 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
           : frames.map((frame) => frameCount(capability, frame)),
       ]))
       const sensorSamples = sensorSamplesV1(compiledRecipe.recipe.scene.sensors, frames)
+      const thumbnails = await renderReviewThumbnailsV1(frames, binding.scene.relations.cameraCalibrations)
       const preview: AuthoringTimelinePreviewV1 = {
         recipeName: compiledRecipe.recipe.identity.name,
         formatId: compiledRecipe.recipe.scene.formatId,
@@ -182,6 +184,7 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
         sampledTimestampsMicros: sampled.map((frame) => binding.scene.index.timestampsMicros[frame].toString()),
         capabilitySamples,
         sensorSamples,
+        ...(thumbnails.length > 0 ? { thumbnails } : {}),
       }
       const presentedFrames = new Map(requiredHumanReviewCapabilitiesV1(binding.scene.manifest.capabilities).map((capability) => [capability, new Set(sampled)]))
       const timeline = graph.outputs.get('timeline') as { readonly unit?: 'ns' | 'us' | 'ms' | 's' } | undefined

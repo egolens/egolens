@@ -1,3 +1,5 @@
+import type { ReviewThumbnailV1 } from './reviewThumbnails'
+
 export interface AuthoringTimelinePreviewV1 {
   readonly recipeName: string
   readonly formatId: string
@@ -8,6 +10,8 @@ export interface AuthoringTimelinePreviewV1 {
   readonly capabilitySamples?: Readonly<Record<string, readonly number[]>>
   /** Per declared sensor: point counts (lidar/radar) or image presence (camera) on each sampled frame. */
   readonly sensorSamples?: Readonly<Record<string, readonly number[]>>
+  /** Rendered camera frames with projected points for human review (browser only). */
+  readonly thumbnails?: readonly ReviewThumbnailV1[]
 }
 
 let preview: AuthoringTimelinePreviewV1 | null = null
