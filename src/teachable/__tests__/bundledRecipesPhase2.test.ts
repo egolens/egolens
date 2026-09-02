@@ -98,6 +98,21 @@ describe('bundled Phase 2 recipes', () => {
     }
   })
 
+  it('rejects the relational boxes3d form without an ego-pose timeline at compile time', () => {
+    const recipe = structuredClone(nuScenesCompiledRecipe.recipe)
+    const node = recipe.pipelines.boxes3d.nodes.find((entry) => entry.op === 'geometry.normalize_boxes3d') as unknown as { inputs: Record<string, string> }
+    expect(node.inputs.poses).toBe('egoPoses.result')
+    delete node.inputs.poses
+    expect(() => compileRecipeV1(recipe, bundledPhase2OperatorRegistry)).toThrow(AdapterCompileError)
+    try {
+      compileRecipeV1(recipe, bundledPhase2OperatorRegistry)
+    } catch (error) {
+      expect((error as AdapterCompileError).diagnostics).toContainEqual(expect.objectContaining({
+        code: 'OPERATOR_INPUTS_INVALID',
+      }))
+    }
+  })
+
   it('rejects graph input drift and Feather column-contract drift before binding', () => {
     const invalidInputs = structuredClone(argoverse2CompiledRecipe.recipe)
     const joinNode = invalidInputs.pipelines.egoPoses.nodes[0] as unknown as { inputs: Record<string, string> }

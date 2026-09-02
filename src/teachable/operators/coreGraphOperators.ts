@@ -915,7 +915,9 @@ function relationalBoxes(
     throw new Error('GRAPH_RELATIONAL_BOX_INPUT_INVALID')
   }
   const poses = inputs.poses as GraphPoseTimelineV1
-  if (poses?.kind !== 'pose-timeline') throw new Error('GRAPH_RELATIONAL_BOX_POSE_INVALID')
+  if (poses?.kind !== 'pose-timeline') {
+    throw new Error('GRAPH_RELATIONAL_BOX_POSE_INVALID: the relational geometry.normalize_boxes3d form requires inputs.poses bound to a relations.token_join result with output "pose-timeline"')
+  }
   const frameKeyField = String(params.frameKeyField)
   const instanceReferenceField = String(params.instanceReferenceField)
   const instanceKeyField = String(params.instanceKeyField)

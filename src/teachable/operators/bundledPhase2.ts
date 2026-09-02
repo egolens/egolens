@@ -196,7 +196,10 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     oneOf: [
       recordContract(['rows']),
       recordContract(['annotations']),
-      recordContract(['annotations', 'instances', 'categories']),
+      // The relational (token-linked) form always needs the ego-pose timeline:
+      // annotations are stored in the global frame and must be re-expressed in
+      // the ego frame. Declaring it required here rejects the omission at
+      // compile time instead of failing the first preview sample.
       recordContract(['annotations', 'instances', 'categories', 'poses']),
     ],
   }, {

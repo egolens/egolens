@@ -589,6 +589,18 @@ Body outline (claim only what is listed in
   viewer either. Fixed by sharing one canonical relative-key rule
   (`selectedFileKeys.ts`, reviewed author source) between both inputs. All
   three counted runs must be redone from a candidate that includes the fix.
+- 2026-09-02, candidate `b746795` (includes #48): Waymo passed again with
+  root-relative source globs (`phase9-waymo-00a31d8cd0ac9417`). The nuScenes
+  author then stopped after two rejected revisions: both omitted the `poses`
+  input of the relational `geometry.normalize_boxes3d` node, which the public
+  contract permitted (`annotations`/`instances`/`categories` variant) but the
+  implementation rejects at sample time with the bare hint
+  `GRAPH_RELATIONAL_BOX_POSE_INVALID`; the author then read "transactional
+  revisions" as requiring a retained candidate and gave up instead of
+  resubmitting. Fixed by requiring `poses` in that contract variant (compile-time
+  `OPERATOR_INPUTS_INVALID`), a descriptive sample-stage message, and an explicit
+  prompt rule that a rejected revision retains no candidate and the complete
+  corrected recipe must be resubmitted.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.

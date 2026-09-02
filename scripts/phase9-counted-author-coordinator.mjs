@@ -1018,6 +1018,7 @@ export function buildAuthorPrompt({ datasetId, caseId, capabilities, port, contr
     `The exact public tool catalog is: ${[...AMNESIA_PUBLIC_TOOLS].sort().join(', ')}.`,
     '',
     'Inspect first, read the public operator contract, and apply transactional revisions. After every accepted revision, use get_state and compare validation capabilities with every required capability above.',
+    'A rejected revision retains no candidate: correct the complete recipe and submit it again with apply_revision. When a diagnostic names a fixable input, operator, or field, resubmit rather than stopping.',
     'Use rendered /view and /review for the human-review controls. Finalize only after public sample validation proves the source facts and all required capabilities.',
     'If the public surface has a capability gap, use other public inspect modes and validator diagnostics to test a minimal hypothesis. If no successful public sample can establish it, stop with authoring-observability-gap and do not export.',
     'Never guess merely to obtain an export. The hidden judge is one-shot and unavailable here.',
