@@ -19,6 +19,11 @@
 (allow file-read* file-test-existence file-map-executable
   (literal "/")
   (literal "/tmp")
+  ; Codex probes /etc/codex/requirements.toml on startup and treats the
+  ; EPERM from a denied /etc symlink as fatal, unlike a plain ENOENT. Both
+  ; entries are top-level symlinks whose targets remain governed below.
+  (literal "/etc")
+  (literal "/var")
   (subpath "/System")
   (subpath "/Library/Apple")
   (subpath "/bin")
