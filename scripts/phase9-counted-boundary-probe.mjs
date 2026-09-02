@@ -137,7 +137,7 @@ const systemSocketWrite = await denied(async () => {
 check('system-socket-root-unrelated-write-denied', systemSocketWrite.denied,
   `open-write-${systemSocketWrite.code.toLowerCase()}`)
 
-const external = await denied(async () => await connect('93.184.216.34', 80))
+const external = await denied(async () => await connect('1.1.1.1', 80))
 check('broker-external-network-denied', external.denied, `connect-${external.code.toLowerCase()}`)
 
 try {
