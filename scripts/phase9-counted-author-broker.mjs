@@ -404,15 +404,19 @@ export async function createBrowserAdapter({
       return serialized(() => invoke(name, argumentsValue))
     },
     async view() {
+      // Review controls are the rendered "Accept <capability>" / "Reject
+      // <capability>" buttons; `checks` reports one entry per capability with
+      // its current verdict so the author can address it by capability name.
       const checks = []
-      const boxes = page.getByRole('checkbox')
-      for (let index = 0; index < await boxes.count(); index += 1) {
-        const box = boxes.nth(index)
-        if (await box.locator('xpath=ancestor::div[@id="egolens-public-webmcp-transport"]').count()) continue
-        checks.push({
-          name: await box.getAttribute('aria-label') ?? await box.locator('xpath=..').innerText(),
-          checked: await box.isChecked(),
-        })
+      const accepts = page.getByRole('button', { name: /^Accept /u })
+      for (let index = 0; index < await accepts.count(); index += 1) {
+        const button = accepts.nth(index)
+        const label = await button.getAttribute('aria-label')
+        if (!label) continue
+        const name = label.slice('Accept '.length)
+        const accepted = (await button.getAttribute('aria-pressed')) === 'true'
+        const rejected = (await page.getByRole('button', { name: `Reject ${name}`, exact: true }).getAttribute('aria-pressed')) === 'true'
+        checks.push({ name, checked: accepted, verdict: accepted ? 'accepted' : rejected ? 'rejected' : null })
       }
       return {
         text: (await page.locator('body').innerText()).slice(0, MAX_VISIBLE_TEXT),
@@ -421,9 +425,9 @@ export async function createBrowserAdapter({
       }
     },
     async review({ name, checked }) {
-      const box = page.getByRole('checkbox', { name, exact: true })
-      if (await box.count() !== 1) throw new Error('Rendered review control is missing or ambiguous.')
-      if (checked) await box.check(); else await box.uncheck()
+      const button = page.getByRole('button', { name: `${checked ? 'Accept' : 'Reject'} ${name}`, exact: true })
+      if (await button.count() !== 1) throw new Error('Rendered review control is missing or ambiguous.')
+      await button.click()
     },
     async export() {
       if (exported) throw new Error('Candidate export is one-shot.')

@@ -177,8 +177,8 @@ export default function TeachableLensPanel({
                   <div><span style={{ fontSize: 12, fontWeight: 600 }}>{capability}</span><span style={{ marginLeft: 8, color: colors.textDim, fontSize: 10 }}>frames {frames.join(', ')}</span></div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     {existing && <Pill tone={existing.verdict === 'accepted' ? 'good' : 'warning'}>{existing.verdict}</Pill>}
-                    <button onClick={() => review(capability, 'accepted')} style={{ border: `1px solid ${colors.border}`, background: 'transparent', color: colors.accent, borderRadius: radius.sm, cursor: 'pointer' }}>Accept</button>
-                    <button onClick={() => review(capability, 'rejected')} style={{ border: `1px solid ${colors.border}`, background: 'transparent', color: colors.danger, borderRadius: radius.sm, cursor: 'pointer' }}>Reject</button>
+                    <button aria-label={`Accept ${capability}`} aria-pressed={existing?.verdict === 'accepted'} onClick={() => review(capability, 'accepted')} style={{ border: `1px solid ${colors.border}`, background: 'transparent', color: colors.accent, borderRadius: radius.sm, cursor: 'pointer' }}>Accept</button>
+                    <button aria-label={`Reject ${capability}`} aria-pressed={existing?.verdict === 'rejected'} onClick={() => review(capability, 'rejected')} style={{ border: `1px solid ${colors.border}`, background: 'transparent', color: colors.danger, borderRadius: radius.sm, cursor: 'pointer' }}>Reject</button>
                   </div>
                 </div>
               })}

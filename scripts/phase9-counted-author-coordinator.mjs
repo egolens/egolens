@@ -1014,7 +1014,7 @@ export function buildAuthorPrompt({ datasetId, caseId, capabilities, port, contr
     `For every request pass this header: Authorization: Bearer ${controllerToken}`,
     'Use /usr/bin/curl with only these routes:',
     'GET /ready and GET /tools; POST /call with {"name":<one public tool>,"arguments":{...}};',
-    'GET /view; POST /review with {"name":<rendered checkbox label>,"checked":true}; POST /export with {}.',
+    'GET /view; POST /review with {"name":<capability listed under view.checks>,"checked":true} to accept that rendered capability (false rejects it); POST /export with {}.',
     `The exact public tool catalog is: ${[...AMNESIA_PUBLIC_TOOLS].sort().join(', ')}.`,
     '',
     'Inspect first, read the public operator contract, and apply transactional revisions. After every accepted revision, use get_state and compare validation capabilities with every required capability above.',
