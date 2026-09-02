@@ -1191,9 +1191,11 @@ test('trusted benchmark invocation rejects a served app inventory mismatch befor
 // cannot run inside the evidence-harness gate's own containment. The harness
 // gate requires exactly this one skip with this reason; the negative gate is
 // always executed as its own outer gate.
-const NESTED_SEATBELT_SKIP = typeof process.env.EGOLENS_BUILD_CONTAINMENT_TOKEN === 'string'
-  ? 'nested deny-default Seatbelt profiles are not permitted; the negative gate runs as its own outer gate'
-  : false
+const NESTED_SEATBELT_SKIP = process.platform !== 'darwin'
+  ? 'the reviewed negative gate requires macOS Seatbelt (/usr/bin/sandbox-exec)'
+  : typeof process.env.EGOLENS_BUILD_CONTAINMENT_TOKEN === 'string'
+    ? 'nested deny-default Seatbelt profiles are not permitted; the negative gate runs as its own outer gate'
+    : false
 
 test('negative gate executes the exact reviewed matrix and rejects caller-supplied reports', { skip: NESTED_SEATBELT_SKIP }, (context) => {
   const trustedTool = trustedToolFixture()

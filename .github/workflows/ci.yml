@@ -33,12 +33,15 @@ jobs:
         run: npm run build
       - name: Build isolated Adapter Amnesia author workspace
         run: npm run build:amnesia-author
-      - name: Production and isolated build-boundary scan
-        run: >-
-          npm run phase10:build-boundary --
-          --production dist
-          --author dist-amnesia-author
-          --expected-commit "$(git rev-parse HEAD)"
+      # The Phase 10 build-boundary scan is a macOS Seatbelt gate that an
+      # operator runs from a separate reviewed verifier checkout with an
+      # owner-only trust manifest (see benchmarks/phase10/README.md); it is not
+      # reproducible on this Linux runner. Only its syntax and schema loading
+      # are checked here.
+      - name: Phase 10 scripts parse and schemas compile
+        run: |
+          find scripts -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check
+          node -e "import('./scripts/lib/phase10-schema.mjs').then((m) => m.loadPhase10SchemasV1()).then((s) => console.log('schemas', s.schemaHashes.length))"
       - name: Bundle size report
         run: |
           {
