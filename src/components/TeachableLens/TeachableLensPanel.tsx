@@ -129,6 +129,16 @@ export default function TeachableLensPanel({
             {preview.capabilitySamples && <div style={{ marginTop: 8, fontSize: 11, color: colors.textDim, lineHeight: 1.6 }}>
               {Object.entries(preview.capabilitySamples).map(([capability, counts]) => `${capability}: [${counts.join(', ')}]`).join(' · ')}
             </div>}
+            {preview.thumbnails && preview.thumbnails.length > 0 && (
+              <div data-testid="review-thumbnails" style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                {preview.thumbnails.map((thumbnail) => (
+                  <figure key={`${thumbnail.frameIndex}:${thumbnail.sensorId}`} style={{ margin: 0 }}>
+                    <img src={thumbnail.dataUrl} alt={`${thumbnail.sensorId} frame ${thumbnail.frameIndex} with ${thumbnail.projectedPoints} projected points`} style={{ width: '100%', display: 'block', borderRadius: radius.sm, border: `1px solid ${colors.border}` }} />
+                    <figcaption style={{ fontSize: 10, color: colors.textDim, marginTop: 3 }}>{thumbnail.sensorId} · frame {thumbnail.frameIndex} · {thumbnail.projectedPoints} pts</figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
