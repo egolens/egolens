@@ -89,8 +89,7 @@ function dependencyManifest() {
   return { ...payload, manifestHash: sha256Colon(payload) }
 }
 
-function fixture(datasetId = 'waymo', suffix = datasetId) {
-  const runRoot = `/private/tmp/egolens-phase9-counted-${suffix}`
+function fixture(datasetId = 'waymo', suffix = datasetId, { evidenceSuffix = suffix, runRoot = `/private/tmp/egolens-phase9-counted-${suffix}` } = {}) {
   const applicationManifest = contentManifest({ 'amnesia.html': 'a' })
   const sourceManifest = contentManifest({ 'source.bin': `source-${suffix}` })
   const tools = currentTrustedToolManifest()
@@ -195,7 +194,7 @@ function fixture(datasetId = 'waymo', suffix = datasetId) {
     buildDependencyManifest: dependencyManifest(),
     protectedRoots: {
       captureConfigFile: `/private/tmp/egolens-phase9-config-${suffix}.json`,
-      evidenceRoot: `/private/tmp/egolens-phase9-evidence-${suffix}`,
+      evidenceRoot: `/private/tmp/egolens-phase9-evidence-${evidenceSuffix}`,
     },
     controllerState: { authMaterial: 'auth-json-only', destroyedAfter: true, freshBefore: true },
     trustedToolManifest: tools,
@@ -276,10 +275,16 @@ test('assembles three path-disjoint cases with the same exact build provenance',
   const report = assembleBoundaryReport({ candidateCommit: COMMIT, caseArtifacts: artifacts })
   assert.equal(report.passed, true)
   assert.equal(report.cases.length, 3)
-  const nested = ['waymo', 'nuscenes', 'argoverse2'].map((dataset) => fixture(dataset, dataset).artifact)
-  nested[1] = structuredClone(nested[1])
-  nested[1].policyDescriptor.protectedRoots.evidenceRoot = nested[0].policyDescriptor.protectedRoots.evidenceRoot
-  assert.throws(() => assembleBoundaryReport({ candidateCommit: COMMIT, caseArtifacts: nested }))
+  // One owner-only evidence root shared by all counted cases is the documented layout.
+  const shared = ['waymo', 'nuscenes', 'argoverse2'].map((dataset) => fixture(dataset, dataset, { evidenceSuffix: 'shared' }).artifact)
+  assert.equal(assembleBoundaryReport({ candidateCommit: COMMIT, caseArtifacts: shared }).passed, true)
+  // Case-private mounts must never overlap another case's (a run root inside
+  // the evidence root is already rejected per run by createBoundaryCaseArtifact).
+  const overlapping = ['waymo', 'nuscenes', 'argoverse2'].map((dataset) => fixture(dataset, dataset, {
+    evidenceSuffix: 'shared',
+    ...(dataset === 'nuscenes' ? { runRoot: '/private/tmp/egolens-phase9-counted-waymo' } : {}),
+  }).artifact)
+  assert.throws(() => assembleBoundaryReport({ candidateCommit: COMMIT, caseArtifacts: overlapping }), /disjoint boundary paths/u)
 })
 
 test('author prompt exposes public capabilities and no protected path or expected recipe hash', () => {

@@ -921,10 +921,22 @@ export function assembleBoundaryReport({ candidateCommit, caseArtifacts }) {
       [`control-${suffix}`, controller.CONTROL_ROOT],
       [`controller-home-${suffix}`, path.dirname(controller.CODEX_HOME_ROOT)],
       [`controller-tmp-${suffix}`, controller.SYSTEM_TMP],
-      [`evidence-${suffix}`, protectedRoots.evidenceRoot],
       [`capture-config-${suffix}`, protectedRoots.captureConfigFile],
     ]
   })))
+  // The owner-only evidence root is coordinator-owned and shared by every
+  // counted case of one PR (the runbook's single `$EVIDENCE`); each run keeps
+  // it disjoint from its own mounts, which the coordinator enforces per run.
+  // Across cases it must still stay outside every case-private mount.
+  assertDisjointBoundaryPaths(Object.fromEntries(caseArtifacts.flatMap((artifact) => {
+    const entry = artifact.boundaryCase
+    const suffix = `${entry.datasetId}-${entry.runId}`
+    return [
+      [`dataset-${suffix}`, entry.mounts.find((mount) => mount.name === 'dataset')?.canonicalPath],
+      [`output-${suffix}`, entry.mounts.find((mount) => mount.name === 'candidate-output')?.canonicalPath],
+      [`scratch-${suffix}`, entry.runtimeScratch.canonicalPath],
+    ]
+  }).concat([['evidence', caseArtifacts[0].policyDescriptor.protectedRoots.evidenceRoot]])))
   const payload = {
     kind: AMNESIA_BOUNDARY_REPORT_KIND,
     schemaVersion: 1,
