@@ -37,9 +37,11 @@ import type {
 import {
   decodeInterleavedRecordsV1,
   decodeNpzUint16V1,
+  decodeNpzRecordsV1,
   decodePcdRecordsV1,
   type InterleavedRecordsParamsV1,
   type NpzUint16ParamsV1,
+  type NpzRecordsParamsV1,
   type PcdRecordsParamsV1,
 } from './binaryReaders'
 import { decodeFeatherColumnsV1, interleaveFeatherNumericColumnsV1 } from './featherColumns'
@@ -170,7 +172,9 @@ export async function loadGraphBinaryV1(
         ? decodeInterleavedRecordsV1(bytes, collection.decoder.params, signal)
         : collection.decoder.kind === 'pcd'
           ? decodePcdRecordsV1(bytes, collection.decoder.params, signal)
-          : await decodeNpzUint16V1(bytes, collection.decoder.params, signal)
+          : collection.decoder.kind === 'npz-records'
+            ? await decodeNpzRecordsV1(bytes, collection.decoder.params, signal)
+            : await decodeNpzUint16V1(bytes, collection.decoder.params, signal)
       const retainedBytes = decoded instanceof Uint16Array ? decoded.byteLength : decoded.values.byteLength
       collection.retainedReleases.set(path, collection.context.resources.allocate(retainedBytes))
       return decoded
@@ -377,6 +381,10 @@ const pcdRecords: CoreOperatorImplementationV1 = (inputs, params, context) => ({
   records: binaryCollection(inputs, context, { kind: 'pcd', params: params as unknown as PcdRecordsParamsV1 }),
 })
 
+const npzRecords: CoreOperatorImplementationV1 = (inputs, params, context) => ({
+  records: binaryCollection(inputs, context, { kind: 'npz-records', params: params as unknown as NpzRecordsParamsV1 }),
+})
+
 const npzArray: CoreOperatorImplementationV1 = (inputs, params, context) => ({
   values: binaryCollection(inputs, context, { kind: 'npz-uint16', params: params as unknown as NpzUint16ParamsV1 }),
 })
@@ -389,18 +397,68 @@ const encodedBytes: CoreOperatorImplementationV1 = (inputs, params, context) => 
   return { bytes: { kind: 'encoded-collection', files: inputs.files, mimeType, context } as GraphEncodedCollectionV1 }
 }
 
-const jsonRecords: CoreOperatorImplementationV1 = async (inputs, _params, context) => {
+const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context) => {
   if (!Array.isArray(inputs.files)) throw new Error('GRAPH_READER_FILES_INVALID')
+  // layout: 'array' (default) reads a top-level array as rows; 'object-rows'
+  // turns each top-level key of an object into one row (key under keyField);
+  // 'file-row' makes the whole top-level object one row. pathField, when set,
+  // adds the source file path to every row so per-file sidecars can be joined.
+  const layout = String(params.layout ?? 'array')
+  const pathField = typeof params.pathField === 'string' ? params.pathField : null
+  const keyField = String(params.keyField ?? 'key')
   const rows: Readonly<Record<string, unknown>>[] = []
   for (const file of inputs.files as readonly { path: string }[]) {
     const bytes = await context.read(file.path)
+    let fileRows: Record<string, unknown>[]
     try {
-      rows.push(...decodeJsonRecordsV1<Record<string, unknown>>(new TextDecoder().decode(bytes)))
+      if (layout === 'array') {
+        fileRows = decodeJsonRecordsV1<Record<string, unknown>>(new TextDecoder().decode(bytes))
+      } else {
+        const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`expected a JSON object for layout ${layout}`)
+        const object = parsed as Record<string, unknown>
+        fileRows = layout === 'file-row'
+          ? [object]
+          : Object.entries(object).map(([key, value]) => (
+            typeof value === 'object' && value !== null && !Array.isArray(value)
+              ? { [keyField]: key, ...(value as Record<string, unknown>) }
+              : { [keyField]: key, value }
+          ))
+      }
     } catch (error) {
       throw new Error(
         `GRAPH_JSON_DECODE_FAILED: ${file.path}: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
+    for (const row of fileRows) rows.push(pathField ? { ...row, [pathField]: file.path } : row)
+  }
+  return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
+}
+
+/**
+ * Derives string fields from existing ones with regular expressions, e.g. the
+ * point-cloud path that belongs to a camera sidecar, or a frame key taken out
+ * of a filename. Records that do not match a required derivation are dropped.
+ */
+const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
+  if (!isRecords(inputs.rows)) throw new Error('GRAPH_RECORDS_INPUT_INVALID')
+  const derivations = (params.derive as readonly { field: string; from: string; pattern: string; replacement: string; required?: boolean }[]).map((entry) => ({
+    ...entry, regex: new RegExp(entry.pattern, 'u'),
+  }))
+  const rows: Record<string, unknown>[] = []
+  for (const row of inputs.rows.rows) {
+    const next: Record<string, unknown> = { ...row }
+    let keep = true
+    for (const derivation of derivations) {
+      const source = next[derivation.from]
+      const text = typeof source === 'string' ? source : source === undefined || source === null ? '' : String(source)
+      if (!derivation.regex.test(text)) {
+        if (derivation.required !== false) { keep = false; break }
+        continue
+      }
+      next[derivation.field] = text.replace(derivation.regex, derivation.replacement)
+    }
+    if (keep) rows.push(next)
   }
   return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
 }
@@ -571,6 +629,26 @@ const tokenJoin: CoreOperatorImplementationV1 = async (inputs, params) => {
   return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
 }
 
+/** Sensor pose from a calibration row: unit quaternion, or two basis axes (z = x × y). */
+function calibrationPose(calibration: Readonly<Record<string, unknown>>, params: Readonly<Record<string, unknown>>): number[] {
+  const translation = finiteTuple(calibration[String(params.translationField)], 3, String(params.translationField)) as [number, number, number]
+  if (params.rotationForm === 'axes') {
+    const axisFields = fieldList(params, 'axisFields', [])
+    if (axisFields.length !== 2) throw new Error('GRAPH_ROTATION_AXES_INVALID: axisFields needs the x-axis and y-axis field names')
+    const x = finiteTuple(calibration[axisFields[0]!], 3, axisFields[0]!)
+    const y = finiteTuple(calibration[axisFields[1]!], 3, axisFields[1]!)
+    const norm = (v: number[]) => { const length = Math.hypot(v[0]!, v[1]!, v[2]!); if (!(length > 0)) throw new Error('GRAPH_ROTATION_AXES_INVALID: zero-length axis'); return v.map((value) => value / length) }
+    const ux = norm(x)
+    const yOrtho = y.map((value, index) => value - (ux[0]! * y[0]! + ux[1]! * y[1]! + ux[2]! * y[2]!) * ux[index]!)
+    const uy = norm(yOrtho)
+    const uz = [ux[1]! * uy[2]! - ux[2]! * uy[1]!, ux[2]! * uy[0]! - ux[0]! * uy[2]!, ux[0]! * uy[1]! - ux[1]! * uy[0]!]
+    // Column-major 4×4 with columns = sensor axes expressed in the ego frame.
+    return [ux[0]!, ux[1]!, ux[2]!, 0, uy[0]!, uy[1]!, uy[2]!, 0, uz[0]!, uz[1]!, uz[2]!, 0, translation[0], translation[1], translation[2], 1]
+  }
+  const rotation = finiteTuple(calibration[String(params.quaternionField)], 4, String(params.quaternionField)) as [number, number, number, number]
+  return quaternionToMatrix4x4(rotation, translation)
+}
+
 function relationalPointCloudPlan(
   inputs: Readonly<Record<string, unknown>>,
   params: Readonly<Record<string, unknown>>,
@@ -588,8 +666,6 @@ function relationalPointCloudPlan(
   const sensorKeyField = String(params.sensorKeyField)
   const sensorIdField = String(params.sensorIdField)
   const keyframeField = String(params.keyframeField)
-  const quaternionField = String(params.quaternionField)
-  const translationField = String(params.translationField)
   const frameId = String(params.outputFrame)
   const files = new Set(inputs.records.files.map((file) => file.path))
   const calibrations = new Map(inputs.calibration.rows.map((row) => [String(row[calibrationKeyField]), row]))
@@ -601,13 +677,11 @@ function relationalPointCloudPlan(
     const calibration = calibrations.get(String(row[recordCalibrationKeyField]))
     const sensor = calibration ? sensors.get(String(calibration[calibrationSensorKeyField])) : undefined
     if (!calibration || !sensor) continue
-    const rotation = finiteTuple(calibration[quaternionField], 4, quaternionField) as [number, number, number, number]
-    const translation = finiteTuple(calibration[translationField], 3, translationField) as [number, number, number]
     bindings.push({
       frameKey: String(row[frameKeyField]), recordKey: String(row[recordKeyField]),
       timestamp: integerTimestamp(row[timestampField], timestampField), path,
       sensorId: String(sensor[sensorIdField]), frameId,
-      egoFromSensor: new Float64Array(quaternionToMatrix4x4(rotation, translation)),
+      egoFromSensor: new Float64Array(calibrationPose(calibration, params)),
     })
   }
   return { kind: 'binary-point-cloud-plan', records: inputs.records, bindings }
@@ -783,8 +857,6 @@ function relationalCameraPlan(
   const widthField = String(params.widthField)
   const heightField = String(params.heightField)
   const intrinsicMatrixField = String(params.intrinsicMatrixField)
-  const quaternionField = String(params.quaternionField)
-  const translationField = String(params.translationField)
   const sensors = new Map(inputs.sensors.rows.map((row) => [String(row[sensorKeyField]), row]))
   const calibrations = new Map<string, NormalizedCameraCalibrationV1>()
   const sensorTransforms: { sensorId: string; egoFromSensor: Float64Array }[] = []
@@ -800,9 +872,7 @@ function relationalCameraPlan(
     const sensor = sensors.get(String(calibration[calibrationSensorKeyField]))
     if (!sensor) continue
     const sensorId = String(sensor[sensorIdField])
-    const rotation = finiteTuple(calibration[quaternionField], 4, quaternionField) as [number, number, number, number]
-    const translation = finiteTuple(calibration[translationField], 3, translationField) as [number, number, number]
-    const egoFromSensor = new Float64Array(quaternionToMatrix4x4(rotation, translation))
+    const egoFromSensor = new Float64Array(calibrationPose(calibration, params))
     sensorTransforms.push({ sensorId, egoFromSensor })
     if (String(sensor[modalityField]) !== cameraModality) continue
     const matrix = calibration[intrinsicMatrixField]
@@ -1194,12 +1264,14 @@ const attachLabels: CoreOperatorImplementationV1 = async (inputs, params) => {
 
 export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOperatorImplementationV1>> = {
   'archive.npz_array': npzArray,
+  'archive.npz_records': npzRecords,
   'binary.interleaved_records': interleavedRecords,
   'binary.pcd_records': pcdRecords,
   'feather.columns': featherColumns,
   'parquet.columns': parquetColumns,
   'image.encoded_bytes': encodedBytes,
   'json.records': jsonRecords,
+  'records.derive': recordsDerive,
   'timeline.sort': timelineSort,
   'geometry.relative_poses': relativePoses,
   'geometry.range_image_to_cartesian': rangeImageToCartesian,
