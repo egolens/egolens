@@ -1,4 +1,5 @@
 import { declaredSensorSummaryV1 } from '../../teachable/authoring/sensorConfiguration'
+import { HUMAN_REVIEW_ISSUES_V1, type HumanReviewIssueV1 } from '../../teachable/authoring/review'
 import { useRef, useState, useSyncExternalStore } from 'react'
 import { colors, fonts, radius, alpha } from '../../theme'
 import type { TeachableAuthoringSessionV1 } from '../../teachable/authoring/AuthoringSession'
@@ -60,6 +61,7 @@ export default function TeachableLensPanel({
     }
   }
 
+  const [issues, setIssues] = useState<Partial<Record<HumanReviewCapabilityV1, HumanReviewIssueV1>>>({})
   const review = (capability: HumanReviewCapabilityV1, verdict: 'accepted' | 'rejected') => {
     const frames = state.validation?.presentedFrames[capability] ?? []
     try {
@@ -67,7 +69,7 @@ export default function TeachableLensPanel({
         capability,
         frameIndices: frames,
         verdict,
-        ...(verdict === 'rejected' ? { issue: 'other' as const } : {}),
+        ...(verdict === 'rejected' ? { issue: issues[capability] ?? 'other' } : {}),
       })
       setLocalError(null)
     } catch (error) {
@@ -178,7 +180,12 @@ export default function TeachableLensPanel({
                   <span style={{ fontWeight: 600, minWidth: 64 }}>{modality}</span>
                   <span>{state.currentArtifact ? `${ids.length}${expected !== undefined ? ` / ${expected} expected` : ''}` : `${expected ?? 0} expected`}</span>
                   {mismatch && <Pill tone="warning">mismatch</Pill>}
-                  <span style={{ color: colors.textDim, fontSize: 10 }}>{state.currentArtifact ? (ids.length > 0 ? ids.join(', ') : 'none declared') : 'waiting for a recipe'}</span>
+                  <span style={{ color: colors.textDim, fontSize: 10 }}>{state.currentArtifact ? (ids.length > 0 ? ids.map((id) => {
+                    const samples = preview?.sensorSamples?.[id]
+                    if (!samples) return id
+                    const bound = samples.some((value) => value > 0)
+                    return `${id}${bound ? ` [${samples.join(', ')}]` : ' (declared, never bound)'}`
+                  }).join(' · ') : 'none declared') : 'waiting for a recipe'}</span>
                 </div>
               })}
             </div>
@@ -197,6 +204,9 @@ export default function TeachableLensPanel({
                   <div style={{ display: 'flex', gap: 6 }}>
                     {existing && <Pill tone={existing.verdict === 'accepted' ? 'good' : 'warning'}>{existing.verdict}</Pill>}
                     <button aria-label={`Accept ${capability}`} aria-pressed={existing?.verdict === 'accepted'} onClick={() => review(capability, 'accepted')} style={{ border: `1px solid ${colors.border}`, background: 'transparent', color: colors.accent, borderRadius: radius.sm, cursor: 'pointer' }}>Accept</button>
+                    <select aria-label={`Issue for ${capability}`} value={issues[capability] ?? 'other'} onChange={(event) => setIssues({ ...issues, [capability]: event.currentTarget.value as HumanReviewIssueV1 })} style={{ fontSize: 11, background: colors.bgBase, color: colors.textSecondary, border: `1px solid ${colors.border}`, borderRadius: radius.sm }}>
+                      {HUMAN_REVIEW_ISSUES_V1.map((issue) => <option key={issue} value={issue}>{issue}</option>)}
+                    </select>
                     <button aria-label={`Reject ${capability}`} aria-pressed={existing?.verdict === 'rejected'} onClick={() => review(capability, 'rejected')} style={{ border: `1px solid ${colors.border}`, background: 'transparent', color: colors.danger, borderRadius: radius.sm, cursor: 'pointer' }}>Reject</button>
                   </div>
                 </div>

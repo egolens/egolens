@@ -6,6 +6,8 @@ export interface AuthoringTimelinePreviewV1 {
   readonly sampledTimestampsMicros: readonly string[]
   /** Visible per-sample output counts produced by the shared scene path. */
   readonly capabilitySamples?: Readonly<Record<string, readonly number[]>>
+  /** Per declared sensor: point counts (lidar/radar) or image presence (camera) on each sampled frame. */
+  readonly sensorSamples?: Readonly<Record<string, readonly number[]>>
 }
 
 let preview: AuthoringTimelinePreviewV1 | null = null

@@ -13,7 +13,7 @@ export const INSPECTION_LIMITS_V1 = Object.freeze({
   maxHexBytes: 4 * 1024,
 })
 
-export type SourceInspectionModeV1 = 'inventory' | 'metadata' | 'bytes' | 'text' | 'json' | 'table-schema'
+export type SourceInspectionModeV1 = 'inventory' | 'metadata' | 'bytes' | 'text' | 'json' | 'json-sample' | 'table-schema'
 
 export interface SourceInspectionRequestV1 {
   readonly mode: SourceInspectionModeV1
@@ -161,6 +161,44 @@ export function featherSchemaFromPrefixV1(prefix: Uint8Array, maxBytes: number):
   }))
 }
 
+/**
+ * Extracts complete leading elements of a top-level JSON array from a text
+ * prefix. Strings and escapes are respected; an element cut off by the prefix
+ * boundary is dropped and reported through `complete: false`.
+ */
+export function leadingJsonArrayRecordsV1(text: string, maximum: number): { readonly records: unknown[]; readonly complete: boolean } {
+  const start = text.indexOf('[')
+  if (start < 0) throw new Error('json-sample inspection requires a top-level JSON array.')
+  const records: unknown[] = []
+  let depth = 0, inString = false, escaped = false, elementStart = -1
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') { inString = true; if (depth === 0 && elementStart < 0) elementStart = index; continue }
+    if (char === '{' || char === '[') { if (depth === 0 && elementStart < 0) elementStart = index; depth += 1; continue }
+    if (char === '}' || char === ']') {
+      if (depth === 0 && char === ']') {
+        if (elementStart >= 0) records.push(JSON.parse(text.slice(elementStart, index)))
+        return { records, complete: true }
+      }
+      depth -= 1
+      continue
+    }
+    if (depth === 0 && elementStart < 0 && !/[\s,]/u.test(char)) elementStart = index
+    if (depth === 0 && (char === ',' ) && elementStart >= 0) {
+      records.push(JSON.parse(text.slice(elementStart, index)))
+      elementStart = -1
+      if (records.length >= maximum) return { records, complete: false }
+    }
+  }
+  return { records, complete: false }
+}
+
 export async function inspectSourceInventoryV1(
   inventory: SourceInventoryV1,
   request: SourceInspectionRequestV1,
@@ -219,6 +257,20 @@ export async function inspectSourceInventoryV1(
   }
   if (request.mode === 'table-schema') {
     throw new Error(`CAPABILITY_GAP: table schema inspection does not support ${entry.extension || 'this file type'} yet.`)
+  }
+  if (request.mode === 'json-sample') {
+    // Leading records of a large JSON array without reading the whole file.
+    const prefix = new Uint8Array(await byteSource.read(entry.path, { end: Math.min(entry.size, maxBytes), signal }))
+    abortIfNeeded(signal)
+    const maximum = boundedInteger(request.maxValues, 8, 64, 'maxValues')
+    const sample = leadingJsonArrayRecordsV1(new TextDecoder('utf-8').decode(prefix), maximum)
+    return {
+      mode: request.mode,
+      sessionId: inventory.sessionId,
+      path: entry.path,
+      truncated: sample.complete === false || entry.size > prefix.length,
+      data: { byteLength: entry.size, recordCount: sample.records.length, schema: schemaOfJson(sample.records), records: sample.records },
+    }
   }
   if ((request.mode === 'json' || request.mode === 'text') && entry.size > maxBytes) {
     throw new Error(`${request.mode} inspection requires the complete file to fit within maxBytes (${entry.size} > ${maxBytes}).`)

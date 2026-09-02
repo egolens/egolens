@@ -21,6 +21,10 @@ export type HumanReviewIssueV1 =
   | 'wrong-labels'
   | 'other'
 
+export const HUMAN_REVIEW_ISSUES_V1: readonly HumanReviewIssueV1[] = Object.freeze([
+  'upside-down', 'mirrored', 'wrong-scale', 'drift', 'misaligned', 'out-of-sync', 'wrong-labels', 'other',
+])
+
 export interface HumanReviewItemV1 {
   readonly recipeHash: string
   readonly capability: HumanReviewCapabilityV1

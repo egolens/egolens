@@ -101,6 +101,22 @@ export function sparseOutputDiagnosticsV1(input: {
   return diagnostics
 }
 
+/**
+ * Per-sensor evidence on the sampled frames: point counts for lidar/radar
+ * sensors and image presence (1/0) for cameras. A declared sensor whose row
+ * is all zeros is declared but never bound.
+ */
+export function sensorSamplesV1(
+  sensors: readonly { readonly id: string; readonly modality: 'lidar' | 'radar' | 'camera' }[],
+  frames: readonly NormalizedFrameV1[],
+): Readonly<Record<string, readonly number[]>> {
+  return Object.fromEntries(sensors.map((sensor) => [sensor.id, frames.map((frame) => {
+    if (sensor.modality === 'camera') return frame.cameraImages.some((image) => image.sensorId === sensor.id) ? 1 : 0
+    const clouds = sensor.modality === 'radar' ? frame.radarPointClouds : frame.pointClouds
+    return clouds.filter((cloud) => cloud.sensorId === sensor.id).reduce((total, cloud) => total + cloud.pointCount, 0)
+  })]))
+}
+
 function frameCount(capability: string, frame: NormalizedFrameV1): number {
   if (capability === 'timeline' || capability === 'segmentMetadata') return 1
   if (capability === 'egoPoses') return frame.worldFromEgo ? 1 : 0
@@ -157,6 +173,7 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
           ? sampled.map(() => binding.scene.relations.trajectories.size)
           : frames.map((frame) => frameCount(capability, frame)),
       ]))
+      const sensorSamples = sensorSamplesV1(compiledRecipe.recipe.scene.sensors, frames)
       const preview: AuthoringTimelinePreviewV1 = {
         recipeName: compiledRecipe.recipe.identity.name,
         formatId: compiledRecipe.recipe.scene.formatId,
@@ -164,6 +181,7 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
         sampledFrames: sampled,
         sampledTimestampsMicros: sampled.map((frame) => binding.scene.index.timestampsMicros[frame].toString()),
         capabilitySamples,
+        sensorSamples,
       }
       const presentedFrames = new Map(requiredHumanReviewCapabilitiesV1(binding.scene.manifest.capabilities).map((capability) => [capability, new Set(sampled)]))
       const timeline = graph.outputs.get('timeline') as { readonly unit?: 'ns' | 'us' | 'ms' | 's' } | undefined
@@ -182,6 +200,8 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
         validationSummary: {
           passed: true, stages: ['schema', 'compile', 'bind', 'sample', 'cross-output'],
           sampleFrames: sampled, frameCount: binding.scene.index.timestampsMicros.length,
+          // Which declared sensors actually carried data on the sampled frames.
+          sensorSamples: Object.fromEntries(Object.entries(sensorSamples).map(([id, samples]) => [id, [...samples]])),
         },
         observableEffect: `Rendered ${sampled.length} validation frame${sampled.length === 1 ? '' : 's'} from the executable graph.`,
         commit() {

@@ -70,7 +70,7 @@ export async function registerTeachableWebMcpToolsV1(
       inputSchema: {
         type: 'object',
         properties: {
-          mode: { enum: ['inventory', 'metadata', 'bytes', 'text', 'json', 'table-schema'] },
+          mode: { enum: ['inventory', 'metadata', 'bytes', 'text', 'json', 'json-sample', 'table-schema'] },
           path: { type: 'string', maxLength: 512 },
           maxBytes: { type: 'integer', minimum: 1, maximum: 65536 },
           maxValues: { type: 'integer', minimum: 1, maximum: 512 },
