@@ -293,7 +293,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
       }, [
         'pathField', 'frameKeyField', 'timestampField', 'recordCalibrationKeyField', 'calibrationKeyField',
         'calibrationSensorKeyField', 'sensorKeyField', 'sensorIdField', 'modalityField', 'cameraModality',
-        'keyframeField', 'widthField', 'heightField', 'intrinsicMatrixField', 'quaternionField',
+        'widthField', 'heightField', 'intrinsicMatrixField', 'quaternionField',
         'translationField', 'frameIdSuffix', 'defaultWidth', 'defaultHeight',
       ]),
       closedParams({
@@ -330,6 +330,8 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     layout: { enum: ['array', 'object-rows', 'file-row'] },
     pathField: { type: 'string', minLength: 1, maxLength: 256 },
     keyField: { type: 'string', minLength: 1, maxLength: 256 },
+    rootPath: { type: 'string', minLength: 1, maxLength: 512 },
+    flatten: { type: 'boolean' },
   }, []), recordContract(['rows'])],
   ['records.derive', recordContract(['rows']), closedParams({
     derive: {
@@ -489,7 +491,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
       }, [
         'output', 'sampleDataCalibrationKeyField', 'calibrationKeyField', 'calibrationSensorKeyField',
         'sensorKeyField', 'sensorIdField', 'preferredSensorId', 'poseReferenceField', 'poseKeyField',
-        'frameKeyField', 'keyframeField', 'quaternionField', 'translationField',
+        'frameKeyField', 'quaternionField', 'translationField',
       ]),
     ],
   }, { oneOf: [recordContract(['rows']), recordContract(['poses'])] }],
@@ -526,7 +528,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         outputFrame: { type: 'string', minLength: 1, maxLength: 96 },
       }, [
         'mode', 'pathField', 'frameKeyField', 'recordKeyField', 'timestampField', 'recordCalibrationKeyField',
-        'calibrationKeyField', 'calibrationSensorKeyField', 'sensorKeyField', 'sensorIdField', 'keyframeField',
+        'calibrationKeyField', 'calibrationSensorKeyField', 'sensorKeyField', 'sensorIdField',
         'quaternionField', 'translationField', 'outputFrame',
       ]),
       closedParams({

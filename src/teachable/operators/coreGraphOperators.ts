@@ -416,12 +416,28 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
       } else {
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`expected a JSON object for layout ${layout}`)
-        const object = parsed as Record<string, unknown>
+        let object = parsed as Record<string, unknown>
+        // rootPath descends into a nested object (dotted keys) before the
+        // layout applies; flatten turns nested objects into dotted keys so a
+        // calibration like { view: { origin } } is addressable as "view.origin".
+        if (typeof params.rootPath === 'string' && params.rootPath.length > 0) {
+          for (const segment of params.rootPath.split('.')) {
+            const next = object[segment]
+            if (typeof next !== 'object' || next === null || Array.isArray(next)) throw new Error(`rootPath "${params.rootPath}" does not name a nested object`)
+            object = next as Record<string, unknown>
+          }
+        }
+        const flatten = params.flatten === true
+        const flat = (value: Record<string, unknown>, prefix = ''): Record<string, unknown> => Object.fromEntries(Object.entries(value).flatMap(([key, entry]) => (
+          flatten && typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+            ? Object.entries(flat(entry as Record<string, unknown>, `${prefix}${key}.`))
+            : [[`${prefix}${key}`, entry]]
+        )))
         fileRows = layout === 'file-row'
-          ? [object]
+          ? [flat(object)]
           : Object.entries(object).map(([key, value]) => (
             typeof value === 'object' && value !== null && !Array.isArray(value)
-              ? { [keyField]: key, ...(value as Record<string, unknown>) }
+              ? { [keyField]: key, ...flat(value as Record<string, unknown>) }
               : { [keyField]: key, value }
           ))
       }
@@ -580,7 +596,7 @@ function poseTimelineFromTokenRelations(
   const poseReferenceField = String(params.poseReferenceField)
   const poseKeyField = String(params.poseKeyField)
   const frameKeyField = String(params.frameKeyField)
-  const keyframeField = String(params.keyframeField)
+  const keyframeField = typeof params.keyframeField === 'string' ? params.keyframeField : null
   const quaternionField = String(params.quaternionField)
   const translationField = String(params.translationField)
   const calibration = new Map(inputs.calibration.rows.map((row) => [String(row[calibrationKey]), row]))
@@ -588,7 +604,7 @@ function poseTimelineFromTokenRelations(
   const poses = new Map(inputs.poses.rows.map((row) => [String(row[poseKeyField]), row]))
   const absoluteWorldFromEgoByFrameKey = new Map<string, Float64Array>()
   for (const row of inputs.sampleData.rows) {
-    if (row[keyframeField] !== true) continue
+    if (keyframeField && row[keyframeField] !== true) continue
     const calibrated = calibration.get(String(row[sampleDataKey]))
     const sensor = calibrated ? sensors.get(String(calibrated[calibrationSensorKey])) : undefined
     if (!sensor || String(sensor[sensorIdField]) !== preferredSensorId) continue
@@ -665,7 +681,7 @@ function relationalPointCloudPlan(
   const calibrationSensorKeyField = String(params.calibrationSensorKeyField)
   const sensorKeyField = String(params.sensorKeyField)
   const sensorIdField = String(params.sensorIdField)
-  const keyframeField = String(params.keyframeField)
+  const keyframeField = typeof params.keyframeField === 'string' ? params.keyframeField : null
   const frameId = String(params.outputFrame)
   const files = new Set(inputs.records.files.map((file) => file.path))
   const calibrations = new Map(inputs.calibration.rows.map((row) => [String(row[calibrationKeyField]), row]))
@@ -673,7 +689,7 @@ function relationalPointCloudPlan(
   const bindings: GraphBinaryPointCloudPlanV1['bindings'][number][] = []
   for (const row of inputs.sampleData.rows) {
     const path = String(row[pathField])
-    if (!files.has(path) || row[keyframeField] !== true) continue
+    if (!files.has(path) || (keyframeField && row[keyframeField] !== true)) continue
     const calibration = calibrations.get(String(row[recordCalibrationKeyField]))
     const sensor = calibration ? sensors.get(String(calibration[calibrationSensorKeyField])) : undefined
     if (!calibration || !sensor) continue
@@ -683,6 +699,11 @@ function relationalPointCloudPlan(
       sensorId: String(sensor[sensorIdField]), frameId,
       egoFromSensor: new Float64Array(calibrationPose(calibration, params)),
     })
+  }
+  if (bindings.length === 0 && files.size > 0 && inputs.sampleData.rows.length > 0) {
+    const firstRow = inputs.sampleData.rows[0]!
+    const firstFile = inputs.records.files[0]?.path ?? 'none'
+    throw new Error(`GRAPH_POINT_RELATION_UNBOUND: none of ${inputs.sampleData.rows.length} sampleData rows bound a record file (${files.size} files). Row ${pathField}="${String(firstRow[pathField])}" must equal an inventory-relative record path such as "${firstFile}", its ${recordCalibrationKeyField}="${String(firstRow[recordCalibrationKeyField])}" must match a calibration ${calibrationKeyField}, and that calibration's ${calibrationSensorKeyField} must match a sensors ${sensorKeyField}${keyframeField ? `; only rows with ${keyframeField} === true count` : ''}.`)
   }
   return { kind: 'binary-point-cloud-plan', records: inputs.records, bindings }
 }
@@ -853,7 +874,7 @@ function relationalCameraPlan(
   const pathField = String(params.pathField)
   const frameKeyField = String(params.frameKeyField)
   const timestampField = String(params.timestampField)
-  const keyframeField = String(params.keyframeField)
+  const keyframeField = typeof params.keyframeField === 'string' ? params.keyframeField : null
   const widthField = String(params.widthField)
   const heightField = String(params.heightField)
   const intrinsicMatrixField = String(params.intrinsicMatrixField)
@@ -863,7 +884,7 @@ function relationalCameraPlan(
   const calibrationByKey = new Map(inputs.calibration.rows.map((row) => [String(row[calibrationKeyField]), row]))
   const dimensionsByCalibration = new Map<string, readonly [number, number]>()
   for (const row of inputs.sampleData.rows) {
-    if (row[keyframeField] !== true) continue
+    if (keyframeField && row[keyframeField] !== true) continue
     dimensionsByCalibration.set(String(row[recordCalibrationKeyField]), [
       Number(row[widthField]) || Number(params.defaultWidth), Number(row[heightField]) || Number(params.defaultHeight),
     ])
@@ -891,7 +912,7 @@ function relationalCameraPlan(
     const path = String(row[pathField])
     const calibration = calibrationByKey.get(String(row[recordCalibrationKeyField]))
     const sensor = calibration ? sensors.get(String(calibration[calibrationSensorKeyField])) : undefined
-    if (!files.has(path) || row[keyframeField] !== true || !sensor || String(sensor[modalityField]) !== cameraModality) return []
+    if (!files.has(path) || (keyframeField && row[keyframeField] !== true) || !sensor || String(sensor[modalityField]) !== cameraModality) return []
     return [{
       frameKey: String(row[frameKeyField]), timestamp: integerTimestamp(row[timestampField], timestampField),
       path, sensorId: String(sensor[sensorIdField]),
