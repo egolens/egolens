@@ -574,100 +574,6 @@ Body outline (claim only what is listed in
   absolute paths. They live outside the repo under the local P7 work root
   (`protected/<dataset>/`, `public/<dataset>/`) and must be regenerated
   (delete first; creation is exclusive) if the verifier is re-pinned.
-- 2026-09-02, candidate `4b98462`: the Waymo counted run passed end to end
-  after #47 (`phase9-waymo-edfef07cb97a3e26`, recipe
-  `sha256:7f2adfc2…0dc279`). The nuScenes counted run then stopped with
-  `authoring-observability-gap`: every path-joined output (pointClouds,
-  radarPointClouds, cameraImages, boxes2d, lidarSegmentation) was disabled as
-  `OPTIONAL_OUTPUT_UNBOUND` while the token-joined outputs validated. **Root
-  cause:** the isolated author workspace keyed its inventory by raw
-  `webkitRelativePath` (`nuscenes/samples/...`) while the ordinary viewer's
-  `scanSelectedFiles` drops the selected wrapper folder (`samples/...`), so
-  `sample_data.filename` never matched a source path inside the author build,
-  and the blind-authored recipes (including the passed Waymo recipe, which used
-  `waymo/<component>/*.parquet` globs) would not bind at capture time in the
-  viewer either. Fixed by sharing one canonical relative-key rule
-  (`selectedFileKeys.ts`, reviewed author source) between both inputs. All
-  three counted runs must be redone from a candidate that includes the fix.
-- 2026-09-02, candidate `b746795` (includes #48): Waymo passed again with
-  root-relative source globs (`phase9-waymo-00a31d8cd0ac9417`). The nuScenes
-  author then stopped after two rejected revisions: both omitted the `poses`
-  input of the relational `geometry.normalize_boxes3d` node, which the public
-  contract permitted (`annotations`/`instances`/`categories` variant) but the
-  implementation rejects at sample time with the bare hint
-  `GRAPH_RELATIONAL_BOX_POSE_INVALID`; the author then read "transactional
-  revisions" as requiring a retained candidate and gave up instead of
-  resubmitting. Fixed by requiring `poses` in that contract variant (compile-time
-  `OPERATOR_INPUTS_INVALID`), a descriptive sample-stage message, and an explicit
-  prompt rule that a rejected revision retains no candidate and the complete
-  corrected recipe must be resubmitted.
-- 2026-09-02, candidate `5aaa1cd` (includes #49): Waymo passed
-  (`phase9-waymo-33f451d8da4f211c`). The nuScenes author validated 9 of 10
-  capabilities and stopped on `lidarSegmentation`: the public
-  `labels.attach_by_point_index` contract offered only a pose-less two-input
-  form (which for per-file labels can never bind, having no index) and a
-  five-input form that forces panoptic inputs; the author's indexed attempt
-  used the lidarseg `token` instead of `sample_data_token` and a taxonomy id
-  that no `scene.taxonomies` entry declares, and every mismatch surfaced only
-  as `OPTIONAL_OUTPUT_UNBOUND`. Fixed by adding the
-  `pointClouds`/`labels`/`labelIndex` contract variant, failing the sample
-  with `GRAPH_LABEL_INDEX_UNMATCHED` (naming both keys) when selected label
-  files reach no bound point-cloud record, and a compile-time
-  `TAXONOMY_UNDECLARED` diagnostic for operator taxonomy references.
-- 2026-09-02, candidate `7f08fb0` (includes #50): Waymo passed
-  (`phase9-waymo-268d0e208f6ae508`) and the nuScenes author completed the
-  whole public flow for the first time (10/10 capabilities, 8 accepted
-  reviews, finalize, one export), but the coordinator rejected the export:
-  the author never declared `provenance`, the session defaulted the finalized
-  artifact to `author: "imported"`, and the coordinator requires `"codex"`.
-  Neither the prompt nor the public apply path had asked for it. Fixed by
-  rejecting any revision without `provenance.author` at apply time
-  (`PROVENANCE_AUTHOR_REQUIRED`) and stating the requirement in the author
-  prompt.
-- 2026-09-02, candidate `83f5168` (includes #51): all three counted author
-  runs passed (`phase9-waymo-8de0a6d57aee1df7`,
-  `phase9-nuscenes-5ea9121510a26be8`, `phase9-argoverse2-1ab5fbff77743018`);
-  the nuScenes and Argoverse 2 authors completed the full public flow on the
-  first attempt after #48–#51. `assemble-report` then rejected the three
-  cases because it required every case's protected evidence root to be
-  disjoint from the others', while the runbook prescribes one owner-only
-  `$EVIDENCE` for the PR. Fixed in the verifier only (the shared evidence root
-  is coordinator-owned; case-private mounts must still stay outside it and
-  each other); the candidate and its counted artifacts are unchanged.
-- 2026-09-02, candidate `19c27e8` (includes #52): the verifier's
-  `verifyPolicyDescriptor` binds every boundary-case artifact to the exact
-  trusted tool manifest (Seatbelt profiles, coordinator scripts and library,
-  reviewed author sources) of the verifier checkout, so #52 forced all three
-  counted runs to be redone. The Waymo author then stopped after three
-  rejected revisions: it bound `outputs` to `<pipeline>.<node>.<output>`
-  (`pc.convert.pointClouds`), which the compiler accepted and the graph kernel
-  rejected at sample time with the bare `GRAPH_REFERENCE_UNRESOLVED`. Fixed by
-  a compile-time `OUTPUT_BINDING_INVALID` diagnostic (outputs bind exactly
-  `<pipelineId>.result`) and an unresolved-reference message that names the
-  missing key, the available keys, and the reference grammar.
-- 2026-09-02, candidate `c6fe467` (includes #53): all three counted runs
-  passed (`phase9-waymo-ff36a54aa97e7ffe`, `phase9-nuscenes-0647a1da90ec3c0e`,
-  `phase9-argoverse2-3af3d0adb5bd6097`), the boundary report assembled, and
-  the build boundary reproduced. Capturing the recipes then needed two
-  corrections outside the repo: the Phase 9 capture must open a served source
-  (`?dataset=<id>&data=<loopback origin>&scene=<oracle scene>`; the
-  `--local-source` path is the Phase 10 counted-preflight mode and demands a
-  `--preflight-recipe`), and the Waymo capture rejected the authored recipe
-  because its `scene.formatId` was `waymo-modular-parquet` while the capture
-  installs recipes only against the active source case (`waymo`). Nothing had
-  told the author that; fixed by stating it in the prompt and failing the
-  coordinator's post-export check with the exact reason. All three counted
-  runs are redone because the coordinator is part of the trusted tool manifest.
-- 2026-09-02, candidate `fa1fa62` (includes #54): Waymo
-  (`phase9-waymo-a1a43d6279d8678a`, `scene.formatId` now `waymo`) and nuScenes
-  (`phase9-nuscenes-463a001688c1c649`) passed; the Argoverse 2 author stopped
-  after 24 rejected revisions because the public `table-schema` inspection
-  refused `.feather` files (`CAPABILITY_GAP`), so it could not learn the
-  calibration and annotation column names and fell back to guessing the
-  camera binding form. Earlier AV2 authors had succeeded only from prior
-  knowledge of the AV2 schema. Fixed by decoding the leading Arrow IPC schema
-  message from a bounded prefix (record batches are never read) and exposing
-  column names, logical types, and nullability through the same inspect mode.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
@@ -701,3 +607,13 @@ source bytes for the remaining Spec 014 generalization ladder.
 
 - 2026-09-02T07:55Z: counted run restarted from main df92b72.
 - 2026-09-02T08:18Z: counted run restarted from main 6e6d520.
+- 2026-09-02T11:30Z: Codex limit lifted; verifier re-pinned to main 1342947; counted run restarted.
+- 2026-09-02T11:55Z: verifier re-pinned to main 186d3dc; counted waymo run restarted.
+- 2026-09-02T12:26Z: verifier re-pinned to main eae334f; counted waymo run restarted.
+- 2026-09-02T12:49Z: verifier re-pinned to main 2bf34c5; counted waymo run restarted.
+- 2026-09-02T13:29Z: verifier re-pinned to main 01be02e; counted waymo run restarted.
+- 2026-09-02T13:56Z: verifier re-pinned to main df6dd2d; counted waymo run restarted.
+- 2026-09-02T14:45Z: verifier re-pinned to main ab13d11; counted waymo run restarted.
+- 2026-09-02T14:57Z: verifier re-pinned to main 5dfb729; counted waymo run restarted.
+- 2026-09-02T15:50Z: verifier re-pinned to main f68ee91; counted waymo run restarted.
+- 2026-09-02T16:31Z: verifier re-pinned to main 0e99e75; counted waymo run restarted.
