@@ -645,6 +645,19 @@ Body outline (claim only what is listed in
   a compile-time `OUTPUT_BINDING_INVALID` diagnostic (outputs bind exactly
   `<pipelineId>.result`) and an unresolved-reference message that names the
   missing key, the available keys, and the reference grammar.
+- 2026-09-02, candidate `c6fe467` (includes #53): all three counted runs
+  passed (`phase9-waymo-ff36a54aa97e7ffe`, `phase9-nuscenes-0647a1da90ec3c0e`,
+  `phase9-argoverse2-3af3d0adb5bd6097`), the boundary report assembled, and
+  the build boundary reproduced. Capturing the recipes then needed two
+  corrections outside the repo: the Phase 9 capture must open a served source
+  (`?dataset=<id>&data=<loopback origin>&scene=<oracle scene>`; the
+  `--local-source` path is the Phase 10 counted-preflight mode and demands a
+  `--preflight-recipe`), and the Waymo capture rejected the authored recipe
+  because its `scene.formatId` was `waymo-modular-parquet` while the capture
+  installs recipes only against the active source case (`waymo`). Nothing had
+  told the author that; fixed by stating it in the prompt and failing the
+  coordinator's post-export check with the exact reason. All three counted
+  runs are redone because the coordinator is part of the trusted tool manifest.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
