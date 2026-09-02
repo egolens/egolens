@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { timingSafeEqual } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -314,6 +315,20 @@ async function installPublicToolTransport(context) {
   }, { allowedNames: COUNTED_PUBLIC_TOOLS })
 }
 
+// The candidate output mount is write-only for the broker (Seatbelt denies
+// every file-read* on it), so the export must be a plain exclusive create plus
+// data writes. Playwright's download.saveAs() goes through copyfile(3), whose
+// extra operations on the destination fail with EPERM under that profile.
+export async function writeCandidateExport(download, outputFile) {
+  const failure = await download.failure()
+  if (failure) throw new Error(`Candidate export download failed: ${failure}`)
+  const sourcePath = await download.path()
+  await pipeline(
+    createReadStream(sourcePath),
+    createWriteStream(outputFile, { flags: 'wx', mode: 0o600 }),
+  )
+}
+
 export async function createBrowserAdapter({
   playwrightPath,
   chromePath,
@@ -434,7 +449,7 @@ export async function createBrowserAdapter({
       const pending = page.waitForEvent('download')
       await page.getByRole('button', { name: 'Export JSON', exact: true }).click()
       const download = await pending
-      await download.saveAs(outputFile)
+      await writeCandidateExport(download, outputFile)
       exported = true
       return { filename: path.basename(outputFile) }
     },
