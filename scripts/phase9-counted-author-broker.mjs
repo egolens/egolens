@@ -338,6 +338,7 @@ export async function createBrowserAdapter({
   outputFile,
   origin,
   browserToken,
+  sensorConfiguration = null,
 }) {
   const playwright = await import(pathToFileURL(playwrightPath).href)
   const chromium = playwright.chromium ?? playwright.default?.chromium
@@ -375,6 +376,15 @@ export async function createBrowserAdapter({
   const page = pages[0] ?? await context.newPage()
   await page.goto(`${origin}/amnesia.html`, { waitUntil: 'networkidle' })
   await page.locator('input[type=file]').setInputFiles(datasetRoot)
+  // The workspace scans the folder and then asks for the sensor layout; the
+  // operator's confirmed counts replace the inferred defaults before start.
+  await page.getByTestId('sensor-configuration').waitFor({ timeout: 60_000 })
+  for (const modality of ['camera', 'lidar', 'radar']) {
+    if (sensorConfiguration && Number.isSafeInteger(sensorConfiguration[modality])) {
+      await page.getByLabel(`${modality} sensor count`, { exact: true }).fill(String(sensorConfiguration[modality]))
+    }
+  }
+  await page.getByRole('button', { name: 'Confirm and start authoring', exact: true }).click()
   await page.waitForFunction((expected) => {
     const definitions = document.querySelector('#egolens-public-webmcp-definitions')?.value
     const rejected = document.querySelector('#egolens-public-webmcp-rejected')?.value
