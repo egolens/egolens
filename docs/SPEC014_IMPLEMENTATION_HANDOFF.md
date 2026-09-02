@@ -624,6 +624,16 @@ Body outline (claim only what is listed in
   rejecting any revision without `provenance.author` at apply time
   (`PROVENANCE_AUTHOR_REQUIRED`) and stating the requirement in the author
   prompt.
+- 2026-09-02, candidate `83f5168` (includes #51): all three counted author
+  runs passed (`phase9-waymo-8de0a6d57aee1df7`,
+  `phase9-nuscenes-5ea9121510a26be8`, `phase9-argoverse2-1ab5fbff77743018`);
+  the nuScenes and Argoverse 2 authors completed the full public flow on the
+  first attempt after #48–#51. `assemble-report` then rejected the three
+  cases because it required every case's protected evidence root to be
+  disjoint from the others', while the runbook prescribes one owner-only
+  `$EVIDENCE` for the PR. Fixed in the verifier only (the shared evidence root
+  is coordinator-owned; case-private mounts must still stay outside it and
+  each other); the candidate and its counted artifacts are unchanged.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
