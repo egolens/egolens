@@ -793,16 +793,17 @@ async function prepareExactApplication({ candidateCommit, runRoot, runtime }) {
     const buildForbiddenRead = await runSandbox(BUILD_PROFILE, buildParameters, [
       '/bin/cat', buildForbiddenProbe,
     ], { cwd: sourceStage, env: candidateBuildEnvironment, timeoutMs: 10_000 })
-    const buildExternalNetwork = await runSandbox(BUILD_PROFILE, buildParameters, [
-      '/usr/bin/curl', ...EXTERNAL_PROBE_ARGUMENTS,
-    ], { cwd: sourceStage, env: candidateBuildEnvironment, timeoutMs: 10_000 })
-    const buildExternalReachable = await externalProbeReachable()
+    const buildExternalTarget = await reachableExternalProbeTarget()
+    const buildExternalNetwork = buildExternalTarget === null ? null : await runSandbox(
+      BUILD_PROFILE, buildParameters, externalProbeCommand(buildExternalTarget),
+      { cwd: sourceStage, env: candidateBuildEnvironment, timeoutMs: 10_000 },
+    )
     const buildChecks = [
       check('build-source-stage-read-allowed', buildSourceRead.code === 0,
         buildSourceRead.code === 0 ? 'allowlisted-source-readable' : 'unexpected-source-denial'),
       check('build-forbidden-resource-read-denied', fileDenied(buildForbiddenRead),
         fileDenied(buildForbiddenRead) ? 'seatbelt-eperm' : 'unexpected-forbidden-read'),
-      externalDenialCheck('build-external-network-denied', buildExternalReachable, buildExternalNetwork),
+      externalDenialCheck('build-external-network-denied', buildExternalTarget, buildExternalNetwork),
     ]
     if (buildChecks.some((entry) => !entry.passed)) {
       throw new Error('Strict candidate build boundary probe failed.')
@@ -1026,20 +1027,31 @@ function fileDenied(result) {
 // reachable from outside the sandbox. Without this control an offline host
 // would report a denial that Seatbelt never enforced. `-f` is deliberately
 // absent: any completed HTTP exchange, whatever its status, proves egress.
+// IP literals (no DNS inside the sandbox) of anycast HTTP responders that
+// answer any request with some status; a completed exchange proves egress.
+const EXTERNAL_PROBE_TARGETS = Object.freeze(['http://1.1.1.1/', 'http://1.0.0.1/'])
 const EXTERNAL_PROBE_ARGUMENTS = Object.freeze([
-  '--connect-timeout', '1', '--max-time', '2', '-sS', '-o', '/dev/null', 'http://93.184.216.34/',
+  '--connect-timeout', '1', '--max-time', '2', '-sS', '-o', '/dev/null',
 ])
 
-async function externalProbeReachable() {
-  const control = await runProcess('/usr/bin/curl', [...EXTERNAL_PROBE_ARGUMENTS], {
-    cwd: '/', env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' }, timeoutMs: 10_000,
-  })
-  return control.code === 0
+function externalProbeCommand(target) {
+  return ['/usr/bin/curl', ...EXTERNAL_PROBE_ARGUMENTS, target]
 }
 
-function externalDenialCheck(id, reachable, sandboxed) {
-  const passed = reachable && sandboxed.code !== 0
-  const observation = !reachable
+/** First probe target reachable from outside the sandbox, or null. */
+async function reachableExternalProbeTarget() {
+  for (const target of EXTERNAL_PROBE_TARGETS) {
+    const control = await runProcess('/usr/bin/curl', [...EXTERNAL_PROBE_ARGUMENTS, target], {
+      cwd: '/', env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' }, timeoutMs: 10_000,
+    })
+    if (control.code === 0) return target
+  }
+  return null
+}
+
+function externalDenialCheck(id, target, sandboxed) {
+  const passed = target !== null && sandboxed !== null && sandboxed.code !== 0
+  const observation = target === null
     ? 'external-control-unreachable'
     : sandboxed.code !== 0 ? 'seatbelt-network-denied' : 'unexpected-external-connect'
   return check(id, passed, observation)
@@ -1070,10 +1082,12 @@ async function controllerNegativeChecks({
     })
     checks.push(check(id, fileDenied(result), fileDenied(result) ? 'seatbelt-eperm' : 'unexpected-access-result'))
   }
-  const external = await runSandbox(CONTROLLER_PROFILE, controllerParams, [
-    '/usr/bin/curl', ...EXTERNAL_PROBE_ARGUMENTS,
-  ], { cwd: controlRoot, env: controllerEnv, timeoutMs: 10_000 })
-  checks.push(externalDenialCheck('controller-external-network-denied', await externalProbeReachable(), external))
+  const externalTarget = await reachableExternalProbeTarget()
+  const external = externalTarget === null ? null : await runSandbox(
+    CONTROLLER_PROFILE, controllerParams, externalProbeCommand(externalTarget),
+    { cwd: controlRoot, env: controllerEnv, timeoutMs: 10_000 },
+  )
+  checks.push(externalDenialCheck('controller-external-network-denied', externalTarget, external))
 
   const reexec = await runSandbox(CONTROLLER_PROFILE, controllerParams, [
     '/bin/sh', '-c', 'exec "$1" --version', 'phase9-reexec-probe', codexBinary,
