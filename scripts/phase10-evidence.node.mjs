@@ -57,8 +57,10 @@ import {
 } from './lib/fresh-process-evidence.mjs'
 import {
   boundaryHashV1,
+  containsCapabilityUrlV1,
   COUNTED_BROWSER_CHROME_REQUIREMENT,
   COUNTED_BROWSER_REQUIRED_CHECKS,
+  redactCapabilityUrlsV1,
   makeBoundaryEnvironmentV1,
   makeBoundaryRunEvidenceV1,
   requestAuditV1,
@@ -1661,4 +1663,35 @@ test('reviewed Vite configs ignore candidate-controlled env, PostCSS, and Babel 
     delete process.env.PHASE9_AUTHOR_GRAPH_REPORT
     delete process.env.PHASE9_SOURCE_COMMIT
   }
+})
+
+test('benchmark artifacts redact range-host capabilities and the final gate requires the ledger', () => {
+  const capability = 'c'.repeat(64)
+  const artifact = JSON.stringify({
+    scenario: { url: `http://127.0.0.1:4173/?shareVersion=1&data=http%3A%2F%2F127.0.0.1%3A18000%2Faccess%2F${capability}%2Fsource%2F&catalog=http%3a%2f%2f127.0.0.1%3a18000%2faccess%2f${capability}%2fcatalog.json` },
+    network: [{ url: `http://127.0.0.1:18000/access/${capability}/source/lidar/frame.bin` }],
+    documentShape: { url: `http://127.0.0.1:4173/?share=http%3A%2F%2F127.0.0.1%3A18000%2Faccess%2F${capability}%2Fshare.json` },
+    untouched: 'http://127.0.0.1:4173/access/short/source/',
+  })
+  assert.equal(containsCapabilityUrlV1(artifact), true)
+  const redacted = redactCapabilityUrlsV1(artifact)
+  assert.equal(redacted.includes(capability), false)
+  assert.equal(containsCapabilityUrlV1(redacted), false)
+  assert.match(redacted, /\/access\/\{capability\}\/source\/lidar\/frame\.bin/u)
+  assert.match(redacted, /%2Faccess%2F\{capability\}%2Fsource%2F/u)
+  assert.match(redacted, /%2faccess%2f\{capability\}%2fcatalog\.json/u)
+  assert.match(redacted, /access\/short\/source/u)
+  assert.equal(JSON.parse(redacted).network[0].url, 'http://127.0.0.1:18000/access/{capability}/source/lidar/frame.bin')
+  const benchmarkSource = readFileSync('scripts/phase6-cdp-benchmark.mjs', 'utf8')
+  assert.match(benchmarkSource, /redactCapabilityUrlsV1\(/u)
+  assert.match(benchmarkSource, /mode: 0o600 \}\)\n\} finally \{/u)
+
+  const withoutLedger = spawnSync(process.execPath, [
+    'scripts/phase10-baseline-gate.mjs',
+    '--freeze', 'freeze.json', '--negative', 'negative.json', '--regression', 'regression.json',
+    '--harness', 'harness.json', '--phase9-attestation', 'attestation.json', '--phase9-gate', 'gate.json',
+    '--phase6-gate', 'phase6-gate.json', '--candidate-repository', '.', '--expected-commit', COMMIT,
+  ], { cwd: process.cwd(), encoding: 'utf8' })
+  assert.notEqual(withoutLedger.status, 0)
+  assert.match(withoutLedger.stderr, /Missing --ledger/u)
 })

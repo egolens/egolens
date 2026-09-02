@@ -61,7 +61,7 @@ const options = parseArgs(process.argv.slice(2))
 for (const name of [
   'freeze', 'negative', 'regression', 'harness',
   'phase9-attestation', 'phase9-gate', 'phase6-gate',
-  'candidate-repository', 'expected-commit',
+  'candidate-repository', 'expected-commit', 'ledger',
 ]) {
   if (!options[name]) throw new Error(`Missing --${name}`)
 }
@@ -191,8 +191,10 @@ const postBuildDirty = git(candidateRepository, ['status', '--porcelain', '--unt
 if (postBuildHead !== expectedCommit || postBuildDirty) {
   throw new Error('Candidate checkout changed while reproducing the final baseline build')
 }
+// The decision ledger is not optional: a freeze that was never recorded in
+// the append-only ledger has no place in the P7 evidence chain.
 let ledger = null
-if (options.ledger) {
+{
   const lines = (await readFile(path.resolve(String(options.ledger)), 'utf8')).trimEnd().split('\n').filter(Boolean)
   const entries = lines.map((line) => JSON.parse(line))
   for (const entry of entries) await validatePhase10SchemaV1(entry)
@@ -225,7 +227,7 @@ const reportPayload = {
     evidenceHash: dataset.evidenceHash,
   })).sort((left, right) => left.datasetId.localeCompare(right.datasetId)),
   negativeCaseCount: freeze.gates.negativeCases.length,
-  ledgerHash: ledger?.ledgerHash ?? null,
+  ledgerHash: ledger.ledgerHash,
   passed: true,
 }
 const report = { ...reportPayload, reportHash: phase10HashV1(reportPayload) }

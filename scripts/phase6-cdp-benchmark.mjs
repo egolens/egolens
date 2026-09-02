@@ -12,7 +12,9 @@ import {
   boundaryHashV1,
   countedBrowserSeatbeltArgumentsV1,
   countedSourceBoundaryV1,
+  containsCapabilityUrlV1,
   endpointForOriginV1,
+  redactCapabilityUrlsV1,
   inspectOfficialChromeIdentityV1,
   makeBoundaryEnvironmentV1,
   makeBoundaryRunEvidenceV1,
@@ -1711,7 +1713,11 @@ try {
     samples,
     summary: aggregate(samples),
   }
-  await writeFile(path.resolve(String(options.output)), `${JSON.stringify(output, null, 2)}\n`)
+  // The benchmark artifact is retained beside public evidence: strip the
+  // range-host capability from every recorded URL and keep the file private.
+  const serialized = redactCapabilityUrlsV1(`${JSON.stringify(output, null, 2)}\n`)
+  if (containsCapabilityUrlV1(serialized)) throw new Error('Benchmark artifact still carries a source capability')
+  await writeFile(path.resolve(String(options.output)), serialized, { mode: 0o600 })
 } finally {
   if (appBuildServer) await appBuildServer.close()
 }
