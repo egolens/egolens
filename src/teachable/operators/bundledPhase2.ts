@@ -377,6 +377,8 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
           pattern: { type: 'string', minLength: 1, maxLength: 512 },
           replacement: { type: 'string', maxLength: 512 },
           required: { type: 'boolean' },
+          pad: { type: 'integer', minimum: 1, maximum: 64 },
+          padChar: { type: 'string', minLength: 1, maxLength: 1 },
         },
         required: ['field', 'from', 'pattern', 'replacement'],
         additionalProperties: false,

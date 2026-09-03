@@ -170,3 +170,12 @@ describe('bundled Phase 2 recipes', () => {
     }).toMatchSnapshot()
   })
 })
+
+describe('artifact size limit at apply time', () => {
+  it('rejects an in-memory recipe whose pretty-printed artifact would exceed the export limit', () => {
+    const filler = Array.from({ length: 600 }, (_, index) => ({ field: `f${index}`, from: 'x', pattern: '^(.*)$', replacement: 'y'.repeat(400) }))
+    const result = validateRecipeV1({ kind: 'egolens-adapter', schemaVersion: 1, pipelines: { p: { nodes: [{ params: { derive: filler } }] } } })
+    expect(result.ok).toBe(false)
+    expect(result.diagnostics[0]?.code).toBe('RESOURCE_LIMIT_ARTIFACT_SIZE')
+  })
+})

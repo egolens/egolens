@@ -153,7 +153,7 @@ export default function TeachableLensPanel({
               <input ref={fileInput} type="file" accept=".json,.egolens-adapter.json,application/json" hidden onChange={(event) => void importRecipe(event.target.files?.[0])} />
               <button disabled={busy} onClick={() => fileInput.current?.click()} style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgOverlay, color: colors.textPrimary, cursor: busy ? 'wait' : 'pointer' }}>Import JSON</button>
               {state.phase === 'review' && <button disabled={busy} onClick={() => void finalize()} style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.12), color: colors.accent, cursor: busy ? 'wait' : 'pointer' }}>Finalize</button>}
-              {state.exportReady && state.currentArtifact && <button onClick={() => downloadRecipeArtifactV1(state.currentArtifact!)} style={{ padding: '8px 12px', borderRadius: radius.sm, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Export JSON</button>}
+              {state.exportReady && state.currentArtifact && <button onClick={() => { try { downloadRecipeArtifactV1(state.currentArtifact!); setLocalError(null) } catch (error) { setLocalError(error instanceof Error ? error.message : String(error)) } }} style={{ padding: '8px 12px', borderRadius: radius.sm, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Export JSON</button>}
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 2fr) minmax(220px, 1fr) auto', gap: 8, marginTop: 12 }}>

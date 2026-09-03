@@ -509,7 +509,7 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
  */
 const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
   if (!isRecords(inputs.rows)) throw new Error('GRAPH_RECORDS_INPUT_INVALID')
-  const derivations = (params.derive as readonly { field: string; from: string; pattern: string; replacement: string; required?: boolean }[]).map((entry) => ({
+  const derivations = (params.derive as readonly { field: string; from: string; pattern: string; replacement: string; required?: boolean; pad?: number; padChar?: string }[]).map((entry) => ({
     ...entry, regex: new RegExp(entry.pattern, 'u'),
   }))
   const rows: Record<string, unknown>[] = []
@@ -523,7 +523,10 @@ const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
         if (derivation.required !== false) { keep = false; break }
         continue
       }
-      next[derivation.field] = text.replace(derivation.regex, derivation.replacement)
+      const derived = text.replace(derivation.regex, derivation.replacement)
+      // `pad` left-pads the derived value (e.g. a frame index → zero-padded file stem) so path linkage
+      // never needs one rule per frame.
+      next[derivation.field] = derivation.pad ? derived.padStart(derivation.pad, derivation.padChar ?? '0') : derived
     }
     if (keep) rows.push(next)
   }
