@@ -16,6 +16,7 @@ export const OPERATOR_DOCS_V1: Readonly<Record<string, string>> = {
   'archive.pickle_rows': 'Whole-file row reader for small metadata tables (cuboids, poses): every row of every matched file becomes one record; `pathField` adds the file path, `indexField` the row index. Hard budget 250k rows across all files. Not for point clouds.',
   'json.records': 'Reads JSON files into records. layout "array": each element is a row (indexField adds its index). layout "object-rows": each top-level key is a row (key under keyField). layout "file-row": the whole object is one row (flatten: true turns nested keys into dotted fields). pathField adds the file path.',
   'text.table': 'Reads a text file into rows. layout "delimited" with `delimiter`, `columns` (names), `header` (whether row 1 is a header), `numeric` (parse numbers), `maxRows`/`maxColumns`. A one-line JSON array can be split with delimiter "," into one row of N columns.',
+  'records.from_files': 'One record per file of any reader collection (binary, encoded, or table): fields `path` (pathField), `index` (indexField, in reader file order), `name`, `stem` (name without extension), `directory`, `size`. This is the per-file table that timeline.join and image.bind_camera_frame need for sampleData: derive the frame key from `stem` with records.derive, join the timestamp table on it, and pass the rows as sampleData while the original collection stays inputs.records.',
   'records.unpivot': 'Turns columns into rows. `pattern` (regex with groups) matches column names; `keyGroup` is the group that becomes the row key (stored under `keyField`), `fieldGroup` the group that becomes the output field name. Use it to turn 80 columns "00_x, 01_x…" into 80 rows with key 00, 01… and field x.',
   'records.derive': 'Adds fields to each record. Each derivation: `field` (new name), `from` (source field; dotted paths reach nested JSON), optional `pattern`/`replacement` (regex rewrite; `required: true` drops rows that do not match), `pad`/`padChar` (zero-pad), `scale`/`offset`/`integer` (numeric conversion: float seconds → integer microseconds is { scale: 1000000, integer: true }).',
   'relations.token_join': 'Inner or left join of two record sets on `leftKey` = `rightKey`; `rightFields` maps right-hand fields into the left rows ({ outputName: rightField }). Output `rows`.',
@@ -524,6 +525,10 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     yawField: { type: 'string', minLength: 1, maxLength: 256 },
     angleUnit: { enum: ['radians', 'degrees'] },
   }, ['timestampField', 'latitudeField', 'longitudeField', 'yawField']), recordContract(['poses'])],
+  ['records.from_files', recordContract(['collection']), closedParams({
+    pathField: { type: 'string', minLength: 1, maxLength: 128 },
+    indexField: { type: 'string', minLength: 1, maxLength: 128 },
+  }, []), recordContract(['rows'])],
   ['records.select', {
     oneOf: [recordContract(['rows']), recordContract(['scenes', 'logs'])],
   }, {
