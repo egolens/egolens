@@ -416,12 +416,22 @@ const pickleRecords: CoreOperatorImplementationV1 = (inputs, params, context) =>
   records: binaryCollection(inputs, context, { kind: 'pickle-records', params: params as unknown as PickleRecordsParamsV1 }),
 })
 
+/**
+ * Rows a whole-file row reader may materialize across all of its files. One JS
+ * object per row is fine for metadata tables (cuboids, poses: hundreds of rows
+ * per file) and fatal for point clouds (170k rows × 80 files exhausted an
+ * in-app browser tab). Point clouds belong to the streaming *_records readers.
+ */
+export const MATERIALIZED_ROWS_BUDGET_V1 = 250_000
+
 /** Whole-file gzip+pickle DataFrame → one record per row (metadata tables such as cuboids or poses). */
 const pickleRows: CoreOperatorImplementationV1 = async (inputs, params, context) => {
   if (!Array.isArray(inputs.files)) throw new Error('GRAPH_READER_FILES_INVALID')
   const pathField = typeof params.pathField === 'string' ? params.pathField : null
   const indexField = typeof params.indexField === 'string' ? params.indexField : null
   const rows: Readonly<Record<string, unknown>>[] = []
+  const fileCount = (inputs.files as readonly unknown[]).length
+  const budget = typeof params.maxTotalRows === 'number' ? Math.min(params.maxTotalRows, MATERIALIZED_ROWS_BUDGET_V1) : MATERIALIZED_ROWS_BUDGET_V1
   for (const file of inputs.files as readonly { path: string }[]) {
     const bytes = await context.read(file.path)
     let frame
@@ -429,6 +439,9 @@ const pickleRows: CoreOperatorImplementationV1 = async (inputs, params, context)
       frame = await decodePickleDataFrameV1(bytes, params as unknown as PickleLimitsV1)
     } catch (error) {
       throw new Error(`GRAPH_PICKLE_DECODE_FAILED: ${file.path}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (rows.length + frame.rowCount > budget) {
+      throw new Error(`GRAPH_ROWS_BUDGET_EXCEEDED: archive.pickle_rows would materialize ${rows.length + frame.rowCount} rows across ${fileCount} file(s) (${file.path} alone has ${frame.rowCount}); the budget is ${budget}. This reader makes one object per row and is for metadata tables (cuboids, poses). For point clouds use archive.pickle_records with columns/attributes, which streams one file per frame.`)
     }
     for (let index = 0; index < frame.rowCount; index += 1) {
       context.throwIfAborted()

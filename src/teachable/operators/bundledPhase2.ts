@@ -712,6 +712,7 @@ const pickleRowsParamsContract: OperatorJsonSchema = {
     pathField: { type: 'string', minLength: 1, maxLength: 256 },
     indexField: { type: 'string', minLength: 1, maxLength: 128 },
     ...pickleLimitContracts,
+    maxTotalRows: { type: 'integer', minimum: 1, maximum: 250000, description: 'Rows this reader may materialize across all matched files (default and hard cap 250000). It builds one object per row: metadata tables only. Point clouds use archive.pickle_records.' },
   },
   additionalProperties: false,
 }
