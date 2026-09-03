@@ -1557,6 +1557,7 @@ function DropZone({ onFilesLoaded }: {
     e.stopPropagation()
   }, [])
 
+  const preferDirectoryPicker = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('picker') === 'fsapi'
   const onPickFolder = useCallback(async () => {
     setScanning(true)
     setError(null)
@@ -2040,7 +2041,10 @@ function DropZone({ onFilesLoaded }: {
                 />
                 <button
                     onClick={() => {
-                      if (hasDirectoryPicker()) void onPickFolder()
+                      // The directory input works in every host (Chrome, ChatGPT and Codex
+                      // in-app browsers); showDirectoryPicker hangs or is missing in some
+                      // embedded browsers, so it is only used when explicitly requested.
+                      if (preferDirectoryPicker && hasDirectoryPicker()) void onPickFolder()
                       else directoryInputRef.current?.click()
                     }}
                     style={{
