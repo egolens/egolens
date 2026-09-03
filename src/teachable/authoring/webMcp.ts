@@ -12,6 +12,8 @@ interface WebMcpToolDefinition {
 
 interface WebMcpModelContext {
   registerTool(definition: WebMcpToolDefinition): void | Promise<void>
+  /** Present on the browser's native implementation; absent on the counted broker's shim. */
+  executeTool?: unknown
 }
 
 type WebMcpDocument = Document & { readonly modelContext?: WebMcpModelContext }
@@ -57,10 +59,15 @@ export async function registerTeachableWebMcpToolsV1(
   const activeRegistration = documentRegistrations.get(target)
   if (activeRegistration) return await activeRegistration
 
+  // The native document.modelContext (Chrome 146+ WebMCP, ChatGPT's in-app browser) calls
+  // execute(params, { signal }) and expects a string result; the counted broker's shim passes
+  // objects through to its HTTP bridge. Serialize only for the native implementation.
+  const native = typeof webDocument.modelContext.executeTool === 'function'
   const engage = <T extends Record<string, unknown>>(handler: (input: T) => unknown | Promise<unknown>) =>
     async (input: Record<string, unknown>): Promise<unknown> => {
       session.markAgentEngaged()
-      return await handler(input as T)
+      const result = await handler((input ?? {}) as T)
+      return native ? JSON.stringify(result ?? null) : result
     }
 
   const tools: readonly WebMcpToolDefinition[] = [
