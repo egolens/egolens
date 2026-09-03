@@ -41,6 +41,9 @@ import SearchableSelect, { type SelectItem } from './components/SearchableSelect
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
+import { inferSensorConfigurationV1, type SensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
+import type { SourceInventoryV1 } from './teachable/authoring/SourceInventory'
+import SensorLayoutConfirm from './components/TeachableLens/SensorLayoutConfirm'
 import { formatFingerprintV1, recipeHashV1 } from './teachable/authoring/hashes'
 import { generateSourceCatalogV1 } from './teachable/source/SourceCatalog'
 import { operatorSetFingerprintV1 } from './teachable/recipe/fingerprints'
@@ -1349,6 +1352,7 @@ function DropZone({ onFilesLoaded }: {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [pendingAuthoring, setPendingAuthoring] = useState<{ inventory: SourceInventoryV1; configuration: SensorConfigurationV1 } | null>(null)
   const dragCounter = useRef(0)
   const directoryInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
@@ -1480,7 +1484,9 @@ function DropZone({ onFilesLoaded }: {
       // do I drop?" twice against a 2 TB tree. Name what we saw instead.
       if (rejection) trackFolderRejected(rejection)
       if (inventory && inventory.snapshot().entries.length > 0) {
-        teachableAuthoringSession.start(inventory)
+        // Authoring starts only after the human confirms the sensor layout, so
+        // an agent cannot quietly collapse six cameras into none.
+        setPendingAuthoring({ inventory, configuration: inferSensorConfigurationV1(inventory.snapshot()) })
         setError(null)
         setScanning(false)
         return
@@ -1579,6 +1585,36 @@ function DropZone({ onFilesLoaded }: {
     }
   }, [handleFiles])
 
+  if (pendingAuthoring) {
+    return (
+      <div className="dropzone-scroll" style={{ flex: 1, overflowY: 'auto', display: 'grid', placeItems: 'center', padding: 24 }}>
+        <section style={{ width: 'min(680px, 100%)', padding: 24, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: 16 }}>
+          <div style={{ color: colors.accent, fontSize: 11, fontWeight: 800, letterSpacing: '0.12em' }}>UNKNOWN DATASET</div>
+          <h2 style={{ margin: '8px 0 4px', fontSize: 20 }}>Teach EgoLens this dataset</h2>
+          <p style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+            No bundled adapter matches this folder. Confirm the physical sensors below; an agent using this page's WebMCP tools must then bind every one of them, and you review the rendering before anything is finalized.
+          </p>
+          <SensorLayoutConfirm
+            inventory={pendingAuthoring.inventory}
+            configuration={pendingAuthoring.configuration}
+            onChange={(configuration) => setPendingAuthoring({ ...pendingAuthoring, configuration })}
+            onConfirm={() => {
+              try {
+                teachableAuthoringSession.start(pendingAuthoring.inventory, { sensorConfiguration: pendingAuthoring.configuration })
+                setPendingAuthoring(null)
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : String(cause))
+              }
+            }}
+          />
+          <button onClick={() => setPendingAuthoring(null)} style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.textSecondary, cursor: 'pointer' }}>
+            Choose another folder
+          </button>
+          {error && <pre style={{ whiteSpace: 'pre-wrap', color: colors.danger, fontSize: 11 }}>{error}</pre>}
+        </section>
+      </div>
+    )
+  }
   return (
     <div
       className="dropzone-scroll"

@@ -3,6 +3,7 @@ import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { sourceInventoryFromFilesV1, type SourceInventoryV1 } from './teachable/authoring/SourceInventory'
 import { inferSensorConfigurationV1, type SensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
+import SensorLayoutConfirm from './components/TeachableLens/SensorLayoutConfirm'
 import { selectedFileKeysV1 } from './teachable/authoring/selectedFileKeys'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
 import { colors, fonts } from './theme'
@@ -45,22 +46,6 @@ export default function AmnesiaAuthorApp() {
     }
   }
 
-  const setCount = (modality: 'camera' | 'lidar' | 'radar', value: string) => {
-    if (!pending) return
-    const parsed = Number.parseInt(value, 10)
-    const count = Number.isFinite(parsed) ? Math.max(0, Math.min(64, parsed)) : 0
-    // A count edit drops the inferred names for that modality; they no longer match.
-    const { [modality]: _dropped, ...names } = pending.configuration.names ?? {}
-    setPending({ ...pending, configuration: { ...pending.configuration, [modality]: count, ...(Object.keys(names).length > 0 ? { names } : { names: undefined }) } })
-  }
-
-  const setNames = (modality: 'camera' | 'lidar' | 'radar', value: string) => {
-    if (!pending) return
-    const list = value.split(',').map((name) => name.trim()).filter((name) => name.length > 0)
-    const names = { ...(pending.configuration.names ?? {}), [modality]: list }
-    setPending({ ...pending, configuration: { ...pending.configuration, [modality]: list.length, names } })
-  }
-
   if (started) return <TeachableLensPanel />
   return <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: colors.bgBase, color: colors.textPrimary, fontFamily: fonts.sans, padding: 24 }}>
     <section style={{ width: 'min(620px, 100%)', padding: 28, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: 16 }}>
@@ -80,38 +65,12 @@ export default function AmnesiaAuthorApp() {
         />
       </label>
       {pending && (
-        <div data-testid="sensor-configuration" style={{ marginTop: 18, padding: 14, border: `1px solid ${colors.border}`, borderRadius: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>Confirm the sensor layout</div>
-          <p style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 1.5, margin: '6px 0 10px' }}>
-            {pending.inventory.snapshot().entries.length} files scanned. Defaults are guessed from the folder layout; correct them so the recipe must expose every physical stream.
-          </p>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-            {(['camera', 'lidar', 'radar'] as const).map((modality) => (
-              <div key={modality} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: colors.textSecondary, minWidth: 180 }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {modality} sensors
-                  <input
-                    type="number" min={0} max={64} value={pending.configuration[modality]}
-                    aria-label={`${modality} sensor count`}
-                    onChange={(event) => setCount(modality, event.currentTarget.value)}
-                    style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary }}
-                  />
-                </label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {modality} ids (comma-separated, optional)
-                  <input
-                    type="text" value={(pending.configuration.names?.[modality] ?? []).join(', ')}
-                    aria-label={`${modality} sensor ids`}
-                    placeholder="found in the folder, edit if wrong"
-                    onChange={(event) => setNames(modality, event.currentTarget.value)}
-                    style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary }}
-                  />
-                </label>
-              </div>
-            ))}
-          </div>
-          <button onClick={confirmConfiguration} style={{ marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Confirm and start authoring</button>
-        </div>
+        <SensorLayoutConfirm
+          inventory={pending.inventory}
+          configuration={pending.configuration}
+          onChange={(configuration) => setPending({ ...pending, configuration })}
+          onConfirm={confirmConfiguration}
+        />
       )}
       {error && <pre style={{ whiteSpace: 'pre-wrap', color: colors.danger, fontSize: 11 }}>{error}</pre>}
     </section>
