@@ -609,7 +609,17 @@ const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
         continue
       }
       const text = typeof source === 'string' ? source : source === undefined || source === null ? '' : String(source)
-      if (!derivation.regex || !derivation.regex.test(text)) {
+      // No pattern: copy the value as text (optionally padded). Only a pattern
+      // that fails to match can drop a row; a bare copy never does.
+      if (!derivation.regex) {
+        if (source === undefined || source === null) {
+          if (derivation.required === true) { keep = false; break }
+          continue
+        }
+        next[derivation.field] = derivation.pad ? text.padStart(derivation.pad, derivation.padChar ?? '0') : text
+        continue
+      }
+      if (!derivation.regex.test(text)) {
         if (derivation.required !== false) { keep = false; break }
         continue
       }
