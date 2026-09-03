@@ -80,6 +80,20 @@ export default function TeachableLensPanel({ session = teachableAuthoringSession
 // P0 — "A wild format appeared!"
 // ---------------------------------------------------------------------------
 
+/** Human reading order for camera ids: front, front-left, front-right, left, right, back; unknown names keep their order at the end. */
+function orderCameraNamesV1(ids: readonly string[]): string[] {
+  const rank = (id: string): number => {
+    const key = id.toLowerCase()
+    const side = /left/u.test(key) ? 'l' : /right/u.test(key) ? 'r' : ''
+    if (/front|fwd|forward/u.test(key)) return side === 'l' ? 1 : side === 'r' ? 2 : 0
+    if (/back|rear/u.test(key)) return side === 'l' ? 5 : side === 'r' ? 6 : 7
+    if (side === 'l') return 3
+    if (side === 'r') return 4
+    return 8
+  }
+  return ids.map((id, index) => ({ id, index, rank: rank(id) })).sort((a, b) => a.rank - b.rank || a.index - b.index).map((entry) => entry.id)
+}
+
 function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }: {
   session: TeachableAuthoringSessionV1
   state: ReturnType<TeachableAuthoringSessionV1['getState']>
@@ -89,6 +103,10 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
   onLeave?: () => void
 }) {
   const [editing, setEditing] = useState(false)
+  // A matching sealed recipe turns P0 into the recognized-format screen until
+  // the person explicitly chooses to teach a new adapter for this folder.
+  const [teachAnyway, setTeachAnyway] = useState(false)
+  const recognized = savedRecipes.length > 0 && !teachAnyway
   const inventory = session.getInventory()
   const configuration = state.sensorConfiguration ?? (state.inventory ? inferSensorConfigurationV1(state.inventory) : { lidar: 0, radar: 0, camera: 0 })
   const [draft, setDraft] = useState<SensorConfigurationV1>(configuration)
@@ -98,34 +116,41 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
     if (!inventory || trimmed === (configuration.datasetName ?? '')) return
     session.start(inventory, { sensorConfiguration: { ...configuration, ...(trimmed ? { datasetName: trimmed } : { datasetName: undefined }) } })
   }
-  const names = (modality: 'camera' | 'lidar' | 'radar') => configuration.names?.[modality] ?? []
+  const names = (modality: 'camera' | 'lidar' | 'radar') => modality === 'camera' ? orderCameraNamesV1(configuration.names?.camera ?? []) : (configuration.names?.[modality] ?? [])
   return (
     <div style={{ flex: 1, overflow: 'auto', display: 'grid', placeItems: 'center', padding: '32px 24px' }}>
       <div style={{ width: 'min(820px, 100%)' }}>
         <div style={{ textAlign: 'center' }}>
-          <div className="tl-pulse" style={{ fontFamily: mono, color: colors.accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.14em', ...pulse(2.2) }}>A WILD FORMAT APPEARED!</div>
-          <h2 style={{ margin: '10px 0 6px', fontSize: 28, fontWeight: 700, letterSpacing: '-0.01em' }}>EgoLens doesn't know this format yet</h2>
-          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: colors.textSecondary }}>Teach it once — your agent writes the adapter, you approve the render.<br />Files never leave this browser.</p>
+          <div className="tl-pulse" style={{ fontFamily: mono, color: colors.accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.14em', ...pulse(2.2) }}>{recognized ? 'A TRAINED FORMAT APPEARED!' : 'A WILD FORMAT APPEARED!'}</div>
+          <h2 style={{ margin: '10px 0 6px', fontSize: 28, fontWeight: 700, letterSpacing: '-0.01em' }}>{recognized ? 'You taught EgoLens this format' : "EgoLens doesn't know this format yet"}</h2>
+          {recognized
+            ? <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: colors.textSecondary }}>Your sealed reader still matches these files.</p>
+            : <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: colors.textSecondary }}>Teach it once — your agent writes the adapter, you approve the render.<br />Files never leave this browser.</p>}
         </div>
 
-        {savedRecipes.length > 0 && (
-          <div data-testid="saved-recipes" style={{ marginTop: 24, padding: '14px 16px', borderRadius: 14, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.06) }}>
-            <div style={{ fontWeight: 700, fontSize: 13 }}>EgoLens already knows this layout</div>
-            <div style={{ margin: '4px 0 10px', color: colors.textSecondary, fontSize: 12, lineHeight: 1.5 }}>A recipe finalized in this browser matches these files. Render with it now, or teach a new one below.</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {savedRecipes.slice(0, 3).map((record) => (
-                <button key={record.recipeHash} onClick={() => onRenderSaved(record)} style={{ padding: '9px 13px', borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>
-                  Render with “{record.artifact.identity.name}” · {new Date(record.finalizedAt).toLocaleDateString()}
-                </button>
-              ))}
+        {recognized && (
+          <div data-testid="saved-recipes" style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[...savedRecipes].sort((a, b) => b.finalizedAt.localeCompare(a.finalizedAt)).map((record) => (
+              <div key={record.recipeHash} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', borderRadius: 14, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.06) }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>{record.artifact.identity.name}</div>
+                  <div style={{ marginTop: 4, fontFamily: mono, fontSize: 12, color: colors.textDim, overflowWrap: 'anywhere' }}>
+                    sealed {new Date(record.finalizedAt).toLocaleDateString()} · {record.recipeHash.slice(0, 15)}…{record.recipeHash.slice(-8)} · {record.capabilities.length} capabilities
+                  </div>
+                </div>
+                <button onClick={() => onRenderSaved(record)} style={{ padding: '12px 22px', borderRadius: 10, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>Render now</button>
+              </div>
+            ))}
+            <div style={{ textAlign: 'center', fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>
+              Different data in the same shape? It still renders. Something off — <button onClick={() => setTeachAnyway(true)} style={{ background: 'none', border: 0, padding: 0, color: colors.accentBlue, textDecoration: 'underline', cursor: 'pointer', fontSize: 13 }}>teach a new adapter instead</button>.
             </div>
           </div>
         )}
 
-        <AgentAskCard agent={agent} />
+        {!recognized && <AgentAskCard agent={agent} />}
 
         <div style={{ marginTop: 12, padding: '12px 16px', border: `1px solid ${colors.border}`, borderRadius: 12, background: colors.bgSurface }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${colors.borderSubtle}` }}>
+          {!recognized && <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${colors.borderSubtle}` }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>Name this dataset <span style={{ fontWeight: 400, color: colors.textDim }}>— the recipe and the sealed reader carry this name</span></div>
               <input
@@ -139,13 +164,13 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
                 style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, padding: '8px 10px', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary, fontSize: 13, fontWeight: 600, outline: 'none' }}
               />
             </div>
-          </div>
+          </div>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>Detected sensors <span style={{ fontWeight: 400, color: colors.textDim }}>— correct this if it's wrong</span></div>
               <div style={{ marginTop: 6, fontFamily: mono, fontSize: 12, color: colors.textSecondary, overflowWrap: 'anywhere' }}>
                 camera <strong style={{ color: colors.textPrimary }}>{configuration.camera}</strong> · lidar <strong style={{ color: colors.textPrimary }}>{configuration.lidar}</strong> · radar <strong style={{ color: colors.textPrimary }}>{configuration.radar}</strong>
-                <span style={{ color: colors.textDim }}> — {[...names('camera'), ...names('lidar'), ...names('radar')].join(', ') || 'no ids inferred'}</span>
+                <span style={{ color: colors.textDim }}> — {[names('camera').join(', '), names('lidar').join(', '), names('radar').join(', ')].filter(Boolean).join(' · ') || 'no ids inferred'}</span>
               </div>
             </div>
             <button onClick={() => setEditing((value) => !value)} style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.textSecondary, fontSize: 12, cursor: 'pointer' }}>{editing ? 'Close' : 'Edit'}</button>
