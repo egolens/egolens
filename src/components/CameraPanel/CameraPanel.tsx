@@ -16,6 +16,7 @@ import { useSceneStore } from '../../stores/useSceneStore'
 import type { ParquetRow } from '../../utils/merge'
 import { createTrackedObjectUrl, revokeTrackedObjectUrl } from '../../teachable/runtime/performanceProbe'
 import { colors, fonts, radius, shadows, alpha } from '../../theme'
+import { splitCamerasIntoRowsV1 } from '../../utils/cameraOrder'
 import { getManifest } from '../../adapters/registry'
 import ErrorBoundary from '../ErrorBoundary'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
@@ -69,6 +70,7 @@ export default function CameraPanel() {
 
   const isMobile = useIsMobile()
   const cameras = getManifest().cameraSensors
+  const cameraCalibrationRows = useSceneStore((s) => s.cameraCalibrations)
 
   // Number key shortcuts: 1–9 toggle camera POV
   useEffect(() => {
@@ -108,8 +110,11 @@ export default function CameraPanel() {
       }
       return order(a.label) - order(b.label)
     }
-    const topRow = cameras.filter(c => isFront(c.label)).sort(sortLR)
-    const bottomRow = cameras.filter(c => !isFront(c.label)).sort(sortLR)
+    // Prefer the mounting geometry when calibrations are known (recipe datasets);
+    // fall back to the label heuristic for bundled adapters without yaws.
+    const geometricRows = splitCamerasIntoRowsV1(cameras, cameraCalibrationRows)
+    const topRow = geometricRows?.[0] ?? cameras.filter(c => isFront(c.label)).sort(sortLR)
+    const bottomRow = geometricRows?.[1] ?? cameras.filter(c => !isFront(c.label)).sort(sortLR)
     const twoRows = bottomRow.length > 0
     const rows = twoRows ? [topRow, bottomRow] : [topRow]
     const rowHeight = STRIP_HEIGHT_MOBILE
