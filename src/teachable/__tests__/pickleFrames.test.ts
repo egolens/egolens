@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { decodePickleDataFrameV1, decodePickleRecordsV1, parsePickleV1 } from '../operators/pickleFrames'
+import { dataFrameFromPickleV1, decodePickleDataFrameV1, decodePickleRecordsV1, parsePickleV1 } from '../operators/pickleFrames'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 
 const fixture = (name: string) => new Uint8Array(readFileSync(path.join(__dirname, '..', '__fixtures__', name)))
@@ -47,5 +47,24 @@ describe('pickle DataFrame reader', () => {
     const names = bundledPhase2OperatorRegistry.list().map((operator) => operator.name)
     expect(names).toContain('archive.pickle_records')
     expect(names).toContain('archive.pickle_rows')
+  })
+
+  it('reads the legacy pandas 1.x BlockManager tuple layout (PandaSet 2021 files)', () => {
+    const index = (cls: string, data: unknown) => ({ __global: 'pandas.core.indexes.base._new_Index', args: [{ __global: cls }, data] })
+    const nd = (shape: number[], dtype: string, data: unknown) => ({ __ndarray: true, shape, dtype, fortran: false, data })
+    const tree = {
+      __global: 'pandas.core.frame.DataFrame', args: [],
+      state: { _data: { __global: 'pandas.core.internals.managers.BlockManager', args: [], state: [
+        [index('pandas.core.indexes.base.Index', { data: nd([3], 'O8', ['x', 'label', 'd']), name: null }), index('pandas.core.indexes.range.RangeIndex', { name: 'index', start: 0, stop: 2, step: 1 })],
+        [nd([2, 2], 'f8', new Uint8Array(new Float64Array([1.5, -2, 0, 1]).buffer)), nd([1, 2], 'O8', ['Car', 'Bus'])],
+        [index('pandas.core.indexes.base.Index', { data: nd([2], 'O8', ['x', 'd']), name: null }), index('pandas.core.indexes.base.Index', { data: nd([1], 'O8', ['label']), name: null })],
+      ] } },
+    }
+    const frame = dataFrameFromPickleV1(tree)
+    expect(frame.rowCount).toBe(2)
+    expect(frame.columns.map((column) => column.name)).toEqual(['x', 'label', 'd'])
+    expect(frame.columns[0]!.values).toEqual([1.5, -2])
+    expect(frame.columns[1]!.values).toEqual(['Car', 'Bus'])
+    expect(frame.columns[2]!.values).toEqual([0, 1])
   })
 })
