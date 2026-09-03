@@ -771,8 +771,10 @@ Two causes. `GraphSceneAssembler` applied ego←world only to the legacy
 viewer and the review thumbnails consume) pushed raw world boxes. Fixed by
 sharing `egoBoxFromWorldV1` (center, orientation, heading) on both paths. And
 PandaSet cuboid yaw points along the width axis, so with `dimensionFields`
-[y, x, z] the heading needs +π/2; the example recipe now derives
-`yaw_length_axis` and the authoring guide states the length-axis convention.
+[y, x, z] the heading needs +π/2; the sealed sample recipe (release asset and
+probe fixture) now derives `yaw_length_axis` and the authoring guide states the
+length-axis convention. Example recipes were then removed from the contract
+altogether (PR #114): the agent gets a placeholder skeleton, not a solution.
 The agent's recipe was parameter-for-parameter identical to the example, so
 this was not an authoring gap.
 

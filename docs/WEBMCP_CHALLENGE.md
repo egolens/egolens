@@ -91,7 +91,8 @@ Evidence from this week (each agent turn under ten minutes):
    call in the agent activity feed (revision counter, inspections, last
    rejection). The tools describe themselves: `get_state` returns the
    confirmed layout and a `nextStep` hint, `get_contract` carries an
-   `authoringGuide` and example recipes, and every diagnostic names the
+   `authoringGuide` and a placeholder-only recipe skeleton (no real-dataset
+   example recipes, so the format stays unknown to the agent), and every diagnostic names the
    field to fix.
 5. As soon as a revision validates, the full 3D viewer loads it against your
    folder and the review dock appears beside it: orbit, POV cameras,
