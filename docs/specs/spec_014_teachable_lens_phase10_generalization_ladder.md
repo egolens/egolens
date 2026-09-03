@@ -98,6 +98,16 @@ Argoverse 2 (shipped) and A2D2 (held-out), egolens#47 through egolens#64.
    and the production viewer caught both. The reviewer must look at the
    images. The transposition was a runtime bug (matrix/axes poses were
    column-major while everything else is row-major), fixed in egolens#77.
+9. **A gap must end in a report, not a loop.** PandaSet turn 1 spent 41
+   revisions on the same three diagnostics. Next: stop the author after a
+   repeated diagnostic and require a gap report; add a sandboxed
+   `records.compute` for small arithmetic/string gaps; automate the
+   maintainer loop (gap report → operator + test + PR) that was run by hand
+   for #61–#88.
+10. **Convergence needs neighbours.** Breadth rungs show the vocabulary
+   grows; only a dataset next to a finished one (KITTI-360 after KITTI Raw,
+   nuPlan after nuScenes) shows whether it converges. Per rung: A2D2 6 new
+   pieces, KITTI Raw 5 (+2 runtime bugs), PandaSet 7 (+1 reader).
 8. **The likely first real users are "known dataset plus in-house
    inference output".** A recipe derived from a bundled dataset with one
    extra boxes/segmentation pipeline in a private format is the small
@@ -111,7 +121,7 @@ Argoverse 2 (shipped) and A2D2 (held-out), egolens#47 through egolens#64.
 | 1 | owner | Download one sequence each of KITTI Raw (synced + calib), ONCE, PandaSet (accounts required) | KITTI Raw done (public S3); PandaSet pending; ONCE needs account |
 | 2 | Claude | Self-consistency diagnostics at apply time: camera reprojection coverage, timeline spacing irregularity, box point density, ego pose continuity (warnings, non-blocking) | next |
 | 3 | Claude | Reader vocabulary ahead of the rungs: whitespace/CSV text tables (KITTI calib, timestamps), XML records (KITTI tracklets); PandaSet gzip+pickle DataFrames (`archive.pickle_records`, `archive.pickle_rows`, egolens#73) | done |
-| 4 | Claude + owner | Run each rung as a collaborative session as archives arrive; keep first-failure artifacts and generic-operator fixes | A2D2 and KITTI Raw done; PandaSet/ONCE pending |
+| 4 | Claude + owner | Run each rung as a collaborative session as archives arrive; keep first-failure artifacts and generic-operator fixes | A2D2, KITTI Raw, PandaSet done; ONCE needs an account; KITTI-360/nuPlan proposed as convergence checks |
 | 5 | Claude | Review UX: BEV thumbnail, channel-name defaults in the layout confirmation, one-click "revision request" text for the Codex chat | after 3 |
 | 6 | Claude | `poses.integrate`: ego poses from raw GPS/IMU/velocity signals (A2D2 bus, KITTI OXTS) | after 5 |
 | 7 | Claude | PR B redefinition: confirmed sensor contract in `phase9-requirements.json`, judge ignores presentation-only fields, rerun; kept as a development report rather than a merge gate | last |

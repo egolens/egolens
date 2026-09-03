@@ -60,8 +60,9 @@ Evidence from this week (each agent turn under ten minutes):
 - A2D2 preview: 3 turns → 6 cameras + 6 LiDAR fused, rendered in the viewer.
 - KITTI Raw drive 0001: 7 turns → 4 cameras with per-camera rectified
   calibration, Velodyne, tracklet boxes, correct LiDAR→camera projection.
-- PandaSet 001: in progress; the first turn exposed the world-frame gaps that
-  are now closed (#81).
+- PandaSet 001: 3 turns → 6 cameras, Pandar64+PandarGT, world-frame cuboids
+  and semantic labels; the first turn exposed the world-frame gaps (#81, #85,
+  #86), the third fixed the y-forward lidar axis in 80 seconds.
 
 ## Testing instructions for judges
 
