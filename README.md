@@ -18,6 +18,7 @@
 
 <p align="center">
   <a href="https://egolens.org"><strong>Live Demo</strong></a> ·
+  <a href="#teachable-lens-webmcp">Teachable Lens (WebMCP)</a> ·
   <a href="#url-loading">URL Loading</a> ·
   <a href="#share-view">Share View</a> ·
   <a href="#dev-setup">Dev Setup</a>
@@ -72,15 +73,47 @@ Dataset format is auto-detected from folder structure.
 
 ## Teachable Lens (WebMCP)
 
-Drop a folder EgoLens does not recognize and the page becomes a WebMCP tool
-provider: five tools on `document.modelContext` let an agent (ChatGPT's
-in-app browser, Chrome 146+ with `chrome://flags/#enable-webmcp-testing`, or
-Codex through the audited broker) inspect the files within byte limits, read
-the operator contract, and submit adapter recipes as declarative JSON. You
-confirm the sensor layout first, review the rendered preview per capability,
-and finalize a hash-sealed recipe that renders the dataset for anyone through
-a share link. See [docs/WEBMCP_CHALLENGE.md](docs/WEBMCP_CHALLENGE.md) for the
-loop, judge instructions, and the sample dataset.
+WebMCP tools usually let agents use an app. EgoLens flips it: agents extend the
+app. Drop a folder EgoLens does not recognize and the page becomes a WebMCP
+tool provider. Your agent teaches EgoLens the format, you approve the render,
+and the app's capabilities keep growing. Files never leave the browser.
+
+<p align="center">
+  <img src="assets/teachable-review.png" alt="Teachable Lens review: the production viewer docked next to the agent activity feed and per-capability review" width="720" />
+</p>
+<p align="center"><sub>An agent's third revision of a PandaSet adapter, rendered in the production viewer. Each capability is accepted or rejected by looking, and the verdict flows back to the agent.</sub></p>
+
+### How it works
+
+1. **Drop an unknown folder.** EgoLens detects the sensor layout (cameras, LiDARs, radars). You confirm it and name the dataset. That layout is a contract the recipe must meet.
+2. **Tell your agent: "Teach EgoLens this dataset."** Five tools are registered on `document.modelContext`:
+   - `egolens_teachable_inspect` — inventory, metadata, bounded text/JSON samples, table schemas (Parquet, Arrow, pandas pickles). Raw bytes stay in the tab.
+   - `egolens_teachable_get_contract` — the recipe JSON schema, the reader/operator vocabulary with JSON-schema params, an authoring guide, and a placeholder skeleton. No dataset examples.
+   - `egolens_teachable_apply_revision` — submit a complete recipe. EgoLens compiles it, binds files, renders sample frames, and returns diagnostics that name the failing input.
+   - `egolens_teachable_get_state` — validation state, the sensor contract, your latest review, and the next step.
+   - `egolens_teachable_finalize` — seal the recipe with recipe, format, and operator-set hashes.
+3. **Review in the real viewer.** Every validated revision loads into the production renderer docked beside the review panel: orbit, scrub, toggle boxes and segmentation, switch camera POVs. Accept or reject each capability with a named issue.
+4. **Finalize.** The sealed recipe can be exported, imported, and shared. Drop the same layout again and EgoLens recognizes the trained format and renders it in one click.
+
+Recipes are declarative JSON, never code, executed in an isolated graph runtime
+with resource limits. The same tools work unchanged in ChatGPT's in-app
+browser, the Codex app, and Chrome 146+ with
+`chrome://flags/#enable-webmcp-testing`.
+
+### Try it
+
+1. Download and unzip the sample: [PandaSet sequence 001, 80 frames, 439 MB](https://github.com/egolens/egolens/releases/download/webmcp-sample/egolens-sample-pandaset-001-full.zip) or the [6-frame version, 32 MB](https://github.com/egolens/egolens/releases/download/webmcp-sample/egolens-sample-pandaset-001-6frames.zip) (CC BY 4.0).
+2. Open [egolens.org](https://egolens.org) in a WebMCP-enabled browser and drop the folder.
+3. Say **"Teach EgoLens this dataset."** and review each capability as it renders.
+
+No agent handy? Click "teach a new adapter instead", then Import JSON with the
+[sealed recipe](https://github.com/egolens/egolens/releases/download/webmcp-sample/pandaset-001.egolens-adapter.json)
+from the release to render immediately.
+
+Datasets taught this way so far: A2D2, KITTI Raw, PandaSet. Judge notes, the
+prior-vs-new work split, and run logs are in
+[docs/WEBMCP_CHALLENGE.md](docs/WEBMCP_CHALLENGE.md). The WebMCP entry point is
+[`src/teachable/authoring/webMcp.ts`](src/teachable/authoring/webMcp.ts).
 
 ## Quick Start
 
