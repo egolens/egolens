@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { orderCamerasByYawV1, splitCamerasIntoRowsV1 } from '../cameraOrder'
+import { abbreviateCameraLabelV1, orderCamerasByYawV1, splitCamerasIntoRowsV1 } from '../cameraOrder'
 
 const yawRow = (id: number, yawDeg: number) => {
   const yaw = (yawDeg * Math.PI) / 180
@@ -27,5 +27,10 @@ describe('orderCamerasByYawV1', () => {
     const [top, bottom] = splitCamerasIntoRowsV1(cameras, rows)!
     expect(top.map((c) => c.label)).toEqual(['front_left', 'front', 'front_right'])
     expect(bottom.map((c) => c.label)).toEqual(['left', 'back', 'right'])
+  })
+
+  it('abbreviates camera labels by direction, not initials', () => {
+    expect(['FRONT-LEFT CAMERA', 'FRONT CAMERA', 'FRONT-RIGHT CAMERA', 'BACK CAMERA', 'LEFT CAMERA', 'RIGHT CAMERA', 'SIDE LEFT', 'REAR CENTER CAMERA', 'Grayscale left camera'].map(abbreviateCameraLabelV1))
+      .toEqual(['FL', 'F', 'FR', 'B', 'L', 'R', 'SL', 'B', 'GL'])
   })
 })

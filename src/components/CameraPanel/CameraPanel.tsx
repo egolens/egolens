@@ -16,7 +16,7 @@ import { useSceneStore } from '../../stores/useSceneStore'
 import type { ParquetRow } from '../../utils/merge'
 import { createTrackedObjectUrl, revokeTrackedObjectUrl } from '../../teachable/runtime/performanceProbe'
 import { colors, fonts, radius, shadows, alpha } from '../../theme'
-import { splitCamerasIntoRowsV1 } from '../../utils/cameraOrder'
+import { abbreviateCameraLabelV1, splitCamerasIntoRowsV1 } from '../../utils/cameraOrder'
 import { getManifest } from '../../adapters/registry'
 import ErrorBoundary from '../ErrorBoundary'
 import BBoxOverlayCanvas from './BBoxOverlayCanvas'
@@ -381,7 +381,7 @@ function CameraView({ cameraName, label, frameIndex, imageBuffer, boxes, boxMode
         whiteSpace: 'nowrap',
       }}>
         {window.innerWidth < 600
-          ? (label.includes(' ') ? label.split(' ').map(w => w[0]).join('') : label)
+          ? abbreviateCameraLabelV1(label)
           : label}
         {shortcutKey != null && (
           <span style={{ opacity: 0.5, marginLeft: 4, fontSize: '8px' }}>{shortcutKey}</span>
