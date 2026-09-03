@@ -439,6 +439,14 @@ export function assembleGraphSceneV1(input: {
     },
     relations,
     async loadFrame(index, request) {
+      // Absolute ego ← world for data stored in the (absolute) world frame:
+      // worldFromEgoByTimestamp is origin-relative (O⁻¹·W), so W⁻¹ = W_rel⁻¹·O⁻¹.
+      const egoFromWorldAt = (timestamp: bigint): Float64Array | null => {
+        const relative = worldFromEgoByTimestamp.get(timestamp)
+        if (!relative) return null
+        const inverse = invertRowMajor4x4([...relative])
+        return new Float64Array(worldOriginInverse ? multiplyRowMajor4x4(inverse, [...worldOriginInverse]) : inverse)
+      }
       if (disposed) throw new Error('Normalized scene has been disposed.')
       if (!Number.isSafeInteger(index) || index < 0 || index >= frames.length) throw new RangeError(`Frame index ${index} is out of range.`)
       if (request.signal?.aborted) throw new DOMException('Scene frame load was aborted.', 'AbortError')
@@ -460,14 +468,18 @@ export function assembleGraphSceneV1(input: {
         for (const binding of bindingsForFrame(binaryPointPlan, timelineFrame)) {
           const sensor = pointSensorForBinding(binding, 'lidar')
           if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          const worldFramePoints = binding.frameId === 'world'
+          if (worldFramePoints && !worldFromEgoByTimestamp.has(timelineFrame.timestamp)) {
+            throw new Error(`GRAPH_WORLD_FRAME_POSE_MISSING: point cloud for ${sensor.id} is declared in the world frame but no ego pose exists at timestamp ${timelineFrame.timestamp}`)
+          }
           const loaded = await loadBinaryPointCloud(
             binding,
             binaryPointPlan,
             segmentation,
             request.signal,
-            sensorTransformById.get(sensor.id) ?? binding.egoFromSensor,
+            worldFramePoints ? egoFromWorldAt(timelineFrame.timestamp) : (sensorTransformById.get(sensor.id) ?? binding.egoFromSensor),
           )
-          ;(frame.pointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId: sensor.id })
+          ;(frame.pointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId: sensor.id, ...(worldFramePoints ? { frameId: 'ego' } : {}) })
           if (requested.has('lidarSegmentation')) {
             ;(frame.lidarSegmentation as NormalizedFrameV1['lidarSegmentation'][number][]).push(
               ...loaded.segmentation.map((labels) => ({ ...labels, sensorId: sensor.id })),
@@ -733,9 +745,30 @@ export function assembleGraphSceneV1(input: {
   const objectTrajectories = new Map<string, TrajectoryPoint[]>()
   const objectCounts: Record<number, number> = {}
   const perTypeCounts = new Map<number, number[]>()
+  const egoFromWorldForBoxes = (timestamp: bigint): number[] | null => {
+    const relative = worldFromEgoByTimestamp.get(timestamp)
+    if (!relative) return null
+    const inverse = invertRowMajor4x4([...relative])
+    return worldOriginInverse ? multiplyRowMajor4x4(inverse, [...worldOriginInverse]) : inverse
+  }
   frames.forEach((timelineFrame, index) => {
-    const frameBoxes = boxesForFrame(boxes, timelineFrame)
-    if (frameBoxes.length === 0) return
+    const rawFrameBoxes = boxesForFrame(boxes, timelineFrame)
+    if (rawFrameBoxes.length === 0) return
+    const egoFromWorld = rawFrameBoxes.some((box) => box.frameId === 'world') ? egoFromWorldForBoxes(timelineFrame.timestamp) : null
+    if (rawFrameBoxes.some((box) => box.frameId === 'world') && !egoFromWorld) {
+      throw new Error(`GRAPH_WORLD_FRAME_POSE_MISSING: boxes are declared in the world frame but no ego pose exists at timestamp ${timelineFrame.timestamp}`)
+    }
+    const frameBoxes = rawFrameBoxes.map((box) => {
+      if (box.frameId !== 'world' || !egoFromWorld) return box
+      const m = egoFromWorld
+      const [x, y, z] = box.center
+      const center: [number, number, number] = [
+        m[0]! * x + m[1]! * y + m[2]! * z + m[3]!,
+        m[4]! * x + m[5]! * y + m[6]! * z + m[7]!,
+        m[8]! * x + m[9]! * y + m[10]! * z + m[11]!,
+      ]
+      return { ...box, center, heading: (box.heading ?? 0) + Math.atan2(m[4]!, m[0]!), frameId: 'ego' }
+    })
     const frameCounts = new Map<number, number>()
     lidarBoxByFrame.set(timestamps[index], frameBoxes.map((box) => ({
       'key.laser_object_id': box.id,
