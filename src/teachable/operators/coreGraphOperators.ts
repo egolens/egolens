@@ -866,20 +866,41 @@ const tokenJoin: CoreOperatorImplementationV1 = async (inputs, params) => {
   return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
 }
 
-/** Sensor pose from a calibration row: unit quaternion, or two basis axes (z = x × y). */
+/** Row-major 4×4 from a calibration matrix field (9 row-major rotation values plus an optional translation, or a 3×4/4×4 carrying its own). */
+function rowMajorPoseFromFields(calibration: Readonly<Record<string, unknown>>, matrixField: string, translationField: string | null): number[] {
+  const values = list(calibration[matrixField], matrixField).map((entry, index) => finite(entry, `${matrixField}[${index}]`))
+  if (values.length !== 9 && values.length !== 12 && values.length !== 16) throw new Error(`GRAPH_ROTATION_MATRIX_INVALID: ${matrixField} must hold 9, 12, or 16 row-major values`)
+  const stride = values.length === 9 ? 3 : 4
+  const r = (row: number, column: number) => values[row * stride + column]!
+  const t = values.length === 9
+    ? (translationField ? finiteTuple(calibration[translationField], 3, translationField) : [0, 0, 0])
+    : [r(0, 3), r(1, 3), r(2, 3)]
+  return [r(0, 0), r(0, 1), r(0, 2), t[0]!, r(1, 0), r(1, 1), r(1, 2), t[1]!, r(2, 0), r(2, 1), r(2, 2), t[2]!, 0, 0, 0, 1]
+}
+
+function columnMajorFromRowMajor(m: readonly number[]): number[] {
+  return [m[0]!, m[4]!, m[8]!, m[12]!, m[1]!, m[5]!, m[9]!, m[13]!, m[2]!, m[6]!, m[10]!, m[14]!, m[3]!, m[7]!, m[11]!, m[15]!]
+}
+
+/**
+ * Sensor pose (ego ← sensor, column-major 4×4) from a calibration row: unit quaternion, two basis
+ * axes (z = x × y), an identity, or row-major matrices. `rotationMatrixFields` composes several
+ * matrices left to right (KITTI: R_rect_00 · [R|T]_velo_to_cam) and `invertPose` flips a matrix
+ * that was published in the sensor ← ego direction.
+ */
 function calibrationPose(calibration: Readonly<Record<string, unknown>>, params: Readonly<Record<string, unknown>>): number[] {
+  if (params.rotationForm === 'identity') return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
   const translation = params.rotationForm === 'matrix' && typeof params.translationField !== 'string'
     ? [0, 0, 0] as [number, number, number]
     : finiteTuple(calibration[String(params.translationField)], 3, String(params.translationField)) as [number, number, number]
   if (params.rotationForm === 'matrix') {
-    const field = String(params.rotationMatrixField)
-    const values = list(calibration[field], field).map((entry, index) => finite(entry, `${field}[${index}]`))
-    if (values.length !== 9 && values.length !== 12 && values.length !== 16) throw new Error(`GRAPH_ROTATION_MATRIX_INVALID: ${field} must hold 9, 12, or 16 row-major values`)
-    const stride = values.length === 9 ? 3 : 4
-    const r = (row: number, column: number) => values[row * stride + column]!
-    // Column-major 4×4 (ego ← sensor); a 3×4/4×4 matrix also carries its own translation.
-    const t = values.length === 9 ? translation : [r(0, 3), r(1, 3), r(2, 3)]
-    return [r(0, 0), r(1, 0), r(2, 0), 0, r(0, 1), r(1, 1), r(2, 1), 0, r(0, 2), r(1, 2), r(2, 2), 0, t[0]!, t[1]!, t[2]!, 1]
+    const chain = Array.isArray(params.rotationMatrixFields) && params.rotationMatrixFields.length > 0
+      ? (params.rotationMatrixFields as readonly { matrixField: string; translationField?: string }[])
+      : [{ matrixField: String(params.rotationMatrixField), translationField: typeof params.translationField === 'string' ? params.translationField : undefined }]
+    let pose = rowMajorPoseFromFields(calibration, chain[0]!.matrixField, chain[0]!.translationField ?? null)
+    for (const link of chain.slice(1)) pose = multiplyRowMajor4x4(pose, rowMajorPoseFromFields(calibration, link.matrixField, link.translationField ?? null))
+    if (params.invertPose === true) pose = invertRowMajor4x4(pose)
+    return columnMajorFromRowMajor(pose)
   }
   if (params.rotationForm === 'axes') {
     const axisFields = fieldList(params, 'axisFields', [])

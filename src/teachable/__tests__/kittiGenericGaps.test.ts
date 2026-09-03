@@ -49,6 +49,14 @@ describe('generic gaps surfaced by the KITTI Raw rung', () => {
     // 3×4 carries its own translation; no translationField needed
     const twelve = (await join({ ...base, calibration: records([{ name: 'velodyne', Tr: [1, 0, 0, 5, 0, 1, 0, 6, 0, 0, 1, 7] }]) }, { ...params, translationField: undefined, rotationMatrixField: 'Tr' }, ctx)).pointClouds as { bindings: { egoFromSensor: Float64Array }[] }
     expect(round(twelve.bindings[0]!.egoFromSensor)).toEqual([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1])
+    // identity: the sensor frame is the ego frame
+    const identity = (await join({ ...base, calibration: records([{ name: 'velodyne' }]) }, { ...params, rotationForm: 'identity' }, ctx)).pointClouds
+    expect(round(identity.bindings[0]!.egoFromSensor)).toEqual([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+    // composed sensor ← ego chain (R_rect · [R|T]) inverted into ego ← sensor
+    const composed = (await join({ ...base, calibration: records([{ name: 'velodyne', Rr: [1, 0, 0, 0, 1, 0, 0, 0, 1], R: [0, -1, 0, 1, 0, 0, 0, 0, 1], T: [1, 2, 3] }]) }, {
+      ...params, translationField: undefined, rotationMatrixFields: [{ matrixField: 'Rr' }, { matrixField: 'R', translationField: 'T' }], invertPose: true,
+    }, ctx)).pointClouds
+    expect(round(composed.bindings[0]!.egoFromSensor)).toEqual([0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, -2, 1, -3, 1])
   })
 
   it('normalizes 3D boxes from plain records', async () => {
