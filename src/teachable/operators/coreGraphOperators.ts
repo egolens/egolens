@@ -579,6 +579,8 @@ const recordsExplode: CoreOperatorImplementationV1 = async (inputs, params) => {
   const rows = await materialize(inputs.rows)
   const path = String(params.path).split('.').filter((segment) => segment.length > 0)
   const indexField = typeof params.indexField === 'string' ? params.indexField : null
+  // Parent field added to the emitted index (KITTI tracklets: first_frame + local pose index).
+  const indexOffsetField = typeof params.indexOffsetField === 'string' ? params.indexOffsetField : null
   const prefix = typeof params.prefix === 'string' ? params.prefix : ''
   const keepNested = params.keepNested === true
   const out: Record<string, unknown>[] = []
@@ -591,7 +593,10 @@ const recordsExplode: CoreOperatorImplementationV1 = async (inputs, params) => {
       if (!keepNested && key === path[0]) continue
       parent[key] = value
     }
-    elements.forEach((element, index) => {
+    const offsetValue = indexOffsetField ? Number(row[indexOffsetField]) : 0
+    if (indexOffsetField && !Number.isFinite(offsetValue)) throw new Error(`GRAPH_EXPLODE_OFFSET_INVALID: ${indexOffsetField} is not numeric`)
+    elements.forEach((element, localIndex) => {
+      const index = localIndex + offsetValue
       const fields = typeof element === 'object' && element !== null && !Array.isArray(element)
         ? Object.fromEntries(Object.entries(element as Record<string, unknown>).map(([key, value]) => [`${prefix}${key}`, value]))
         : { [`${prefix}value`]: element }
