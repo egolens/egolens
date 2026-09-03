@@ -723,7 +723,11 @@ const relativePoses: CoreOperatorImplementationV1 = async (inputs, params) => {
   const absolute = new Map<bigint, number[]>()
   for (const row of rows) {
     let matrix: number[]
-    if (typeof params.matrixField === 'string') {
+    if (Array.isArray(params.poseChain) && params.poseChain.length > 0) {
+      const chain = params.poseChain as PoseLinkV1[]
+      matrix = poseLinkFromRow(row, chain[0]!)
+      for (const link of chain.slice(1)) matrix = multiplyRowMajor4x4(matrix, poseLinkFromRow(row, link))
+    } else if (typeof params.matrixField === 'string') {
       matrix = list(row[params.matrixField], params.matrixField)
       if (matrix.length !== 16) throw new Error(`GRAPH_MATRIX_INVALID: ${params.matrixField}`)
     } else {
@@ -938,6 +942,9 @@ interface PoseLinkV1 {
   readonly matrixField?: string
   readonly translationField?: string
   readonly translationFields?: readonly string[]
+  /** Constant link: a literal unit quaternion [w, x, y, z] (and optional translation) instead of row fields. */
+  readonly quaternion?: readonly number[]
+  readonly translation?: readonly number[]
   readonly invert?: boolean
 }
 
@@ -953,7 +960,13 @@ function translationFromRow(row: Readonly<Record<string, unknown>>, link: { tran
 /** One row-major pose link from a row: quaternion (array or 4 scalar fields) or matrix, plus translation. */
 function poseLinkFromRow(row: Readonly<Record<string, unknown>>, link: PoseLinkV1): number[] {
   let pose: number[]
-  if (typeof link.matrixField === 'string') {
+  if (Array.isArray(link.quaternion)) {
+    // Constant link, e.g. a fixed axis convention (PandaSet lidar frame is y-forward, x-right:
+    // ego ← lidar is a −90° yaw, quaternion [0.7071, 0, 0, −0.7071]).
+    const quaternion = finiteTuple(link.quaternion, 4, 'poseChain.quaternion') as [number, number, number, number]
+    const translation = Array.isArray(link.translation) ? finiteTuple(link.translation, 3, 'poseChain.translation') as [number, number, number] : [0, 0, 0] as [number, number, number]
+    pose = quaternionToMatrix4x4(quaternion, translation)
+  } else if (typeof link.matrixField === 'string') {
     pose = rowMajorPoseFromFields(row, link.matrixField, typeof link.translationField === 'string' ? link.translationField : null)
     if (Array.isArray(link.translationFields)) { const t = translationFromRow(row, link, null); pose[3] = t[0]; pose[7] = t[1]; pose[11] = t[2] }
   } else {
