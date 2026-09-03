@@ -1,4 +1,6 @@
 import { tableFromArrays, tableToIPC } from '@uwdata/flechette'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SourceInventoryV1 } from '../authoring/SourceInventory'
 import { featherSchemaFromPrefixV1, inspectSourceInventoryV1 } from '../authoring/inspection'
@@ -42,5 +44,20 @@ describe('feather table-schema inspection', () => {
         { name: 'sensor_name', logicalType: 'utf8', arrowTypeId: -1, nullable: true },
       ],
     })
+  })
+})
+
+describe('pickle table-schema inspection', () => {
+  it('exposes DataFrame column names, types, samples, and row count for .pkl.gz files', async () => {
+    const bytes = readFileSync(path.join(__dirname, '..', '__fixtures__', 'pandas-cuboids-sample.pkl.gz'))
+    const inventory = new SourceInventoryV1([
+      ['annotations/cuboids/00.pkl.gz', new File([bytes], '00.pkl.gz', { lastModified: 1 })],
+    ], { sessionId: 'pickle-session' })
+    const result = await inspectSourceInventoryV1(inventory, { mode: 'table-schema', path: 'annotations/cuboids/00.pkl.gz', maxBytes: 4096 })
+    const data = result.data as { numRows: number; schema: { name: string; type: string; sample: unknown[] }[] }
+    expect(data.numRows).toBe(2)
+    expect(data.schema.find((column) => column.name === 'label')).toEqual({ name: 'label', type: 'string', sample: ['Car', 'Pedestrian'] })
+    expect(data.schema.find((column) => column.name === 'stationary')?.type).toBe('boolean')
+    expect(data.schema.find((column) => column.name === 'position.x')?.type).toBe('number')
   })
 })

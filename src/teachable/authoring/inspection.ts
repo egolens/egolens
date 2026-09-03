@@ -1,6 +1,7 @@
 import { tableFromIPC } from '@uwdata/flechette'
 import { featherLogicalTypeV1, type FeatherLogicalTypeV1, type FlechetteFieldLike } from '../operators/featherColumns'
 import { openParquetFile } from '../../utils/parquet'
+import { decodePickleDataFrameV1 } from '../operators/pickleFrames'
 import type { SourceInventoryEntryV1 } from './SourceInventory'
 import { SourceInventoryV1 } from './SourceInventory'
 
@@ -11,7 +12,13 @@ export const INSPECTION_LIMITS_V1 = Object.freeze({
   maxJsonValues: 512,
   maxJsonDepth: 12,
   maxHexBytes: 4 * 1024,
+  /** A pickled DataFrame has no footer or leading schema; the whole stream is decoded, bounded by this. */
+  maxPickleBytes: 64 * 1024 * 1024,
 })
+
+function isPickleEntry(path: string, extension: string): boolean {
+  return extension === '.pkl' || extension === '.pickle' || /\.(?:pkl|pickle)\.gz$/u.test(path)
+}
 
 export type SourceInspectionModeV1 = 'inventory' | 'metadata' | 'bytes' | 'text' | 'json' | 'json-sample' | 'table-schema'
 
@@ -253,6 +260,27 @@ export async function inspectSourceInventoryV1(
       path: entry.path,
       truncated: false,
       data: { byteLength: entry.size, schema: featherSchemaFromPrefixV1(prefix, maxBytes) },
+    }
+  }
+  if (request.mode === 'table-schema' && isPickleEntry(entry.path, entry.extension)) {
+    // pandas DataFrame pickles (optionally gzip): the column index precedes the
+    // block values but the stream cannot be parsed partially, so the whole file
+    // is decoded under maxPickleBytes and only names, types, samples, and the
+    // row count are returned.
+    if (entry.size > INSPECTION_LIMITS_V1.maxPickleBytes) throw new Error(`Pickle exceeds ${INSPECTION_LIMITS_V1.maxPickleBytes} bytes.`)
+    const bytes = new Uint8Array(await byteSource.read(entry.path, { end: entry.size, signal }))
+    abortIfNeeded(signal)
+    const frame = await decodePickleDataFrameV1(bytes, { maxExpandedBytes: INSPECTION_LIMITS_V1.maxPickleBytes })
+    const schema = frame.columns.map((column) => {
+      const first = column.values.find((value) => value !== null && value !== undefined)
+      return { name: column.name, type: first === undefined ? 'null' : typeof first, sample: column.values.slice(0, 2) }
+    })
+    return {
+      mode: request.mode,
+      sessionId: inventory.sessionId,
+      path: entry.path,
+      truncated: false,
+      data: { byteLength: entry.size, numRows: frame.rowCount, schema },
     }
   }
   if (request.mode === 'table-schema') {
