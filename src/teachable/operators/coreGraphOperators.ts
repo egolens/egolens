@@ -372,7 +372,7 @@ export async function loadGraphParquetFrameRowsV1(
 function recordsInputInvalid(inputName: string, value: unknown): Error {
   const kind = inputKindLabel(value)
   const hint = kind === 'binary-collection' || kind === 'encoded-collection'
-    ? ' A binary collection is a per-file stream (point clouds, images, labels): feed it to timeline.join / image.bind_camera_frame / labels.attach_by_point_index, and give records operators the small metadata tables (timestamps, poses, cuboids) instead. Do not re-read point-cloud files with a row reader.'
+    ? ' A binary collection is a per-file stream (point clouds, images, labels): feed it to timeline.join / image.bind_camera_frame / labels.attach_by_point_index. To get one row per file (path, index, stem) for sampleData, use records.from_files on the same collection, then records.derive the frame key from the stem. Do not re-read point-cloud files with a row reader.'
     : kind === 'point-cloud-plan' || kind === 'binary-point-cloud-plan'
       ? ' A point-cloud plan is already bound; connect it to outputs.pointClouds or labels.attach_by_point_index, not to records operators.'
       : ''
@@ -441,6 +441,33 @@ const pickleRecords: CoreOperatorImplementationV1 = (inputs, params, context) =>
  * in-app browser tab). Point clouds belong to the streaming *_records readers.
  */
 export const MATERIALIZED_ROWS_BUDGET_V1 = 250_000
+
+/**
+ * One record per file of a collection (binary, encoded, or table). This is how
+ * a recipe gets the per-file rows that timeline.join / image.bind_camera_frame
+ * need for sampleData without re-reading the files through a row reader.
+ */
+const recordsFromFiles: CoreOperatorImplementationV1 = (inputs, params) => {
+  const collection = inputs.collection as { kind?: unknown; files?: unknown } | undefined
+  if (!collection || typeof collection !== 'object' || !Array.isArray(collection.files)) {
+    throw new Error(`GRAPH_COLLECTION_INPUT_INVALID: inputs.collection must be a file collection from a reader (got ${inputKindLabel(inputs.collection)})`)
+  }
+  const pathField = typeof params.pathField === 'string' ? params.pathField : 'path'
+  const indexField = typeof params.indexField === 'string' ? params.indexField : 'index'
+  const rows = (collection.files as readonly { path: string; size?: number }[]).map((file, index) => {
+    const leaf = file.path.split('/').at(-1) ?? file.path
+    const dot = leaf.indexOf('.')
+    return {
+      [pathField]: file.path,
+      [indexField]: index,
+      name: leaf,
+      stem: dot > 0 ? leaf.slice(0, dot) : leaf,
+      directory: file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '',
+      ...(typeof file.size === 'number' ? { size: file.size } : {}),
+    }
+  })
+  return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
+}
 
 /** Whole-file gzip+pickle DataFrame → one record per row (metadata tables such as cuboids or poses). */
 const pickleRows: CoreOperatorImplementationV1 = async (inputs, params, context) => {
@@ -1716,6 +1743,7 @@ export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOpe
   'archive.npz_records': npzRecords,
   'archive.pickle_records': pickleRecords,
   'archive.pickle_rows': pickleRows,
+  'records.from_files': recordsFromFiles,
   'binary.interleaved_records': interleavedRecords,
   'binary.pcd_records': pcdRecords,
   'feather.columns': featherColumns,

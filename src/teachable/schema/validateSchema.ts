@@ -40,8 +40,20 @@ function schemaDiagnostic(error: ErrorObject): AdapterDiagnostic {
     jsonPointer: error.instancePath || '/',
     expected: error.schema,
     got: error.data,
-    hint: error.message ?? 'The adapter does not match EgoLensAdapterRecipeV1.',
+    hint: schemaHint(error),
   }
+}
+
+/** ajv's message alone ("must NOT have additional properties") hides the one fact the author needs. */
+function schemaHint(error: ErrorObject): string {
+  if (error.keyword === 'additionalProperties') {
+    const property = String((error.params as { additionalProperty?: unknown }).additionalProperty ?? '?')
+    const allowed = Object.keys((error.parentSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {})
+    return `Unknown property "${property}" at ${error.instancePath || '/'}${allowed.length > 0 ? `; allowed here: ${allowed.join(', ')}` : ''}.`
+  }
+  if (error.keyword === 'enum') return `${error.message ?? 'must match an allowed value'}: ${JSON.stringify((error.params as { allowedValues?: unknown }).allowedValues ?? [])}`
+  if (error.keyword === 'required') return `Missing required property "${String((error.params as { missingProperty?: unknown }).missingProperty ?? '?')}" at ${error.instancePath || '/'}.`
+  return error.message ?? 'The adapter does not match EgoLensAdapterRecipeV1.'
 }
 
 function inspectNode(node: Node, depth: number, diagnostics: AdapterDiagnostic[]): void {
