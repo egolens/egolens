@@ -85,7 +85,13 @@ function integerTimestamp(value: unknown, label: string): bigint {
     const micros = BigInt((fraction + '000000').slice(0, 6))
     return seconds * 1_000_000n + micros
   }
-  throw new Error(`GRAPH_TIMESTAMP_INVALID: ${label}`)
+  const shown = typeof value === 'number' || typeof value === 'string' ? String(value).slice(0, 40) : typeof value
+  const advice = typeof value === 'number' && !Number.isInteger(value)
+    ? 'it is a fractional number: convert float seconds with records.derive { field, from, scale: 1000000, integer: true } and declare timestampUnit "us"'
+    : typeof value === 'string' && /^\d+\.\d+$/u.test(value)
+      ? 'it is a decimal string: convert with records.derive { field, from, scale: 1000000, integer: true } and declare timestampUnit "us"'
+      : 'timestamps must be integers in the declared unit (or ISO calendar strings)'
+  throw new Error(`GRAPH_TIMESTAMP_INVALID: ${label} = ${shown}; ${advice}`)
 }
 
 function fieldList(params: Readonly<Record<string, unknown>>, key: string, fallback: readonly string[]): readonly string[] {

@@ -1,0 +1,1581 @@
+{
+  "kind": "egolens-adapter",
+  "schemaVersion": 1,
+  "engine": {
+    "minimumVersion": "1.0.0",
+    "requiredOperators": {
+      "text.table": {
+        "major": 1,
+        "provider": "core"
+      },
+      "binary.interleaved_records": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.encoded_bytes": {
+        "major": 1,
+        "provider": "core"
+      },
+      "xml.records": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.unpivot": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.explode": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.derive": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.select": {
+        "major": 1,
+        "provider": "core"
+      },
+      "relations.token_join": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.sort": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.join": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.bind_camera_frame": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.geodetic_poses": {
+        "major": 1,
+        "provider": "core"
+      },
+      "geometry.normalize_boxes3d": {
+        "major": 1,
+        "provider": "core"
+      }
+    }
+  },
+  "identity": {
+    "name": "KITTI Raw synced and rectified drive",
+    "description": "KITTI Raw 2011_09_26_drive_0001_sync with four rectified cameras, Velodyne, OXTS, and tracklets."
+  },
+  "match": {
+    "inventory": {
+      "rootEntries": [
+        {
+          "path": "2011_09_26_drive_0001_sync",
+          "required": true
+        },
+        {
+          "path": "calib_cam_to_cam.txt",
+          "required": true
+        },
+        {
+          "path": "calib_velo_to_cam.txt",
+          "required": true
+        },
+        {
+          "path": "calib_imu_to_velo.txt",
+          "required": true
+        }
+      ]
+    },
+    "all": [
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/image_00/data/*.png",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/image_01/data/*.png",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/image_02/data/*.png",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/image_03/data/*.png",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/velodyne_points/data/*.bin",
+        "minCount": 1
+      },
+      {
+        "kind": "size",
+        "glob": "2011_09_26_drive_0001_sync/velodyne_points/data/*.bin",
+        "minimum": 16,
+        "divisibleBy": 16
+      },
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/oxts/data/*.txt",
+        "minCount": 1
+      },
+      {
+        "kind": "path",
+        "glob": "2011_09_26_drive_0001_sync/tracklet_labels.xml",
+        "minCount": 1
+      }
+    ]
+  },
+  "sources": {
+    "master_timestamps": {
+      "reader": "text.table",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/oxts/timestamps.txt"
+      },
+      "params": {
+        "layout": "lines",
+        "field": "stamp",
+        "indexField": "frame",
+        "pathField": "source_path",
+        "maxRows": 108
+      }
+    },
+    "lidar_timestamps": {
+      "reader": "text.table",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/velodyne_points/timestamps.txt"
+      },
+      "params": {
+        "layout": "lines",
+        "field": "stamp",
+        "indexField": "frame",
+        "pathField": "source_path",
+        "maxRows": 108
+      }
+    },
+    "oxts_rows": {
+      "reader": "text.table",
+      "files": {
+        "glob": "2011_09_26_drive_0001_sync/oxts/data/*.txt",
+        "order": "numeric-path",
+        "minCount": 108
+      },
+      "params": {
+        "layout": "delimited",
+        "delimiter": " ",
+        "header": false,
+        "numeric": true,
+        "pathField": "path",
+        "maxRows": 108,
+        "maxColumns": 30,
+        "columns": [
+          "lat",
+          "lon",
+          "alt",
+          "roll",
+          "pitch",
+          "yaw",
+          "vn",
+          "ve",
+          "vf",
+          "vl",
+          "vu",
+          "ax",
+          "ay",
+          "az",
+          "af",
+          "al",
+          "au",
+          "wx",
+          "wy",
+          "wz",
+          "wf",
+          "wl",
+          "wu",
+          "pos_accuracy",
+          "vel_accuracy",
+          "navstat",
+          "numsats",
+          "posmode",
+          "velmode",
+          "orimode"
+        ]
+      }
+    },
+    "velodyne_points": {
+      "reader": "binary.interleaved_records",
+      "files": {
+        "glob": "2011_09_26_drive_0001_sync/velodyne_points/data/*.bin",
+        "order": "numeric-path",
+        "minCount": 108
+      },
+      "params": {
+        "strideBytes": 16,
+        "littleEndian": true,
+        "fields": [
+          {
+            "name": "x",
+            "type": "float32",
+            "offsetBytes": 0
+          },
+          {
+            "name": "y",
+            "type": "float32",
+            "offsetBytes": 4
+          },
+          {
+            "name": "z",
+            "type": "float32",
+            "offsetBytes": 8
+          },
+          {
+            "name": "reflectance",
+            "type": "float32",
+            "offsetBytes": 12
+          }
+        ],
+        "maxRecords": 160000,
+        "maxOutputBytes": 67108864
+      }
+    },
+    "camera_pngs": {
+      "reader": "image.encoded_bytes",
+      "files": {
+        "glob": "2011_09_26_drive_0001_sync/image_0?/data/*.png",
+        "order": "numeric-path",
+        "minCount": 432
+      },
+      "params": {
+        "mimeType": "image/png"
+      }
+    },
+    "camera_calibration": {
+      "reader": "text.table",
+      "files": {
+        "exact": "calib_cam_to_cam.txt"
+      },
+      "params": {
+        "layout": "key-values",
+        "keySeparator": ":",
+        "numeric": true,
+        "pathField": "path",
+        "maxRows": 64,
+        "maxColumns": 64
+      }
+    },
+    "velo_calibration": {
+      "reader": "text.table",
+      "files": {
+        "exact": "calib_velo_to_cam.txt"
+      },
+      "params": {
+        "layout": "key-values",
+        "keySeparator": ":",
+        "numeric": true,
+        "pathField": "path",
+        "maxRows": 8,
+        "maxColumns": 16
+      }
+    },
+    "tracklets": {
+      "reader": "xml.records",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/tracklet_labels.xml"
+      },
+      "params": {
+        "recordPath": "boost_serialization/tracklets/item",
+        "pathField": "source_path",
+        "numeric": true,
+        "maxRecords": 512,
+        "maxDepth": 64
+      }
+    },
+    "camera_timestamps_00": {
+      "reader": "text.table",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/image_00/timestamps.txt"
+      },
+      "params": {
+        "layout": "lines",
+        "field": "stamp",
+        "indexField": "frame",
+        "pathField": "source_path",
+        "maxRows": 108
+      }
+    },
+    "camera_timestamps_01": {
+      "reader": "text.table",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/image_01/timestamps.txt"
+      },
+      "params": {
+        "layout": "lines",
+        "field": "stamp",
+        "indexField": "frame",
+        "pathField": "source_path",
+        "maxRows": 108
+      }
+    },
+    "camera_timestamps_02": {
+      "reader": "text.table",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/image_02/timestamps.txt"
+      },
+      "params": {
+        "layout": "lines",
+        "field": "stamp",
+        "indexField": "frame",
+        "pathField": "source_path",
+        "maxRows": 108
+      }
+    },
+    "camera_timestamps_03": {
+      "reader": "text.table",
+      "files": {
+        "exact": "2011_09_26_drive_0001_sync/image_03/timestamps.txt"
+      },
+      "params": {
+        "layout": "lines",
+        "field": "stamp",
+        "indexField": "frame",
+        "pathField": "source_path",
+        "maxRows": 108
+      }
+    }
+  },
+  "scene": {
+    "formatId": "kitti-raw",
+    "timeline": {
+      "timestampUnit": "us",
+      "nominalFrameRate": 10
+    },
+    "coordinateFrames": [
+      {
+        "id": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "velodyne_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "image_00_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "right",
+          "y": "down",
+          "z": "forward",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "image_01_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "right",
+          "y": "down",
+          "z": "forward",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "image_02_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "right",
+          "y": "down",
+          "z": "forward",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "image_03_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "right",
+          "y": "down",
+          "z": "forward",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      }
+    ],
+    "sensors": [
+      {
+        "id": "image_00",
+        "rendererId": 0,
+        "label": "Grayscale left camera",
+        "modality": "camera",
+        "frameId": "image_00_frame",
+        "color": "#A0A0A0",
+        "image": {
+          "width": 1242,
+          "height": 375,
+          "model": "pinhole",
+          "view": "front",
+          "povLabel": "gray-left",
+          "aliases": [
+            "cam0"
+          ]
+        }
+      },
+      {
+        "id": "image_01",
+        "rendererId": 1,
+        "label": "Grayscale right camera",
+        "modality": "camera",
+        "frameId": "image_01_frame",
+        "color": "#D0D0D0",
+        "image": {
+          "width": 1242,
+          "height": 375,
+          "model": "pinhole",
+          "view": "front-right",
+          "povLabel": "gray-right",
+          "aliases": [
+            "cam1"
+          ]
+        }
+      },
+      {
+        "id": "image_02",
+        "rendererId": 2,
+        "label": "Color left camera",
+        "modality": "camera",
+        "frameId": "image_02_frame",
+        "color": "#4E79A7",
+        "image": {
+          "width": 1242,
+          "height": 375,
+          "model": "pinhole",
+          "view": "front",
+          "povLabel": "color-left",
+          "aliases": [
+            "cam2"
+          ]
+        }
+      },
+      {
+        "id": "image_03",
+        "rendererId": 3,
+        "label": "Color right camera",
+        "modality": "camera",
+        "frameId": "image_03_frame",
+        "color": "#F28E2B",
+        "image": {
+          "width": 1242,
+          "height": 375,
+          "model": "pinhole",
+          "view": "front-right",
+          "povLabel": "color-right",
+          "aliases": [
+            "cam3"
+          ]
+        }
+      },
+      {
+        "id": "velodyne_points",
+        "rendererId": 4,
+        "label": "Velodyne HDL-64E",
+        "modality": "lidar",
+        "frameId": "velodyne_frame",
+        "color": "#59A14F"
+      }
+    ],
+    "taxonomies": [
+      {
+        "id": "kitti_objects",
+        "role": "objects",
+        "classes": [
+          {
+            "id": "car",
+            "rendererId": 1,
+            "label": "Car",
+            "color": "#4E79A7",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "van",
+            "rendererId": 2,
+            "label": "Van",
+            "color": "#76B7B2",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "truck",
+            "rendererId": 3,
+            "label": "Truck",
+            "color": "#59A14F",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "pedestrian",
+            "rendererId": 4,
+            "label": "Pedestrian",
+            "color": "#E15759",
+            "modelHint": "pedestrian"
+          },
+          {
+            "id": "person_sitting",
+            "rendererId": 5,
+            "label": "Person sitting",
+            "color": "#FF9DA7",
+            "modelHint": "pedestrian"
+          },
+          {
+            "id": "cyclist",
+            "rendererId": 6,
+            "label": "Cyclist",
+            "color": "#F28E2B",
+            "modelHint": "cyclist"
+          },
+          {
+            "id": "tram",
+            "rendererId": 7,
+            "label": "Tram",
+            "color": "#B07AA1",
+            "modelHint": "vehicle"
+          },
+          {
+            "id": "misc",
+            "rendererId": 8,
+            "label": "Miscellaneous",
+            "color": "#BAB0AC",
+            "modelHint": "box"
+          }
+        ]
+      }
+    ],
+    "pointAttributes": [
+      {
+        "id": "x",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "y",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "z",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "reflectance",
+        "storage": "float32",
+        "range": [
+          0,
+          1
+        ]
+      }
+    ],
+    "pointLayout": {
+      "interleavedAttributes": [
+        "x",
+        "y",
+        "z",
+        "reflectance"
+      ],
+      "colorModes": [
+        "distance",
+        "intensity"
+      ]
+    }
+  },
+  "pipelines": {
+    "timeline_pipeline": {
+      "nodes": [
+        {
+          "id": "sort_timeline",
+          "op": "timeline.sort",
+          "version": 1,
+          "inputs": {
+            "rows": "master_timestamps.rows"
+          },
+          "params": {
+            "timestampField": "stamp",
+            "timestampUnit": "us",
+            "keyField": "frame",
+            "groupField": "source_path"
+          }
+        }
+      ],
+      "result": "sort_timeline.frames"
+    },
+    "ego_pose_pipeline": {
+      "nodes": [
+        {
+          "id": "oxts_key",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "oxts_rows.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "frame_key",
+                "from": "path",
+                "pattern": "^.*/0*([0-9]+)\\.txt$",
+                "replacement": "$1",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "stamp_key",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "master_timestamps.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "frame_key",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "oxts_with_stamp",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "oxts_key.rows",
+            "right": "stamp_key.rows"
+          },
+          "params": {
+            "leftKey": "frame_key",
+            "rightKey": "frame_key",
+            "join": "inner",
+            "rightFields": {
+              "stamp": "stamp"
+            }
+          }
+        },
+        {
+          "id": "geodetic_poses",
+          "op": "geometry.geodetic_poses",
+          "version": 1,
+          "inputs": {
+            "rows": "oxts_with_stamp.rows"
+          },
+          "params": {
+            "timestampField": "stamp",
+            "latitudeField": "lat",
+            "longitudeField": "lon",
+            "altitudeField": "alt",
+            "rollField": "roll",
+            "pitchField": "pitch",
+            "yawField": "yaw",
+            "angleUnit": "radians"
+          }
+        }
+      ],
+      "result": "geodetic_poses.poses"
+    },
+    "point_cloud_pipeline": {
+      "nodes": [
+        {
+          "id": "lidar_base_fields",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "master_timestamps.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "stem",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true,
+                "pad": 10
+              },
+              {
+                "field": "frame_key",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "sensor_id",
+                "from": "source_path",
+                "pattern": "^.*$",
+                "replacement": "velodyne_points",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "lidar_sample_key",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "lidar_base_fields.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "path",
+                "from": "stem",
+                "pattern": "^([0-9]{10})$",
+                "replacement": "2011_09_26_drive_0001_sync/velodyne_points/data/$1.bin",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "tag_velo_calibration",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "velo_calibration.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "sensor_id",
+                "from": "path",
+                "pattern": "^.*$",
+                "replacement": "velodyne_points",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "bind_lidar",
+          "op": "timeline.join",
+          "version": 1,
+          "inputs": {
+            "records": "velodyne_points.records",
+            "sampleData": "lidar_sample_key.rows",
+            "calibration": "tag_velo_calibration.rows",
+            "sensors": "tag_velo_calibration.rows"
+          },
+          "params": {
+            "mode": "token",
+            "pathField": "path",
+            "frameKeyField": "frame",
+            "recordKeyField": "frame",
+            "timestampField": "stamp",
+            "recordCalibrationKeyField": "sensor_id",
+            "calibrationKeyField": "sensor_id",
+            "calibrationSensorKeyField": "sensor_id",
+            "sensorKeyField": "sensor_id",
+            "sensorIdField": "sensor_id",
+            "quaternionField": "R",
+            "translationField": "T",
+            "rotationForm": "identity",
+            "outputFrame": "ego"
+          }
+        }
+      ],
+      "result": "bind_lidar.pointClouds"
+    },
+    "camera_image_pipeline": {
+      "nodes": [
+        {
+          "id": "camera_00_fields",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_timestamps_00.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "stem",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true,
+                "pad": 10
+              },
+              {
+                "field": "camera_stamp_00",
+                "from": "stamp",
+                "pattern": "^(.+)$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "camera_sensor_id_00",
+                "from": "source_path",
+                "pattern": "^.*$",
+                "replacement": "image_00",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_00_path",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_00_fields.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "camera_path_00",
+                "from": "stem",
+                "pattern": "^([0-9]{10})$",
+                "replacement": "2011_09_26_drive_0001_sync/image_00/data/$1.png",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_01_fields",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_timestamps_01.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "stem",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true,
+                "pad": 10
+              },
+              {
+                "field": "camera_stamp_01",
+                "from": "stamp",
+                "pattern": "^(.+)$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "camera_sensor_id_01",
+                "from": "source_path",
+                "pattern": "^.*$",
+                "replacement": "image_01",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_01_path",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_01_fields.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "camera_path_01",
+                "from": "stem",
+                "pattern": "^([0-9]{10})$",
+                "replacement": "2011_09_26_drive_0001_sync/image_01/data/$1.png",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_02_fields",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_timestamps_02.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "stem",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true,
+                "pad": 10
+              },
+              {
+                "field": "camera_stamp_02",
+                "from": "stamp",
+                "pattern": "^(.+)$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "camera_sensor_id_02",
+                "from": "source_path",
+                "pattern": "^.*$",
+                "replacement": "image_02",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_02_path",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_02_fields.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "camera_path_02",
+                "from": "stem",
+                "pattern": "^([0-9]{10})$",
+                "replacement": "2011_09_26_drive_0001_sync/image_02/data/$1.png",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_03_fields",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_timestamps_03.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "stem",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true,
+                "pad": 10
+              },
+              {
+                "field": "camera_stamp_03",
+                "from": "stamp",
+                "pattern": "^(.+)$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "camera_sensor_id_03",
+                "from": "source_path",
+                "pattern": "^.*$",
+                "replacement": "image_03",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "camera_03_path",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_03_fields.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "camera_path_03",
+                "from": "stem",
+                "pattern": "^([0-9]{10})$",
+                "replacement": "2011_09_26_drive_0001_sync/image_03/data/$1.png",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "join_camera_01",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "camera_00_path.rows",
+            "right": "camera_01_path.rows"
+          },
+          "params": {
+            "leftKey": "frame",
+            "rightKey": "frame",
+            "join": "inner",
+            "rightFields": {
+              "camera_stamp_01": "camera_stamp_01",
+              "camera_path_01": "camera_path_01",
+              "camera_sensor_id_01": "camera_sensor_id_01"
+            }
+          }
+        },
+        {
+          "id": "join_camera_02",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "join_camera_01.rows",
+            "right": "camera_02_path.rows"
+          },
+          "params": {
+            "leftKey": "frame",
+            "rightKey": "frame",
+            "join": "inner",
+            "rightFields": {
+              "camera_stamp_02": "camera_stamp_02",
+              "camera_path_02": "camera_path_02",
+              "camera_sensor_id_02": "camera_sensor_id_02"
+            }
+          }
+        },
+        {
+          "id": "join_camera_03",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "join_camera_02.rows",
+            "right": "camera_03_path.rows"
+          },
+          "params": {
+            "leftKey": "frame",
+            "rightKey": "frame",
+            "join": "inner",
+            "rightFields": {
+              "camera_stamp_03": "camera_stamp_03",
+              "camera_path_03": "camera_path_03",
+              "camera_sensor_id_03": "camera_sensor_id_03"
+            }
+          }
+        },
+        {
+          "id": "unpivot_camera_samples",
+          "op": "records.unpivot",
+          "version": 1,
+          "inputs": {
+            "rows": "join_camera_03.rows"
+          },
+          "params": {
+            "pattern": "^(camera_[A-Za-z_]+?)_(0\\d)$",
+            "keyGroup": 2,
+            "fieldGroup": 1,
+            "keyField": "camera"
+          }
+        },
+        {
+          "id": "unpivot_camera_calibration",
+          "op": "records.unpivot",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_calibration.rows"
+          },
+          "params": {
+            "pattern": "^([A-Za-z_]+?)_(0\\d)$",
+            "keyGroup": 2,
+            "fieldGroup": 1,
+            "keyField": "camera"
+          }
+        },
+        {
+          "id": "tag_camera_calibration",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "unpivot_camera_calibration.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "sensor_id",
+                "from": "camera",
+                "pattern": "^(0[0-3])$",
+                "replacement": "image_$1",
+                "required": true
+              },
+              {
+                "field": "modality",
+                "from": "path",
+                "pattern": "^.*$",
+                "replacement": "camera",
+                "required": true
+              },
+              {
+                "field": "width",
+                "from": "S_rect",
+                "pattern": "^([0-9.eE+-]+),([0-9.eE+-]+)$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "height",
+                "from": "S_rect",
+                "pattern": "^([0-9.eE+-]+),([0-9.eE+-]+)$",
+                "replacement": "$2",
+                "required": true
+              },
+              {
+                "field": "reference_key",
+                "from": "path",
+                "pattern": "^.*$",
+                "replacement": "velo_to_camera",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "tag_camera_reference_rectification",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "camera_calibration.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "reference_key",
+                "from": "path",
+                "pattern": "^.*$",
+                "replacement": "velo_to_camera",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "join_camera_calibration",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "tag_camera_calibration.rows",
+            "right": "tag_camera_reference_rectification.rows"
+          },
+          "params": {
+            "leftKey": "reference_key",
+            "rightKey": "reference_key",
+            "join": "inner",
+            "rightFields": {
+              "rect_R": "R_rect_00"
+            }
+          }
+        },
+        {
+          "id": "tag_camera_velo_extrinsics",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "velo_calibration.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "reference_key",
+                "from": "path",
+                "pattern": "^.*$",
+                "replacement": "velo_to_camera",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "join_camera_pose",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "join_camera_calibration.rows",
+            "right": "tag_camera_velo_extrinsics.rows"
+          },
+          "params": {
+            "leftKey": "reference_key",
+            "rightKey": "reference_key",
+            "join": "inner",
+            "rightFields": {
+              "velo_R": "R",
+              "velo_T": "T"
+            }
+          }
+        },
+        {
+          "id": "bind_cameras",
+          "op": "image.bind_camera_frame",
+          "version": 1,
+          "inputs": {
+            "bytes": "camera_pngs.bytes",
+            "sampleData": "unpivot_camera_samples.rows",
+            "calibration": "join_camera_pose.rows",
+            "sensors": "join_camera_pose.rows"
+          },
+          "params": {
+            "pathField": "camera_path",
+            "frameKeyField": "frame",
+            "timestampField": "camera_stamp",
+            "recordCalibrationKeyField": "camera_sensor_id",
+            "calibrationKeyField": "sensor_id",
+            "calibrationSensorKeyField": "sensor_id",
+            "sensorKeyField": "sensor_id",
+            "sensorIdField": "sensor_id",
+            "modalityField": "modality",
+            "cameraModality": "camera",
+            "widthField": "width",
+            "heightField": "height",
+            "intrinsicMatrixField": "P_rect",
+            "quaternionField": "rect_R",
+            "translationField": "velo_T",
+            "rotationForm": "matrix",
+            "rotationMatrixFields": [
+              {
+                "matrixField": "rect_R"
+              },
+              {
+                "matrixField": "velo_R",
+                "translationField": "velo_T"
+              }
+            ],
+            "invertPose": true,
+            "frameIdSuffix": "_frame",
+            "defaultWidth": 1242,
+            "defaultHeight": 375
+          }
+        }
+      ],
+      "result": "bind_cameras.images"
+    },
+    "boxes3d_pipeline": {
+      "nodes": [
+        {
+          "id": "explode_poses",
+          "op": "records.explode",
+          "version": 1,
+          "inputs": {
+            "rows": "tracklets.rows"
+          },
+          "params": {
+            "path": "poses.item",
+            "indexField": "frame",
+            "indexOffsetField": "first_frame",
+            "keepNested": false
+          }
+        },
+        {
+          "id": "box_object_id",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "explode_poses.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "object_id",
+                "from": "l",
+                "pattern": "^(.+)$",
+                "replacement": "$1",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "box_frame_ready",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "box_object_id.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "frame_key",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "box_stamp_key",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "master_timestamps.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "frame_key",
+                "from": "frame",
+                "pattern": "^([0-9]+)$",
+                "replacement": "$1",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "boxes_with_stamp",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "box_frame_ready.rows",
+            "right": "box_stamp_key.rows"
+          },
+          "params": {
+            "leftKey": "frame_key",
+            "rightKey": "frame_key",
+            "join": "inner",
+            "rightFields": {
+              "stamp": "stamp"
+            }
+          }
+        },
+        {
+          "id": "normalize_boxes",
+          "op": "geometry.normalize_boxes3d",
+          "version": 1,
+          "inputs": {
+            "rows": "boxes_with_stamp.rows"
+          },
+          "params": {
+            "frameId": "velodyne_frame",
+            "timestampField": "stamp",
+            "classField": "objectType",
+            "objectIdField": "object_id",
+            "centerFields": [
+              "tx",
+              "ty",
+              "tz"
+            ],
+            "dimensionFields": [
+              "l",
+              "w",
+              "h"
+            ],
+            "headingField": "rz",
+            "classMap": {
+              "Car": "car",
+              "Van": "van",
+              "Truck": "truck",
+              "Pedestrian": "pedestrian",
+              "Person_sitting": "person_sitting",
+              "Cyclist": "cyclist",
+              "Tram": "tram",
+              "Misc": "misc"
+            }
+          }
+        }
+      ],
+      "result": "normalize_boxes.boxes"
+    },
+    "segment_metadata_pipeline": {
+      "nodes": [
+        {
+          "id": "select_segment",
+          "op": "records.select",
+          "version": 1,
+          "inputs": {
+            "rows": "master_timestamps.rows"
+          },
+          "params": {
+            "fields": [
+              "source_path",
+              "frame",
+              "stamp"
+            ],
+            "segmentIdentity": {
+              "labelFromSceneId": true,
+              "metadataKey": "drive"
+            }
+          }
+        }
+      ],
+      "result": "select_segment.records"
+    }
+  },
+  "outputs": {
+    "timeline": "timeline_pipeline.result",
+    "egoPoses": "ego_pose_pipeline.result",
+    "pointClouds": "point_cloud_pipeline.result",
+    "cameraImages": "camera_image_pipeline.result",
+    "boxes3d": "boxes3d_pipeline.result",
+    "segmentMetadata": "segment_metadata_pipeline.result"
+  },
+  "validation": {
+    "sampleFrames": [
+      "first",
+      "middle",
+      "last"
+    ],
+    "assertions": [],
+    "humanReview": [
+      "timeline",
+      "egoPoses",
+      "pointClouds",
+      "cameraImages",
+      "boxes3d",
+      "segmentMetadata"
+    ]
+  },
+  "provenance": {
+    "author": "codex",
+    "createdAt": "2026-09-02T00:00:00Z",
+    "summary": "Compact KITTI Raw adapter preserving Velodyne as ego, with index-derived stream paths, offset tracklet frames, and composed per-camera poses.",
+    "assumptions": [
+      "OXTS timestamps are the master synchronized timeline in microseconds.",
+      "All synchronized stream timestamp tables share the same zero-based frame index.",
+      "Tracklet global frame indices are emitted by records.explode using first_frame as indexOffsetField.",
+      "Velodyne points remain unchanged in the ego frame using identity sensor calibration.",
+      "Each camera pose is the inverse of the published R_rect_00 then Velodyne-to-camera R/T chain.",
+      "Each camera uses its own unpivoted S_rect and P_rect row; image.bind_camera_frame applies the P_rect-derived stereo offset.",
+      "KITTI tracklet boxes remain in the Velodyne frame."
+    ],
+    "datasetFingerprint": "sha256:4b8bf7181009cae780cdf597855627cf6197a4555156cf4cc48fc0aa813dc73c",
+    "validatorVersion": "1.0.0",
+    "validationSummary": {
+      "passed": true,
+      "stages": [
+        "schema",
+        "compile",
+        "bind",
+        "sample",
+        "cross-output"
+      ],
+      "sampleFrames": [
+        0,
+        53,
+        107
+      ],
+      "frameCount": 108,
+      "sensorSamples": {
+        "image_00": [
+          1,
+          1,
+          1
+        ],
+        "image_01": [
+          1,
+          1,
+          1
+        ],
+        "image_02": [
+          1,
+          1,
+          1
+        ],
+        "image_03": [
+          1,
+          1,
+          1
+        ],
+        "velodyne_points": [
+          121015,
+          121923,
+          98322
+        ]
+      }
+    },
+    "humanReviewReceipt": {
+      "version": 1,
+      "items": [
+        {
+          "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+          "capability": "timeline",
+          "frameIndices": [
+            0,
+            53,
+            107
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+          "capability": "egoPoses",
+          "frameIndices": [
+            0,
+            53,
+            107
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+          "capability": "pointClouds",
+          "frameIndices": [
+            0,
+            53,
+            107
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+          "capability": "cameraImages",
+          "frameIndices": [
+            0,
+            53,
+            107
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+          "capability": "boxes3d",
+          "frameIndices": [
+            0,
+            53,
+            107
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+          "capability": "projection",
+          "frameIndices": [
+            0,
+            53,
+            107
+          ],
+          "verdict": "accepted"
+        }
+      ]
+    }
+  },
+  "hashes": {
+    "recipeHash": "sha256:3022e0895b41f774a848f159e6730e1915a536c8692458752b30e16cac408213",
+    "formatFingerprint": "sha256:aeae5cb6db8c5deb9114745ded6285c16ee7280eb3053d8f14f16e329a7153ad",
+    "operatorSetFingerprint": "sha256:f0554d41062cf73ca5a494548995768f75729225ac0b2de46a7f8314552fb9dc",
+    "artifactHash": "sha256:917fb8621fcf0fe943c444125e3830dc9d7040dd6b33b41412db5b9c46dbc397"
+  }
+}

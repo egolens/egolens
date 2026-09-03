@@ -7,6 +7,9 @@ import { AdapterCompileError, AdapterValidationError, type AdapterDiagnostic } f
 import type { EgoLensAdapterRecipeV1, JsonObject } from '../recipe/types'
 import type { NormalizedCapabilityV1 } from '../runtime/normalizedScene'
 import { assertValidRecipeV1 } from '../schema/validateSchema'
+import a2d2Example from '../examples/a2d2.egolens-adapter.json'
+import kittiRawExample from '../examples/kitti-raw.egolens-adapter.json'
+import pandasetExample from '../examples/pandaset.egolens-adapter.json'
 import { withComputedArtifactHashesV1, verifySuppliedHashesV1 } from './hashes'
 import { inspectSourceInventoryV1, INSPECTION_LIMITS_V1, type SourceInspectionRequestV1, type SourceInspectionResultV1 } from './inspection'
 import { TeachableArtifactCacheV1, type FinalizedArtifactRecordV1 } from './persistence'
@@ -168,14 +171,22 @@ export class TeachableAuthoringSessionV1 {
     return await inspectSourceInventoryV1(this.#requireInventory(), request, signal)
   }
 
-  getContract(): Readonly<Record<string, unknown>> {
+  getContract(options: { readonly example?: string } = {}): Readonly<Record<string, unknown>> {
+    const examples: Record<string, { readonly summary: string; readonly recipe: unknown }> = {
+      'kitti-raw': { summary: 'Ego-frame dataset: text timestamp tables, per-camera rectified calibration from key-value calib files, Velodyne bin records, XML tracklets exploded into boxes.', recipe: kittiRawExample },
+      pandaset: { summary: 'World-frame dataset: JSON arrays of float-second timestamps and quaternion poses (records.derive scale/integer, json.records indexField), pandas pickle points and cuboids, poseChain with a constant axis fix, outputFrame "world".', recipe: pandasetExample },
+      a2d2: { summary: 'Per-file sidecars: JSON per camera frame, NPZ per lidar view, axis-vector calibration, path-derived linkage.', recipe: a2d2Example },
+    }
+    const requested = options.example && examples[options.example] ? { example: options.example, ...examples[options.example]! } : undefined
     return {
       schemaVersion: 1,
+      exampleRecipes: Object.fromEntries(Object.entries(examples).map(([id, entry]) => [id, entry.summary])),
+      ...(requested ? { example: requested } : {}),
       engineVersion: RECIPE_ENGINE_VERSION,
       authoringGuide: [
         '1. egolens_teachable_get_state: read the confirmed sensor layout (counts and ids). The recipe must declare and bind exactly those sensors; a different layout is rejected.',
         '2. egolens_teachable_inspect: inventory first, then metadata/text/json/json-sample/table-schema on one example of every file kind (bounded maxBytes). Never guess a column name you could read.',
-        '3. Read recipeSchema and operators below. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your lowercase agent id (e.g. "chatgpt", "codex"), provenance.createdAt to now.',
+        '3. Read recipeSchema and operators below. Call get_contract again with { example: "<id>" } (ids in exampleRecipes) to read a complete, sealed recipe for the closest layout and adapt it: change identity, match, sources, sensor ids, and provenance, keep the operator patterns. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your lowercase agent id (e.g. "chatgpt", "codex"), provenance.createdAt to now.',
         '4. egolens_teachable_apply_revision with the COMPLETE recipe every time (a rejected revision keeps nothing). Diagnostics name the input or field to fix. Bind timeline first, then pointClouds and cameraImages, then boxes3d, egoPoses, segmentation, segmentMetadata.',
         '5. Conventions: ego frame is x-forward, y-left, z-up; camera frames are optical (x-right, y-down, z-forward); poses are ego ← sensor (compose or invert with poseChain when the dataset publishes the other direction or another axis convention); timestamps are integers in the declared unit (records.derive scale/integer converts float seconds).',
         '6. World-frame datasets: bind points with outputFrame "world" and boxes with frameId "world" and provide egoPoses; EgoLens converts them per frame.',
