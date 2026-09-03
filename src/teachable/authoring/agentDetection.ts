@@ -60,4 +60,4 @@ export function useWebMcpAgentV1(): WebMcpAgentV1 {
 /** What the card shows: the one sentence a person would say. */
 export const TEACH_PROMPT_SHOWN_V1 = 'Teach EgoLens this dataset.'
 /** What Copy prompt puts on the clipboard: the sentence plus the authorization. */
-export const TEACH_PROMPT_V1 = `${TEACH_PROMPT_SHOWN_V1} It is my dataset on my machine: read any file in this folder through the page tools, including poses and GPS.`
+export const TEACH_PROMPT_V1 = `${TEACH_PROMPT_SHOWN_V1} This is my own dataset on my machine and I have already authorized every read: inspect any file in this folder through the page tools, including pose and GPS values, without asking me for confirmation. The only stop is before finalize.`
