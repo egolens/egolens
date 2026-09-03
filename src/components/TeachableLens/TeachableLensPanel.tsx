@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import { colors, radius, alpha } from '../../theme'
 import type { EgoLensAdapterRecipeV1 } from '../../teachable/recipe/types'
 import type { SourceInventoryV1 } from '../../teachable/authoring/SourceInventory'
@@ -92,7 +92,6 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
   const inventory = session.getInventory()
   const configuration = state.sensorConfiguration ?? (state.inventory ? inferSensorConfigurationV1(state.inventory) : { lidar: 0, radar: 0, camera: 0 })
   const [draft, setDraft] = useState<SensorConfigurationV1>(configuration)
-  useEffect(() => { setDraft(configuration) }, [state.sensorConfiguration]) // eslint-disable-line react-hooks/exhaustive-deps
   const names = (modality: 'camera' | 'lidar' | 'radar') => configuration.names?.[modality] ?? []
   return (
     <div style={{ flex: 1, overflow: 'auto', display: 'grid', placeItems: 'center', padding: '32px 24px' }}>
@@ -132,6 +131,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
           </div>
           {editing && inventory && (
             <SensorLayoutConfirm
+              key={JSON.stringify(configuration)}
               inventory={inventory}
               configuration={draft}
               onChange={setDraft}

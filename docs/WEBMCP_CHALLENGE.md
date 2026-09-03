@@ -78,22 +78,29 @@ Evidence from this week (each agent turn under ten minutes):
    https://github.com/egolens/egolens/releases/tag/webmcp-sample:
    `egolens-sample-pandaset-001-6frames.zip` (32 MB, quick) or
    `egolens-sample-pandaset-001-full.zip` (439 MB, all 80 frames for
-   playback). Unzip and drop the folder on the page. Confirm the layout: 6 cameras (front_camera, front_left_camera,
-   front_right_camera, back_camera, left_camera, right_camera), 1 lidar
-   (lidar), 0 radar. The defaults are inferred from the folder; just confirm.
-4. Ask the agent in plain words, for example: *"Teach EgoLens this dataset."*
-   The tools describe themselves: `get_state` returns the confirmed layout and
-   a `nextStep` hint, `get_contract` carries an `authoringGuide` with the
-   order of steps and the frame conventions, and every diagnostic names the
-   field to fix. No scripted tool sequence is needed.
+   playback). Unzip and drop the folder on the page. "A wild format
+   appeared!" opens: the detected sensors (6 cameras, 1 lidar) are the
+   contract the recipe must meet — press **Edit** if they are wrong — and
+   the agent card names your host (Codex, ChatGPT, or your agent) with the
+   prompt and a **Copy prompt** button. Without a WebMCP host the same card
+   points to the Codex app, the ChatGPT app, and Chrome 146+.
+4. Ask the agent in plain words: *"Teach EgoLens this dataset."* The page
+   switches to the teaching stage on its first tool call and shows every
+   call in the agent activity feed (revision counter, inspections, last
+   rejection). The tools describe themselves: `get_state` returns the
+   confirmed layout and a `nextStep` hint, `get_contract` carries an
+   `authoringGuide` and example recipes, and every diagnostic names the
+   field to fix.
 5. As soon as a revision validates, the full 3D viewer loads it against your
-   folder and the review panel docks beside it: orbit, POV cameras,
+   folder and the review dock appears beside it: orbit, POV cameras,
    LiDAR→camera overlay, boxes, colormaps, and playback all work on the real
-   rendering while the agent keeps iterating (each accepted revision
-   reloads the scene). Accept or reject each capability with an issue and
-   let the agent revise. Finalize and Export JSON when the rendering is right.
-   A scene rendered later from the saved recipe offers **✎ Edit recipe** to
-   reopen authoring on the same folder.
+   rendering while the agent keeps iterating. Judge each capability with
+   the chips (✓ / ✕), pick what looked wrong, add a note if you like; the
+   verdicts reach the agent through `get_state`. When everything is
+   accepted, **Finalize — seal this recipe** shows the sealed screen: Render
+   this dataset, Export JSON, Import JSON/URL, and the recipe hashes. A
+   scene rendered later from the saved recipe offers **✎ Edit recipe** in the
+   header to reopen authoring on the same folder.
 6. Shortcut: import the finished recipe from the same release
    (`pandaset-001.egolens-adapter.json`, sealed against this six-frame sample)
    with **Import JSON** after confirming the layout to see the end state

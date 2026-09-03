@@ -810,12 +810,11 @@ function App() {
   const [savedRecipes, setSavedRecipes] = useState<readonly FinalizedArtifactRecordV1[]>([])
   // After Finalize the sealed screen takes over the stage until the person
   // chooses "Render this dataset"; the loaded scene stays in the store.
-  const [renderedAfterSeal, setRenderedAfterSeal] = useState(false)
-  useEffect(() => { if (authoringState.phase !== 'finalized') setRenderedAfterSeal(false) }, [authoringState.phase])
-  const sealedStage = !isEmbed && authoringState.phase === 'finalized' && !renderedAfterSeal
+  const [renderedSealHash, setRenderedSealHash] = useState<string | null>(null)
+  const sealedStage = !isEmbed && authoringState.phase === 'finalized' && renderedSealHash !== authoringState.currentRecipeHash
   const leaveAuthoring = () => { const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([]); setSavedRecipes([]) }
   const renderAuthored = (inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1) => {
-    setRenderedAfterSeal(true)
+    setRenderedSealHash(teachableAuthoringSession.getState().currentRecipeHash)
     const current = useSceneStore.getState()
     // The sealed artifact is the reviewed revision plus hashes; the scene bound
     // at review time from the same folder is already the right one.
@@ -1070,7 +1069,11 @@ function Header() {
             style={{ cursor: 'pointer', lineHeight: 1 }}
             title="Back to home"
           >EgoLens</span>
-          {authoringSubtitle && !isMobile && <span data-testid="flow-subtitle" style={{ fontSize: 12, opacity: 0.45, marginLeft: 6 }}>{authoringSubtitle}</span>}
+          {authoringSubtitle && !isMobile && (
+            status === 'ready'
+              ? <span data-testid="flow-subtitle" style={{ marginLeft: 8, padding: '2px 7px', borderRadius: 999, border: `1px solid ${colors.border}`, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: colors.textSecondary }}>{authoringSubtitle}</span>
+              : <span data-testid="flow-subtitle" style={{ fontSize: 12, opacity: 0.45, marginLeft: 6 }}>{authoringSubtitle}</span>
+          )}
           {status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: isMobile ? '10px' : '12px', lineHeight: 1 }}>{getManifest().name}</span>}
         </h1>
       </div>
