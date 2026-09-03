@@ -16,6 +16,8 @@ export interface OperatorParameterValidationError {
 interface OperatorDescriptorBase {
   readonly name: string
   readonly majorVersion: number
+  /** Contract prose for agents: what each input is, which fields params name, what comes out. Never dataset-specific. */
+  readonly doc?: string
   readonly inputContract: OperatorJsonSchema
   readonly paramsContract: OperatorJsonSchema
   readonly outputContract: OperatorJsonSchema
