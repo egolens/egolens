@@ -57,4 +57,7 @@ export function useWebMcpAgentV1(): WebMcpAgentV1 {
 // The second sentence is the person's explicit authorization. Agent hosts run
 // their own safety review and flag pose/GPS reads as sensitive location data
 // unless the person has said the read is intended.
-export const TEACH_PROMPT_V1 = 'Teach EgoLens this dataset. It is my dataset on my machine: read any file in this folder through the page tools, including poses and GPS.'
+/** What the card shows: the one sentence a person would say. */
+export const TEACH_PROMPT_SHOWN_V1 = 'Teach EgoLens this dataset.'
+/** What Copy prompt puts on the clipboard: the sentence plus the authorization. */
+export const TEACH_PROMPT_V1 = `${TEACH_PROMPT_SHOWN_V1} It is my dataset on my machine: read any file in this folder through the page tools, including poses and GPS.`
