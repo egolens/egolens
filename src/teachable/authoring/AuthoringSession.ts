@@ -172,6 +172,15 @@ export class TeachableAuthoringSessionV1 {
     return {
       schemaVersion: 1,
       engineVersion: RECIPE_ENGINE_VERSION,
+      authoringGuide: [
+        '1. egolens_teachable_get_state: read the confirmed sensor layout (counts and ids). The recipe must declare and bind exactly those sensors; a different layout is rejected.',
+        '2. egolens_teachable_inspect: inventory first, then metadata/text/json/json-sample/table-schema on one example of every file kind (bounded maxBytes). Never guess a column name you could read.',
+        '3. Read recipeSchema and operators below. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your agent name, provenance.createdAt to now.',
+        '4. egolens_teachable_apply_revision with the COMPLETE recipe every time (a rejected revision keeps nothing). Diagnostics name the input or field to fix. Bind timeline first, then pointClouds and cameraImages, then boxes3d, egoPoses, segmentation, segmentMetadata.',
+        '5. Conventions: ego frame is x-forward, y-left, z-up; camera frames are optical (x-right, y-down, z-forward); poses are ego ← sensor (compose or invert with poseChain when the dataset publishes the other direction or another axis convention); timestamps are integers in the declared unit (records.derive scale/integer converts float seconds).',
+        '6. World-frame datasets: bind points with outputFrame "world" and boxes with frameId "world" and provide egoPoses; EgoLens converts them per frame.',
+        '7. After each accepted revision call get_state and stop when validation passes: summarize the bindings and let the user review the rendered preview. Their accept/reject per capability (with an issue name) arrives in get_state.latestHumanReview; revise from it. Do not call finalize unless the user asks.',
+      ],
       recipeSchema: schema,
       normalizedOutputs: [
         'timeline', 'egoPoses', 'pointClouds', 'radarPointClouds', 'cameraImages',
