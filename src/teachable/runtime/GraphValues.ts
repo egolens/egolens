@@ -1,5 +1,6 @@
 import type { FeatherColumnsParamsV1, DecodedFeatherColumnsV1 } from '../operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../operators/parquetColumns'
+import type { PickleRecordsParamsV1 } from '../operators/pickleFrames'
 import type {
   DecodedNumericRecordsV1,
   InterleavedRecordsParamsV1,
@@ -128,6 +129,7 @@ export type GraphBinaryDecoderV1 =
   | { readonly kind: 'pcd'; readonly params: PcdRecordsParamsV1 }
   | { readonly kind: 'npz-uint16'; readonly params: NpzUint16ParamsV1 }
   | { readonly kind: 'npz-records'; readonly params: NpzRecordsParamsV1 }
+  | { readonly kind: 'pickle-records'; readonly params: PickleRecordsParamsV1 }
 
 export type GraphDecodedBinaryV1 = DecodedNumericRecordsV1 | Uint16Array
 

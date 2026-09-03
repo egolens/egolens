@@ -46,6 +46,7 @@ import {
 } from './binaryReaders'
 import { decodeFeatherColumnsV1, interleaveFeatherNumericColumnsV1 } from './featherColumns'
 import { decodeJsonRecordsV1 } from './jsonRecords'
+import { decodePickleDataFrameV1, decodePickleRecordsV1, type PickleLimitsV1, type PickleRecordsParamsV1 } from './pickleFrames'
 import { decodeTextTableV1, type TextTableParamsV1 } from './textTable'
 import { decodeXmlRecordsV1, type XmlRecordsParamsV1 } from './xmlRecords'
 import { readParquetColumnsV1 } from './parquetColumns'
@@ -192,7 +193,9 @@ export async function loadGraphBinaryV1(
           ? decodePcdRecordsV1(bytes, collection.decoder.params, signal)
           : collection.decoder.kind === 'npz-records'
             ? await decodeNpzRecordsV1(bytes, collection.decoder.params, signal)
-            : await decodeNpzUint16V1(bytes, collection.decoder.params, signal)
+            : collection.decoder.kind === 'pickle-records'
+              ? await decodePickleRecordsV1(bytes, collection.decoder.params, signal)
+              : await decodeNpzUint16V1(bytes, collection.decoder.params, signal)
       const retainedBytes = decoded instanceof Uint16Array ? decoded.byteLength : decoded.values.byteLength
       collection.retainedReleases.set(path, collection.context.resources.allocate(retainedBytes))
       return decoded
@@ -402,6 +405,36 @@ const pcdRecords: CoreOperatorImplementationV1 = (inputs, params, context) => ({
 const npzRecords: CoreOperatorImplementationV1 = (inputs, params, context) => ({
   records: binaryCollection(inputs, context, { kind: 'npz-records', params: params as unknown as NpzRecordsParamsV1 }),
 })
+
+const pickleRecords: CoreOperatorImplementationV1 = (inputs, params, context) => ({
+  records: binaryCollection(inputs, context, { kind: 'pickle-records', params: params as unknown as PickleRecordsParamsV1 }),
+})
+
+/** Whole-file gzip+pickle DataFrame → one record per row (metadata tables such as cuboids or poses). */
+const pickleRows: CoreOperatorImplementationV1 = async (inputs, params, context) => {
+  if (!Array.isArray(inputs.files)) throw new Error('GRAPH_READER_FILES_INVALID')
+  const pathField = typeof params.pathField === 'string' ? params.pathField : null
+  const indexField = typeof params.indexField === 'string' ? params.indexField : null
+  const rows: Readonly<Record<string, unknown>>[] = []
+  for (const file of inputs.files as readonly { path: string }[]) {
+    const bytes = await context.read(file.path)
+    let frame
+    try {
+      frame = await decodePickleDataFrameV1(bytes, params as unknown as PickleLimitsV1)
+    } catch (error) {
+      throw new Error(`GRAPH_PICKLE_DECODE_FAILED: ${file.path}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    for (let index = 0; index < frame.rowCount; index += 1) {
+      context.throwIfAborted()
+      const row: Record<string, unknown> = {}
+      for (const column of frame.columns) row[column.name] = column.values[index]
+      if (indexField) row[indexField] = index
+      if (pathField) row[pathField] = file.path
+      rows.push(row)
+    }
+  }
+  return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
+}
 
 const npzArray: CoreOperatorImplementationV1 = (inputs, params, context) => ({
   values: binaryCollection(inputs, context, { kind: 'npz-uint16', params: params as unknown as NpzUint16ParamsV1 }),
@@ -1498,6 +1531,8 @@ const attachLabels: CoreOperatorImplementationV1 = async (inputs, params) => {
 export const coreGraphOperatorImplementationsV1: Readonly<Record<string, CoreOperatorImplementationV1>> = {
   'archive.npz_array': npzArray,
   'archive.npz_records': npzRecords,
+  'archive.pickle_records': pickleRecords,
+  'archive.pickle_rows': pickleRows,
   'binary.interleaved_records': interleavedRecords,
   'binary.pcd_records': pcdRecords,
   'feather.columns': featherColumns,
