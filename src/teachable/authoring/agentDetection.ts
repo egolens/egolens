@@ -54,4 +54,4 @@ export function useWebMcpAgentV1(): WebMcpAgentV1 {
   return agent
 }
 
-export const TEACH_PROMPT_V1 = 'Teach EgoLens this dataset. Use the tools this page exposes; stop before finalize and tell me what you bound so I can review the preview.'
+export const TEACH_PROMPT_V1 = 'Teach EgoLens this dataset.'
