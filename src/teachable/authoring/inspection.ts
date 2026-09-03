@@ -293,7 +293,23 @@ export async function inspectSourceInventoryV1(
     const prefix = new Uint8Array(await byteSource.read(entry.path, { end: Math.min(entry.size, maxBytes), signal }))
     abortIfNeeded(signal)
     const maximum = boundedInteger(request.maxValues, 8, 64, 'maxValues')
-    const sample = leadingJsonArrayRecordsV1(new TextDecoder('utf-8').decode(prefix), maximum)
+    const prefixText = new TextDecoder('utf-8').decode(prefix)
+    if (!prefixText.trimStart().startsWith('[')) {
+      // A top-level object (calibration, class map, pose dictionary): sample
+      // its leading keys instead of refusing, so one call answers either shape.
+      if (entry.size > prefix.length) {
+        throw new Error(`json-sample sampled the leading records of a JSON array; ${entry.path} is a JSON object larger than maxBytes (${entry.size} > ${maxBytes}). Read it with mode "json" and a larger maxBytes, or "text" for a prefix.`)
+      }
+      const bounded = boundedJson(JSON.parse(prefixText), Math.max(maximum * 8, 64))
+      return {
+        mode: request.mode,
+        sessionId: inventory.sessionId,
+        path: entry.path,
+        truncated: bounded.truncated,
+        data: { byteLength: entry.size, shape: 'object', schema: schemaOfJson(bounded.value), value: bounded.value },
+      }
+    }
+    const sample = leadingJsonArrayRecordsV1(prefixText, maximum)
     return {
       mode: request.mode,
       sessionId: inventory.sessionId,
