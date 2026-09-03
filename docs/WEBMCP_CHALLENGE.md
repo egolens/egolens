@@ -53,7 +53,10 @@ Every commit is on `main` of https://github.com/egolens/egolens with CI.
    …). `egolens_teachable_get_state` carries the review back to the agent.
 5. Agent revises; human finalizes; `egolens_teachable_finalize` seals the
    artifact with recipe/format/operator-set hashes; Export JSON.
-6. The recipe renders in the production viewer through an inline share URL
+6. The finalized recipe is also saved in the browser: dropping a folder with
+   the same layout later offers "Render with <recipe>" before any authoring,
+   so a format taught once renders immediately next time.
+7. The recipe renders in the production viewer through an inline share URL
    (`shareVersion=1`, catalog + recipe + hashes), so anyone can open the
    dataset with the same adapter and no install.
 
