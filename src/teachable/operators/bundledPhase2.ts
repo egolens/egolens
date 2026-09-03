@@ -363,6 +363,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['records.explode', recordContract(['rows']), closedParams({
     path: { type: 'string', minLength: 1, maxLength: 256 },
     indexField: { type: 'string', minLength: 1, maxLength: 128 },
+    indexOffsetField: { type: 'string', minLength: 1, maxLength: 128 },
     prefix: { type: 'string', maxLength: 64 },
     keepNested: { type: 'boolean' },
   }, ['path']), recordContract(['rows'])],

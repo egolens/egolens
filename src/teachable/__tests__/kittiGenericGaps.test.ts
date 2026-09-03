@@ -27,6 +27,10 @@ describe('generic gaps surfaced by the KITTI Raw rung', () => {
       { objectType: 'Car', h: 1.5, first_frame: 4, tx: 1, ty: 2, poseIndex: 0 },
       { objectType: 'Car', h: 1.5, first_frame: 4, tx: 1.5, ty: 2, poseIndex: 1 },
     ])
+    const offset = await ops['records.explode']!({ rows: records([tracklet]) }, { path: 'poses.item', indexField: 'frame', indexOffsetField: 'first_frame' }, ctx)
+    expect((offset.rows as { rows: { frame: number }[] }).rows.map((row) => row.frame)).toEqual([4, 5])
+    await expect(ops['records.explode']!({ rows: records([{ ...tracklet, first_frame: 'n/a' }]) }, { path: 'poses.item', indexField: 'frame', indexOffsetField: 'first_frame' }, ctx))
+      .rejects.toThrow(/GRAPH_EXPLODE_OFFSET_INVALID/u)
     const single = await ops['records.explode']!({ rows: records([{ id: 'x', poses: { item: { tx: 9 } } }]) }, { path: 'poses.item', prefix: 'pose_' }, ctx)
     expect((single.rows as { rows: unknown[] }).rows).toEqual([{ id: 'x', pose_tx: 9 }])
   })
