@@ -730,6 +730,26 @@ Body outline (claim only what is listed in
   `~/Workspace/egolens-p7/collab-kitti-raw/` (feedback1-6, codex-turn1-7
   logs, success/{recipe, review-page.png, viewer-0.png}). PandaSet reader
   landed ahead of its rung (egolens#73).
+- 2026-09-02/03, PandaSet rung (collaborative; Claude as operator and
+  reviewer): sequence 001 (80 frames, 6 cameras, Pandar64+PandarGT in one
+  pickle per frame, cuboids and semseg pickles, world-frame everything) from
+  the Kaggle mirror (744 files, raw protocol-3 pandas-1.x pickles). Confirmed
+  layout 6 cameras / 1 lidar / 0 radar. Session 01a0651c…: turn 1 looped 41
+  revisions on repeating diagnostics and was stopped by hand; the tally named
+  the gaps (float-second timestamps, nested pose scalars, absolute world
+  frame per frame, opaque input errors) → egolens#79 legacy pickles, #80
+  pickle table-schema inspect, #81 numeric derive / quaternionFields /
+  poseChain / intrinsicFields / world-frame conversion / named input
+  diagnostics, #85 json.records indexField, #86 constant pose links. Turn 2
+  bound all seven capabilities (cameras 6×[1,1,1], ~169K points, boxes
+  [151,147,132], segmentation) and rendered correctly in the viewer except
+  the y-forward lidar axis; turn 3 fixed that in one revision (80 s) with a
+  constant −90° yaw link. Finalized and exported (`sha256:bb2bc808…`),
+  rendered through an inline share with LiDAR→camera overlays on all six
+  cameras. Camera tiles are now ordered by mounting yaw (egolens#87/#88).
+  Artifacts (local, not committed): `~/Workspace/egolens-p7/collab-pandaset/`
+  (feedback1-2, codex-turn1-3 logs, success/{recipe, review-page.png,
+  viewer-*.png}); catalog in `egolens-p7/protected/pandaset`.
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
