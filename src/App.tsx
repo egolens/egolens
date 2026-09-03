@@ -41,11 +41,10 @@ import SearchableSelect, { type SelectItem } from './components/SearchableSelect
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
-import { inferSensorConfigurationV1, type SensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
+import { inferSensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
 import type { SourceInventoryV1 } from './teachable/authoring/SourceInventory'
 import type { FinalizedArtifactRecordV1 } from './teachable/authoring/persistence'
-import SensorLayoutConfirm from './components/TeachableLens/SensorLayoutConfirm'
-import AgentPromptHint from './components/TeachableLens/AgentPromptHint'
+import type { EgoLensAdapterRecipeV1 } from './teachable/recipe/types'
 import { formatFingerprintV1, recipeHashV1 } from './teachable/authoring/hashes'
 import { generateSourceCatalogV1 } from './teachable/source/SourceCatalog'
 import { operatorSetFingerprintV1 } from './teachable/recipe/fingerprints'
@@ -807,8 +806,22 @@ function App() {
   // Authoring with the real renderer: once a revision validates, the same recipe
   // is loaded into the full viewer and the review panel docks beside it, so the
   // human tests toggles, cameras, and playback on the actual rendering.
-  const authoringDocked = !isEmbed && !showDropZone && status === 'ready'
-    && (authoringState.phase === 'review' || authoringState.phase === 'finalized')
+  const authoringDocked = !isEmbed && !showDropZone && status === 'ready' && authoringState.phase === 'review'
+  const [savedRecipes, setSavedRecipes] = useState<readonly FinalizedArtifactRecordV1[]>([])
+  // After Finalize the sealed screen takes over the stage until the person
+  // chooses "Render this dataset"; the loaded scene stays in the store.
+  const [renderedAfterSeal, setRenderedAfterSeal] = useState(false)
+  useEffect(() => { if (authoringState.phase !== 'finalized') setRenderedAfterSeal(false) }, [authoringState.phase])
+  const sealedStage = !isEmbed && authoringState.phase === 'finalized' && !renderedAfterSeal
+  const leaveAuthoring = () => { const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([]); setSavedRecipes([]) }
+  const renderAuthored = (inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1) => {
+    setRenderedAfterSeal(true)
+    const current = useSceneStore.getState()
+    // The sealed artifact is the reviewed revision plus hashes; the scene bound
+    // at review time from the same folder is already the right one.
+    const already = current.status === 'ready' && current.actions.authoredScene()?.inventory === inventory
+    if (!already) void current.actions.loadAuthoredScene(inventory, recipe)
+  }
   const loadedAuthoredHashRef = useRef<string | null>(null)
   useEffect(() => {
     if (isEmbed) return
@@ -824,7 +837,7 @@ function App() {
   useEffect(() => {
     if (authoringState.phase === 'idle' || authoringState.phase === 'revoked') loadedAuthoredHashRef.current = null
   }, [authoringState.phase])
-  const showTimeline = !showDropZone && (!isEmbed || embedParams.controls !== 'none')
+  const showTimeline = !showDropZone && !sealedStage && (!isEmbed || embedParams.controls !== 'none')
 
   return (
     <div style={{
@@ -845,10 +858,12 @@ function App() {
 
       {/* Main Content */}
       <main style={{ flex: 1, display: 'flex', flexDirection: authoringDocked ? 'row' : 'column', overflow: 'hidden', position: 'relative' }}>
-        {showDropZone && !isEmbed ? (
+        {sealedStage ? (
+          <TeachableLensPanel onRenderDataset={renderAuthored} savedRecipes={savedRecipes} onLeave={leaveAuthoring} />
+        ) : showDropZone && !isEmbed ? (
           showTeachableLens
-            ? <TeachableLensPanel />
-            : <DropZone onFilesLoaded={loadFromFiles} />
+            ? <TeachableLensPanel onRenderDataset={renderAuthored} savedRecipes={savedRecipes} onLeave={leaveAuthoring} />
+            : <DropZone onFilesLoaded={loadFromFiles} onSavedRecipes={setSavedRecipes} />
         ) : (
           <>
             {authoringDocked ? (
@@ -859,32 +874,9 @@ function App() {
               <SensorView embedControls={isEmbed ? embedParams.controls : 'full'} />
             )}
             {authoringDocked && (
-              <aside data-testid="authoring-dock" style={{ width: 'min(460px, 42vw)', flexShrink: 0, overflowY: 'auto', borderLeft: `1px solid ${colors.border}`, background: colors.bgBase }}>
-                <TeachableLensPanel />
-              </aside>
-            )}
-            {!isEmbed && authoringState.phase === 'idle' && useSceneStore.getState().actions.authoredScene() && (
-              <button
-                data-testid="edit-recipe"
-                onClick={() => {
-                  const authored = useSceneStore.getState().actions.authoredScene()
-                  if (!authored) return
-                  const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([])
-                  void teachableAuthoringSession.resumeFromArtifact(authored.inventory, authored.recipe)
-                }}
-                style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20, padding: '7px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.bgSurface, 0.92), color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-              >
-                ✎ Edit recipe
-              </button>
-            )}
-            {!isEmbed && !authoringDocked && (authoringState.phase === 'review' || authoringState.phase === 'finalized') && (
-              <button
-                data-testid="back-to-review"
-                onClick={() => { const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([]) }}
-                style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20, padding: '7px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accentBlue}`, background: alpha(colors.bgSurface, 0.92), color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-              >
-                ← Back to review
-              </button>
+              <div style={{ width: 'min(460px, 42vw)', flexShrink: 0, borderLeft: `1px solid ${colors.border}`, background: colors.bgBase, minHeight: 0, display: 'flex' }}>
+                <TeachableLensPanel docked onRenderDataset={renderAuthored} onLeave={leaveAuthoring} />
+              </div>
             )}
           </>
         )}
@@ -947,6 +939,22 @@ function App() {
 function Header() {
   const status = useSceneStore((s) => s.status)
   const isMobile = useIsMobile()
+  const authoring = useSyncExternalStore(teachableAuthoringSession.subscribe, teachableAuthoringSession.getState, teachableAuthoringSession.getState)
+  const authoredScene = status === 'ready' ? useSceneStore.getState().actions.authoredScene() : null
+  const authoringSubtitle = authoring.phase === 'idle' || authoring.phase === 'revoked'
+    ? (authoredScene ? `${authoredScene.recipe.identity.name} · authored recipe` : null)
+    : authoring.phase === 'finalized'
+      ? (status === 'ready' ? 'sealed' : `${authoring.currentArtifact?.identity.name ?? 'recipe'} · sealed`)
+      : authoring.currentArtifact
+        ? (status === 'ready' ? `revision #${authoring.revisionCount}` : `${authoring.currentArtifact.identity.name} · revision #${authoring.revisionCount}`)
+        : authoring.agentEngaged ? 'unknown folder · teaching' : 'unknown folder'
+  const showEditRecipe = status === 'ready' && authoredScene !== null && (authoring.phase === 'idle' || authoring.phase === 'finalized' || authoring.phase === 'revoked')
+  const editRecipe = () => {
+    const scene = useSceneStore.getState().actions.authoredScene()
+    if (!scene) return
+    const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([])
+    void teachableAuthoringSession.resumeFromArtifact(scene.inventory, scene.recipe)
+  }
 
   const availableSegments = useSceneStore((s) => s.availableSegments)
   const currentSegment = useSceneStore((s) => s.currentSegment)
@@ -1062,6 +1070,7 @@ function Header() {
             style={{ cursor: 'pointer', lineHeight: 1 }}
             title="Back to home"
           >EgoLens</span>
+          {authoringSubtitle && !isMobile && <span data-testid="flow-subtitle" style={{ fontSize: 12, opacity: 0.45, marginLeft: 6 }}>{authoringSubtitle}</span>}
           {status === 'ready' && <span style={{ fontWeight: 400, opacity: 0.4, fontSize: isMobile ? '10px' : '12px', lineHeight: 1 }}>{getManifest().name}</span>}
         </h1>
       </div>
@@ -1200,6 +1209,9 @@ function Header() {
               </div>
             )}
           </div>
+        )}
+        {showEditRecipe && (
+          <button data-testid="edit-recipe" onClick={editRecipe} style={{ padding: '5px 11px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: 'transparent', color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✎ Edit recipe</button>
         )}
         <ThemeToggle isMobile={isMobile} />
         <button
@@ -1401,7 +1413,8 @@ function ThemeToggle({ isMobile }: { isMobile: boolean }) {
   )
 }
 
-function DropZone({ onFilesLoaded }: {
+function DropZone({ onFilesLoaded, onSavedRecipes }: {
+  onSavedRecipes?: (records: readonly FinalizedArtifactRecordV1[]) => void
   onFilesLoaded: (
     segments: Map<string, Map<string, File>>,
     countedRecipe?: CompiledRecipeV1,
@@ -1410,7 +1423,6 @@ function DropZone({ onFilesLoaded }: {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
-  const [pendingAuthoring, setPendingAuthoring] = useState<{ inventory: SourceInventoryV1; configuration: SensorConfigurationV1; saved: readonly FinalizedArtifactRecordV1[] } | null>(null)
   const dragCounter = useRef(0)
   const directoryInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
@@ -1546,7 +1558,10 @@ function DropZone({ onFilesLoaded }: {
         // an agent cannot quietly collapse six cameras into none.
         // Recipes finalized earlier in this browser for the same layout render without authoring.
         const saved = await teachableAuthoringSession.findSavedRecipes(inventory).catch(() => [] as readonly FinalizedArtifactRecordV1[])
-        setPendingAuthoring({ inventory, configuration: inferSensorConfigurationV1(inventory.snapshot()), saved })
+        onSavedRecipes?.(saved)
+        // Teaching starts on the agent's first tool call; the detected layout is
+        // the contract until the person edits it on the P0 screen.
+        teachableAuthoringSession.start(inventory, { sensorConfiguration: inferSensorConfigurationV1(inventory.snapshot()) })
         setError(null)
         setScanning(false)
         return
@@ -1646,54 +1661,6 @@ function DropZone({ onFilesLoaded }: {
     }
   }, [handleFiles])
 
-  if (pendingAuthoring) {
-    return (
-      <div className="dropzone-scroll" style={{ flex: 1, overflowY: 'auto', display: 'grid', placeItems: 'center', padding: 24 }}>
-        <section style={{ width: 'min(680px, 100%)', padding: 24, background: colors.bgSurface, border: `1px solid ${colors.border}`, borderRadius: 16 }}>
-          <div style={{ color: colors.accent, fontSize: 11, fontWeight: 800, letterSpacing: '0.12em' }}>UNKNOWN DATASET</div>
-          <h2 style={{ margin: '8px 0 4px', fontSize: 20 }}>Teach EgoLens this dataset</h2>
-          <p style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 1.6, margin: 0 }}>
-            No bundled adapter matches this folder. Confirm the physical sensors below; an agent using this page's WebMCP tools must then bind every one of them, and you review the rendering before anything is finalized.
-          </p>
-          {pendingAuthoring.saved.length > 0 && (
-            <div data-testid="saved-recipes" style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, border: `1px solid ${colors.accent}`, background: colors.bgSurface }}>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>EgoLens already knows this layout</div>
-              <p style={{ margin: '4px 0 8px', color: colors.textSecondary, fontSize: 12, lineHeight: 1.5 }}>A recipe finalized in this browser matches these files. Render with it now, or teach a new one below.</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {pendingAuthoring.saved.slice(0, 3).map((record) => (
-                  <button
-                    key={record.recipeHash}
-                    onClick={() => { void useSceneStore.getState().actions.loadAuthoredScene(pendingAuthoring.inventory, record.artifact); setPendingAuthoring(null) }}
-                    style={{ padding: '8px 12px', borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}
-                  >
-                    Render with “{record.artifact.identity.name}” · {new Date(record.finalizedAt).toLocaleDateString()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <AgentPromptHint />
-          <SensorLayoutConfirm
-            inventory={pendingAuthoring.inventory}
-            configuration={pendingAuthoring.configuration}
-            onChange={(configuration) => setPendingAuthoring({ ...pendingAuthoring, configuration })}
-            onConfirm={() => {
-              try {
-                teachableAuthoringSession.start(pendingAuthoring.inventory, { sensorConfiguration: pendingAuthoring.configuration })
-                setPendingAuthoring(null)
-              } catch (cause) {
-                setError(cause instanceof Error ? cause.message : String(cause))
-              }
-            }}
-          />
-          <button onClick={() => setPendingAuthoring(null)} style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.textSecondary, cursor: 'pointer' }}>
-            Choose another folder
-          </button>
-          {error && <pre style={{ whiteSpace: 'pre-wrap', color: colors.danger, fontSize: 11 }}>{error}</pre>}
-        </section>
-      </div>
-    )
-  }
   return (
     <div
       className="dropzone-scroll"

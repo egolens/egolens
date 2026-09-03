@@ -86,11 +86,35 @@ export async function registerTeachableWebMcpToolsV1(
     }
     return typeof input === 'object' && input !== null && !Array.isArray(input) ? input as Record<string, unknown> : {}
   }
-  const engage = <T extends Record<string, unknown>>(handler: (input: T) => unknown | Promise<unknown>) =>
+  const summarize = (tool: string, input: Record<string, unknown>, result: unknown, ok: boolean): { arg: string; text: string; kind: 'ok' | 'bad' | 'info' } => {
+    const r = (result ?? {}) as Record<string, unknown>
+    if (tool === 'inspect') return { arg: [input.mode, input.path].filter(Boolean).join(' '), text: ok ? 'read' : 'failed', kind: ok ? 'info' : 'bad' }
+    if (tool === 'get_contract') return { arg: typeof input.example === 'string' ? `example: ${input.example}` : '', text: 'operators, schema, guide', kind: 'info' }
+    if (tool === 'get_state') return { arg: '', text: typeof r.nextStep === 'string' ? `phase ${String(r.phase)} · ${String(r.nextStep).slice(0, 80)}` : `phase ${String(r.phase ?? '?')}`, kind: 'info' }
+    if (tool === 'apply_revision') {
+      const diagnostics = Array.isArray(r.diagnostics) ? r.diagnostics as { code?: string; hint?: string }[] : []
+      const first = diagnostics.find((d) => d && typeof d.code === 'string')
+      return r.ok === true
+        ? { arg: '', text: `passed — phase ${String(r.phase)}`, kind: 'ok' }
+        : { arg: '', text: `rejected — ${first?.code ?? 'error'}${first?.hint ? `: ${String(first.hint).slice(0, 140)}` : ''}`, kind: 'bad' }
+    }
+    if (tool === 'finalize') return { arg: '', text: r.ok === true ? 'sealed' : 'refused', kind: r.ok === true ? 'ok' : 'bad' }
+    return { arg: '', text: ok ? 'ok' : 'failed', kind: ok ? 'info' : 'bad' }
+  }
+  const engage = <T extends Record<string, unknown>>(toolName: string, handler: (input: T) => unknown | Promise<unknown>) =>
     async (input: unknown): Promise<unknown> => {
       session.markAgentEngaged()
-      const result = await handler(normalizeInput(input) as T)
-      return native ? JSON.stringify(result ?? null) : result
+      const started = Date.now()
+      const normalized = normalizeInput(input)
+      try {
+        const result = await handler(normalized as T)
+        const summary = summarize(toolName, normalized, result, true)
+        session.recordActivity({ tool: toolName, arg: summary.arg, ms: Date.now() - started, result: summary.text, kind: summary.kind })
+        return native ? JSON.stringify(result ?? null) : result
+      } catch (error) {
+        session.recordActivity({ tool: toolName, arg: summarize(toolName, normalized, null, false).arg, ms: Date.now() - started, result: `failed — ${error instanceof Error ? error.message.slice(0, 140) : String(error)}`, kind: 'bad' })
+        throw error
+      }
     }
 
   const tools: readonly WebMcpToolDefinition[] = [
@@ -109,7 +133,7 @@ export async function registerTeachableWebMcpToolsV1(
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true },
-      execute: engage(async (input: { mode: SourceInspectionModeV1; path?: string; maxBytes?: number; maxValues?: number }) =>
+      execute: engage('inspect', async (input: { mode: SourceInspectionModeV1; path?: string; maxBytes?: number; maxValues?: number }) =>
         await session.inspect(input)),
     },
     {
@@ -117,7 +141,7 @@ export async function registerTeachableWebMcpToolsV1(
       description: 'Step 3: read the adapter recipe schema, the operator vocabulary with JSON-schema params, and the authoringGuide (rules and the expected order of steps). Pass { example: "kitti-raw" | "pandaset" | "a2d2" } to also get a complete sealed recipe for that layout family to adapt. A recipe is declarative JSON that binds files through operators to outputs; it never contains code.',
       inputSchema: { type: 'object', properties: { example: { type: 'string', enum: ['kitti-raw', 'pandaset', 'a2d2'], description: 'Return one complete sealed example recipe for this layout family in addition to the contract.' } }, additionalProperties: false },
       annotations: { readOnlyHint: true },
-      execute: engage(async (input: { example?: string }) => session.getContract({ example: input.example })),
+      execute: engage('get_contract', async (input: { example?: string }) => session.getContract({ example: input.example })),
     },
     {
       name: 'egolens_teachable_apply_revision',
@@ -129,21 +153,21 @@ export async function registerTeachableWebMcpToolsV1(
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false },
-      execute: engage(async (input: { recipe: unknown }) => await session.applyRevision(input.recipe)),
+      execute: engage('apply_revision', async (input: { recipe: unknown }) => await session.applyRevision(input.recipe)),
     },
     {
       name: 'egolens_teachable_get_state',
       description: 'Step 1 and after every revision: the teaching phase, the sensor layout the user confirmed (counts and ids the recipe must declare exactly), validation results with per-sensor sample counts, diagnostics, and the latest human review. The nextStep field says what to do next.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true },
-      execute: engage(async () => stateForTool(session)),
+      execute: engage('get_state', async () => stateForTool(session)),
     },
     {
       name: 'egolens_teachable_finalize',
       description: 'Last step, only when the user asks: seal the reviewed recipe with hashes so it can be exported and shared. Refused until the user has accepted every presented capability on the page.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false },
-      execute: engage(async () => {
+      execute: engage('finalize', async () => {
         const record = await session.finalize()
         return {
           ok: true,
