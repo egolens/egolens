@@ -1,4 +1,5 @@
 import { declaredSensorSummaryV1 } from '../../teachable/authoring/sensorConfiguration'
+import AgentPromptHint from './AgentPromptHint'
 import { revisionRequestTextV1 } from '../../teachable/authoring/revisionRequest'
 import { HUMAN_REVIEW_ISSUES_V1, type HumanReviewIssueV1 } from '../../teachable/authoring/review'
 import { useRef, useState, useSyncExternalStore } from 'react'
@@ -102,6 +103,7 @@ export default function TeachableLensPanel({
             <p style={{ margin: 0, color: colors.textSecondary, fontSize: 13, lineHeight: 1.6 }}>
               {inventory?.entries.length ?? 0} authorized files are available for bounded inspection. Raw evidence stays in this browser session.
             </p>
+            {!state.agentEngaged && <AgentPromptHint compact />}
           </div>
           <button onClick={() => session.revoke()} style={{ padding: '7px 11px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgSurface, color: colors.textSecondary, cursor: 'pointer' }}>
             Choose another folder

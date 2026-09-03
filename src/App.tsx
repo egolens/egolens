@@ -44,6 +44,7 @@ import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
 import { inferSensorConfigurationV1, type SensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
 import type { SourceInventoryV1 } from './teachable/authoring/SourceInventory'
 import SensorLayoutConfirm from './components/TeachableLens/SensorLayoutConfirm'
+import AgentPromptHint from './components/TeachableLens/AgentPromptHint'
 import { formatFingerprintV1, recipeHashV1 } from './teachable/authoring/hashes'
 import { generateSourceCatalogV1 } from './teachable/source/SourceCatalog'
 import { operatorSetFingerprintV1 } from './teachable/recipe/fingerprints'
@@ -1594,6 +1595,7 @@ function DropZone({ onFilesLoaded }: {
           <p style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 1.6, margin: 0 }}>
             No bundled adapter matches this folder. Confirm the physical sensors below; an agent using this page's WebMCP tools must then bind every one of them, and you review the rendering before anything is finalized.
           </p>
+          <AgentPromptHint />
           <SensorLayoutConfirm
             inventory={pendingAuthoring.inventory}
             configuration={pendingAuthoring.configuration}
