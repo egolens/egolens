@@ -145,6 +145,24 @@ export class TeachableAuthoringSessionV1 {
 
   getState = (): AuthoringSessionStateV1 => this.#state
 
+  /**
+   * Reopen authoring on a folder that is already rendering with a recipe: the
+   * confirmed layout is taken from the recipe's declared sensors and the recipe
+   * becomes the first revision, so the human can reject what looked wrong and
+   * an agent can revise from there.
+   */
+  async resumeFromArtifact(inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1): Promise<ApplyRevisionResultV1> {
+    const byModality = (modality: 'lidar' | 'radar' | 'camera') => recipe.scene.sensors.filter((sensor) => sensor.modality === modality).map((sensor) => sensor.id)
+    const configuration: SensorConfigurationV1 = {
+      lidar: byModality('lidar').length, radar: byModality('radar').length, camera: byModality('camera').length,
+      names: { lidar: byModality('lidar'), radar: byModality('radar'), camera: byModality('camera') },
+    }
+    this.start(inventory, { sensorConfiguration: configuration })
+    const { hashes: _hashes, ...rest } = recipe
+    const { parentRecipeHash: _parent, ...provenance } = rest.provenance ?? { author: 'imported', createdAt: new Date().toISOString() }
+    return await this.applyRevision({ ...rest, provenance: { ...provenance, author: provenance.author === 'imported' || provenance.author === 'registry' ? 'human' : provenance.author } })
+  }
+
   /** The live user-authorized inventory, for rendering the current recipe in the viewer. */
   getInventory(): SourceInventoryV1 | null {
     return this.#inventory

@@ -198,6 +198,8 @@ interface SceneActions {
   ) => Promise<ResolvedPortableShareV1 | null>
   /** Render a validated Teachable Lens recipe against the user's local folder in the interactive viewer. */
   loadAuthoredScene: (inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1) => Promise<void>
+  /** The folder and recipe behind the current authored scene, or null. */
+  authoredScene: () => { inventory: SourceInventoryV1; recipe: EgoLensAdapterRecipeV1 } | null
   loadFrame: (index: number) => Promise<void>
   nextFrame: () => Promise<void>
   prevFrame: () => Promise<void>
@@ -441,6 +443,8 @@ const internal = {
   recipeInventoryEntries: [] as RecipeInventoryEntryV1[],
   /** Phase 9 author recipe bound to one counted local source session. */
   localCompiledRecipe: null as CompiledRecipeV1 | null,
+  /** Set while a Teachable Lens recipe is rendering the user's local folder; lets the viewer reopen authoring. */
+  authoredScene: null as { inventory: SourceInventoryV1; recipe: EgoLensAdapterRecipeV1 } | null,
   timestamps: [] as bigint[],
   /** Reverse lookup: timestamp → frame index */
   timestampToFrame: new Map<bigint, number>(),
@@ -524,6 +528,7 @@ const internal = {
 }
 
 function resetInternal(options: { preserveLocalRecipe?: boolean } = {}) {
+  internal.authoredScene = null
   internal.normalizedScene?.dispose()
   internal.normalizedScene = null
   internal.conformanceSceneFactory = null
@@ -1036,6 +1041,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
     },
 
+    authoredScene: () => internal.authoredScene,
     loadAuthoredScene: async (inventory, recipe) => {
       resetInternal()
       clearUrlSource()
@@ -1047,6 +1053,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       })
       try {
         const compiledRecipe = compileRecipeV1(recipe, bundledPhase2OperatorRegistry)
+        internal.authoredScene = { inventory, recipe }
         const binding = await bindRecipeSceneV1({ compiledRecipe, source: inventory.resolveAuthorizedSource(), inventory })
         const manifest = binding.scene.manifest
         setAdapter(new RecipeBackedDatasetAdapter(recipe, bundledPhase2OperatorRegistry, compiledRecipe))

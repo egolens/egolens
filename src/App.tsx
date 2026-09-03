@@ -804,6 +804,26 @@ function App() {
   const showDropZone = status === 'idle' && availableSegments.length === 0
   const showTeachableLens = showDropZone && authoringState.phase !== 'idle' && authoringState.phase !== 'revoked'
   const isEmbed = embedParams.embed
+  // Authoring with the real renderer: once a revision validates, the same recipe
+  // is loaded into the full viewer and the review panel docks beside it, so the
+  // human tests toggles, cameras, and playback on the actual rendering.
+  const authoringDocked = !isEmbed && !showDropZone && status === 'ready'
+    && (authoringState.phase === 'review' || authoringState.phase === 'finalized')
+  const loadedAuthoredHashRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (isEmbed) return
+    const artifact = authoringState.currentArtifact
+    const hash = authoringState.currentRecipeHash
+    if (!artifact || !hash || (authoringState.phase !== 'review' && authoringState.phase !== 'finalized')) return
+    if (loadedAuthoredHashRef.current === hash) return
+    const inventory = teachableAuthoringSession.getInventory()
+    if (!inventory) return
+    loadedAuthoredHashRef.current = hash
+    void useSceneStore.getState().actions.loadAuthoredScene(inventory, artifact)
+  }, [isEmbed, authoringState.phase, authoringState.currentRecipeHash, authoringState.currentArtifact])
+  useEffect(() => {
+    if (authoringState.phase === 'idle' || authoringState.phase === 'revoked') loadedAuthoredHashRef.current = null
+  }, [authoringState.phase])
   const showTimeline = !showDropZone && (!isEmbed || embedParams.controls !== 'none')
 
   return (
@@ -824,15 +844,40 @@ function App() {
       {!isEmbed && <Header />}
 
       {/* Main Content */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: authoringDocked ? 'row' : 'column', overflow: 'hidden', position: 'relative' }}>
         {showDropZone && !isEmbed ? (
           showTeachableLens
-            ? <TeachableLensPanel onOpenInteractivePreview={(inventory, recipe) => { void useSceneStore.getState().actions.loadAuthoredScene(inventory, recipe) }} />
+            ? <TeachableLensPanel />
             : <DropZone onFilesLoaded={loadFromFiles} />
         ) : (
           <>
-            <SensorView embedControls={isEmbed ? embedParams.controls : 'full'} />
-            {!isEmbed && (authoringState.phase === 'review' || authoringState.phase === 'finalized') && (
+            {authoringDocked ? (
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                <SensorView embedControls="full" />
+              </div>
+            ) : (
+              <SensorView embedControls={isEmbed ? embedParams.controls : 'full'} />
+            )}
+            {authoringDocked && (
+              <aside data-testid="authoring-dock" style={{ width: 'min(460px, 42vw)', flexShrink: 0, overflowY: 'auto', borderLeft: `1px solid ${colors.border}`, background: colors.bgBase }}>
+                <TeachableLensPanel />
+              </aside>
+            )}
+            {!isEmbed && authoringState.phase === 'idle' && useSceneStore.getState().actions.authoredScene() && (
+              <button
+                data-testid="edit-recipe"
+                onClick={() => {
+                  const authored = useSceneStore.getState().actions.authoredScene()
+                  if (!authored) return
+                  const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([])
+                  void teachableAuthoringSession.resumeFromArtifact(authored.inventory, authored.recipe)
+                }}
+                style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20, padding: '7px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.bgSurface, 0.92), color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >
+                ✎ Edit recipe
+              </button>
+            )}
+            {!isEmbed && !authoringDocked && (authoringState.phase === 'review' || authoringState.phase === 'finalized') && (
               <button
                 data-testid="back-to-review"
                 onClick={() => { const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([]) }}

@@ -3716,8 +3716,8 @@
               "position.z"
             ],
             "dimensionFields": [
-              "dimensions.x",
               "dimensions.y",
+              "dimensions.x",
               "dimensions.z"
             ],
             "headingField": "yaw",
@@ -3877,7 +3877,8 @@
     "assumptions": [
       "PandaSet camera mounts are rigid and are computed from frame-0 world poses.",
       "Both lidar heads are intentionally exposed as one pandar stream while retaining the d head attribute.",
-      "JPEG dimensions are 1920x1080, confirmed from the encoded image header."
+      "JPEG dimensions are 1920x1080, confirmed from the encoded image header.",
+      "PandaSet cuboid dimensions.x is the width and dimensions.y the length (y-forward frame), so dimensionFields are [y, x, z]."
     ],
     "datasetFingerprint": "sha256:6fa289d2360b64a6092286a4711eb6fa99061cd9f2f6770756e39685e542481a",
     "validatorVersion": "1.0.0",
@@ -3938,7 +3939,7 @@
       "version": 1,
       "items": [
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "timeline",
           "frameIndices": [
             0,
@@ -3948,7 +3949,7 @@
           "verdict": "accepted"
         },
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "egoPoses",
           "frameIndices": [
             0,
@@ -3958,7 +3959,7 @@
           "verdict": "accepted"
         },
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "pointClouds",
           "frameIndices": [
             0,
@@ -3968,7 +3969,7 @@
           "verdict": "accepted"
         },
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "cameraImages",
           "frameIndices": [
             0,
@@ -3978,7 +3979,7 @@
           "verdict": "accepted"
         },
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "boxes3d",
           "frameIndices": [
             0,
@@ -3988,7 +3989,7 @@
           "verdict": "accepted"
         },
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "projection",
           "frameIndices": [
             0,
@@ -3998,7 +3999,7 @@
           "verdict": "accepted"
         },
         {
-          "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+          "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
           "capability": "segmentation",
           "frameIndices": [
             0,
@@ -4011,9 +4012,9 @@
     }
   },
   "hashes": {
-    "recipeHash": "sha256:e4422a6f58df3d71ff61792fd31970b4e782842b715fc61746ac03c2d8c6f52f",
+    "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
     "formatFingerprint": "sha256:edd1f4969dbbfc4f3a3604b8352e129e3895ff7765a801b7a631f9c2237722a2",
     "operatorSetFingerprint": "sha256:ef85b7d1c971dd91ddb24018f18d9e6ae5ff9d9a1bce17e9dc60d65370f242bb",
-    "artifactHash": "sha256:69a79ce9bdb730cb4383a3b1cd017ed4549fa1e4f35b4412345e9d147c5e6c2e"
+    "artifactHash": "sha256:55ae769d45ef7dd3ac0665e270a9f8f4602b5cf436b70023982f122990303040"
   }
 }
