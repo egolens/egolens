@@ -508,22 +508,33 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
  * of a filename. Records that do not match a required derivation are dropped.
  */
 const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
-  if (!isRecords(inputs.rows)) throw new Error('GRAPH_RECORDS_INPUT_INVALID')
-  const derivations = (params.derive as readonly { field: string; from: string; pattern: string; replacement: string; required?: boolean; pad?: number; padChar?: string }[]).map((entry) => ({
-    ...entry, regex: new RegExp(entry.pattern, 'u'),
+  if (!isRecords(inputs.rows)) throw new Error(`GRAPH_RECORDS_INPUT_INVALID: inputs.rows must be records (got ${inputKindLabel(inputs.rows)})`)
+  const derivations = (params.derive as readonly { field: string; from: string; pattern?: string; replacement?: string; required?: boolean; pad?: number; padChar?: string; scale?: number; offset?: number; integer?: boolean }[]).map((entry) => ({
+    ...entry, regex: entry.pattern === undefined ? null : new RegExp(entry.pattern, 'u'),
   }))
   const rows: Record<string, unknown>[] = []
   for (const row of inputs.rows.rows) {
     const next: Record<string, unknown> = { ...row }
     let keep = true
     for (const derivation of derivations) {
-      const source = next[derivation.from]
+      const source = next[derivation.from] ?? nestedValue(next, derivation.from)
+      // Numeric mode: value × scale + offset (e.g. float seconds → integer microseconds with scale 1e6, integer true).
+      if (derivation.scale !== undefined || derivation.offset !== undefined) {
+        const numeric = Number(source)
+        if (!Number.isFinite(numeric)) {
+          if (derivation.required !== false) throw new Error(`GRAPH_DERIVE_NUMERIC_INVALID: ${derivation.from} is not numeric`)
+          continue
+        }
+        const scaled = numeric * (derivation.scale ?? 1) + (derivation.offset ?? 0)
+        next[derivation.field] = derivation.integer ? Math.round(scaled) : scaled
+        continue
+      }
       const text = typeof source === 'string' ? source : source === undefined || source === null ? '' : String(source)
-      if (!derivation.regex.test(text)) {
+      if (!derivation.regex || !derivation.regex.test(text)) {
         if (derivation.required !== false) { keep = false; break }
         continue
       }
-      const derived = text.replace(derivation.regex, derivation.replacement)
+      const derived = text.replace(derivation.regex, derivation.replacement ?? '$&')
       // `pad` left-pads the derived value (e.g. a frame index → zero-padded file stem) so path linkage
       // never needs one rule per frame.
       next[derivation.field] = derivation.pad ? derived.padStart(derivation.pad, derivation.padChar ?? '0') : derived
@@ -531,6 +542,23 @@ const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
     if (keep) rows.push(next)
   }
   return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
+}
+
+/** Dotted-path lookup for nested JSON rows ("heading.w"). */
+function nestedValue(row: Readonly<Record<string, unknown>>, path: string): unknown {
+  let value: unknown = row
+  for (const segment of path.split('.')) {
+    if (typeof value !== 'object' || value === null) return undefined
+    value = (value as Record<string, unknown>)[segment]
+  }
+  return value
+}
+
+/** Kind label for input diagnostics ("records", "binary-collection", "missing", …). */
+function inputKindLabel(value: unknown): string {
+  if (value === undefined || value === null) return 'missing'
+  if (typeof value === 'object' && 'kind' in (value as object)) return String((value as { kind: unknown }).kind)
+  return typeof value
 }
 
 async function readTextRows(
@@ -656,7 +684,7 @@ const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
       group: groupField ? String(row[groupField]) : undefined,
     }))
   } else {
-    throw new Error('GRAPH_TIMELINE_INPUT_INVALID')
+    throw new Error(`GRAPH_TIMELINE_INPUT_INVALID: rows must be records, a table, or parquet (got ${inputKindLabel(candidate)})`)
   }
   frames = [...frames].sort((left, right) => {
     const leftGroup = String(left.group ?? '')
@@ -677,11 +705,16 @@ const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
 const relativePoses: CoreOperatorImplementationV1 = async (inputs, params) => {
   const rows = await materialize(inputs.rows)
   const timestampField = String(params.timestampField)
-  const matrixField = String(params.matrixField)
   const absolute = new Map<bigint, number[]>()
   for (const row of rows) {
-    const matrix = list(row[matrixField], matrixField)
-    if (matrix.length !== 16) throw new Error(`GRAPH_MATRIX_INVALID: ${matrixField}`)
+    let matrix: number[]
+    if (typeof params.matrixField === 'string') {
+      matrix = list(row[params.matrixField], params.matrixField)
+      if (matrix.length !== 16) throw new Error(`GRAPH_MATRIX_INVALID: ${params.matrixField}`)
+    } else {
+      // Quaternion (array or 4 scalar fields) + translation (array or 3 scalar fields) → row-major world ← ego.
+      matrix = poseLinkFromRow(row, params as PoseLinkV1)
+    }
     absolute.set(integerTimestamp(row[timestampField], timestampField), matrix)
   }
   const timestamps = [...absolute.keys()].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
@@ -884,11 +917,51 @@ function rowMajorPoseFromFields(calibration: Readonly<Record<string, unknown>>, 
  * matrices left to right (KITTI: R_rect_00 · [R|T]_velo_to_cam) and `invertPose` flips a matrix
  * that was published in the sensor ← ego direction.
  */
+interface PoseLinkV1 {
+  readonly quaternionField?: string
+  readonly quaternionFields?: readonly string[]
+  readonly matrixField?: string
+  readonly translationField?: string
+  readonly translationFields?: readonly string[]
+  readonly invert?: boolean
+}
+
+function translationFromRow(row: Readonly<Record<string, unknown>>, link: { translationField?: string; translationFields?: readonly string[] }, fallback: [number, number, number] | null): [number, number, number] {
+  if (Array.isArray(link.translationFields) && link.translationFields.length === 3) {
+    return link.translationFields.map((field) => finite(row[field] ?? nestedValue(row, field), field)) as [number, number, number]
+  }
+  if (typeof link.translationField === 'string') return finiteTuple(row[link.translationField], 3, link.translationField) as [number, number, number]
+  if (fallback) return fallback
+  throw new Error('GRAPH_POSE_TRANSLATION_MISSING: translationField or translationFields (3 scalar names) is required')
+}
+
+/** One row-major pose link from a row: quaternion (array or 4 scalar fields) or matrix, plus translation. */
+function poseLinkFromRow(row: Readonly<Record<string, unknown>>, link: PoseLinkV1): number[] {
+  let pose: number[]
+  if (typeof link.matrixField === 'string') {
+    pose = rowMajorPoseFromFields(row, link.matrixField, typeof link.translationField === 'string' ? link.translationField : null)
+    if (Array.isArray(link.translationFields)) { const t = translationFromRow(row, link, null); pose[3] = t[0]; pose[7] = t[1]; pose[11] = t[2] }
+  } else {
+    const quaternion = Array.isArray(link.quaternionFields) && link.quaternionFields.length === 4
+      ? link.quaternionFields.map((field) => finite(row[field] ?? nestedValue(row, field), field)) as [number, number, number, number]
+      : finiteTuple(row[String(link.quaternionField)], 4, String(link.quaternionField)) as [number, number, number, number]
+    pose = quaternionToMatrix4x4(quaternion, translationFromRow(row, link, [0, 0, 0]))
+  }
+  return link.invert === true ? invertRowMajor4x4(pose) : pose
+}
+
 function calibrationPose(calibration: Readonly<Record<string, unknown>>, params: Readonly<Record<string, unknown>>): number[] {
   if (params.rotationForm === 'identity') return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-  const translation = params.rotationForm === 'matrix' && typeof params.translationField !== 'string'
+  // poseChain: links composed left to right (row-major), each optionally inverted; e.g. PandaSet
+  // ego ← camera = inverse(world ← lidar) · (world ← camera) from one joined calibration row.
+  if (Array.isArray(params.poseChain) && params.poseChain.length > 0) {
+    let pose = poseLinkFromRow(calibration, params.poseChain[0] as PoseLinkV1)
+    for (const link of (params.poseChain as PoseLinkV1[]).slice(1)) pose = multiplyRowMajor4x4(pose, poseLinkFromRow(calibration, link))
+    return params.invertPose === true ? invertRowMajor4x4(pose) : pose
+  }
+  const translation = params.rotationForm === 'matrix' && typeof params.translationField !== 'string' && !Array.isArray(params.translationFields)
     ? [0, 0, 0] as [number, number, number]
-    : finiteTuple(calibration[String(params.translationField)], 3, String(params.translationField)) as [number, number, number]
+    : translationFromRow(calibration, params as { translationField?: string; translationFields?: readonly string[] }, null)
   if (params.rotationForm === 'matrix') {
     const chain = Array.isArray(params.rotationMatrixFields) && params.rotationMatrixFields.length > 0
       ? (params.rotationMatrixFields as readonly { matrixField: string; translationField?: string }[])
@@ -911,8 +984,11 @@ function calibrationPose(calibration: Readonly<Record<string, unknown>>, params:
     // Row-major 4×4 whose columns are the sensor axes expressed in the ego frame.
     return [ux[0]!, uy[0]!, uz[0]!, translation[0], ux[1]!, uy[1]!, uz[1]!, translation[1], ux[2]!, uy[2]!, uz[2]!, translation[2], 0, 0, 0, 1]
   }
-  const rotation = finiteTuple(calibration[String(params.quaternionField)], 4, String(params.quaternionField)) as [number, number, number, number]
-  return quaternionToMatrix4x4(rotation, translation)
+  const rotation = Array.isArray(params.quaternionFields) && params.quaternionFields.length === 4
+    ? (params.quaternionFields as string[]).map((field) => finite(calibration[field] ?? nestedValue(calibration, field), field)) as [number, number, number, number]
+    : finiteTuple(calibration[String(params.quaternionField)], 4, String(params.quaternionField)) as [number, number, number, number]
+  const pose = quaternionToMatrix4x4(rotation, translation)
+  return params.invertPose === true ? invertRowMajor4x4(pose) : pose
 }
 
 function relationalPointCloudPlan(
@@ -1112,7 +1188,7 @@ function relationalCameraPlan(
   params: Readonly<Record<string, unknown>>,
 ): GraphCameraPlanV1 {
   if (!isRecords(inputs.sampleData) || !isRecords(inputs.calibration) || !isRecords(inputs.sensors)) {
-    throw new Error('GRAPH_CAMERA_RELATION_INPUT_INVALID')
+    throw new Error(`GRAPH_CAMERA_RELATION_INPUT_INVALID: sampleData, calibration, and sensors must be records (got sampleData=${inputKindLabel(inputs.sampleData)}, calibration=${inputKindLabel(inputs.calibration)}, sensors=${inputKindLabel(inputs.sensors)})`)
   }
   const calibrationKeyField = String(params.calibrationKeyField)
   const calibrationSensorKeyField = String(params.calibrationSensorKeyField)
@@ -1146,6 +1222,16 @@ function relationalCameraPlan(
     const egoFromSensor = new Float64Array(calibrationPose(calibration, params))
     sensorTransforms.push({ sensorId, egoFromSensor })
     if (String(sensor[modalityField]) !== cameraModality) continue
+    const intrinsicFields = fieldList(params, 'intrinsicFields', [])
+    if (intrinsicFields.length === 4) {
+      const [fx, fy, cx, cy] = intrinsicFields.map((field) => finite(calibration[field] ?? nestedValue(calibration, field), field))
+      const [width, height] = dimensionsByCalibration.get(key) ?? [Number(params.defaultWidth), Number(params.defaultHeight)]
+      calibrations.set(sensorId, {
+        sensorId, frameId: `${sensorId}${String(params.frameIdSuffix)}`, width, height,
+        intrinsics: [fx!, fy!, cx!, cy!], distortionModel: 'none', distortion: [], egoFromCamera: egoFromSensor,
+      })
+      continue
+    }
     const matrix = calibration[intrinsicMatrixField]
     if (!Array.isArray(matrix)) continue
     // Nested rows ([[fx,0,cx],[0,fy,cy],[0,0,1]]) or a flat row-major 3×3 / 3×4
@@ -1241,9 +1327,9 @@ const bindCameraFrame: CoreOperatorImplementationV1 = async (inputs, params) => 
     return { images: await parquetCameraPlan(inputs.rows, inputs.calibration, params) }
   }
   const encoded = inputs.bytes as GraphEncodedCollectionV1
-  if (encoded?.kind !== 'encoded-collection') throw new Error('GRAPH_CAMERA_INPUT_INVALID')
+  if (encoded?.kind !== 'encoded-collection') throw new Error(`GRAPH_CAMERA_INPUT_INVALID: inputs.bytes must come from image.encoded_bytes (got ${inputKindLabel(inputs.bytes)})`)
   if (isRecords(inputs.sampleData)) return { images: relationalCameraPlan(encoded, inputs, params) }
-  if (!(isTable(inputs.intrinsics) || isRecords(inputs.intrinsics)) || !(isTable(inputs.extrinsics) || isRecords(inputs.extrinsics))) throw new Error('GRAPH_CAMERA_INPUT_INVALID')
+  if (!(isTable(inputs.intrinsics) || isRecords(inputs.intrinsics)) || !(isTable(inputs.extrinsics) || isRecords(inputs.extrinsics))) throw new Error(`GRAPH_CAMERA_INPUT_INVALID: bind by sampleData records (relational form) or give intrinsics and extrinsics records/tables (got intrinsics=${inputKindLabel(inputs.intrinsics)}, extrinsics=${inputKindLabel(inputs.extrinsics)})`)
   const intrinsics = await materialize(inputs.intrinsics)
   const sensorField = String(params.sensorField ?? 'sensor_name')
   const intrinsic = fieldList(params, 'intrinsicFields', ['fx_px', 'fy_px', 'cx_px', 'cy_px', 'k1', 'k2', 'k3', 'width_px', 'height_px'])
