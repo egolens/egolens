@@ -32,6 +32,8 @@ import { memLog } from '../utils/memoryLogger'
 import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
 import { getAdapterById, getManifest, setAdapter } from '../adapters/registry'
 import { RecipeBackedDatasetAdapter } from '../teachable/runtime/RecipeBackedDatasetAdapter'
+import type { EgoLensAdapterRecipeV1 } from '../teachable/recipe/types'
+import type { SourceInventoryV1 } from '../teachable/authoring/SourceInventory'
 import {
   detectNuScenesVersionRoot,
   discoverNuScenesScenes,
@@ -78,7 +80,7 @@ import { applyTheme, initialTheme, viewportBg, type ThemeName } from '../theme'
 import { argoverse2CompiledRecipe, nuScenesCompiledRecipe, waymoCompiledRecipe } from '../adapters/recipes/bundled'
 import type { FeatherColumnsParamsV1 } from '../teachable/operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../teachable/operators/parquetColumns'
-import type { CompiledRecipeV1 } from '../teachable/recipe/compiler'
+import { compileRecipeV1, type CompiledRecipeV1 } from '../teachable/recipe/compiler'
 import { bindRecipeSceneV1, bindRemoteRecipeSceneV1 } from '../teachable/runtime/bindRecipeScene'
 import { bundledPhase2OperatorRegistry } from '../teachable/operators/bundledPhase2'
 import type { RecipeInventoryEntryV1 } from '../teachable/runtime/GraphKernel'
@@ -194,6 +196,8 @@ interface SceneActions {
     counted?: boolean,
     onBeforeReady?: (resolved: ResolvedPortableShareV1) => void,
   ) => Promise<ResolvedPortableShareV1 | null>
+  /** Render a validated Teachable Lens recipe against the user's local folder in the interactive viewer. */
+  loadAuthoredScene: (inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1) => Promise<void>
   loadFrame: (index: number) => Promise<void>
   nextFrame: () => Promise<void>
   prevFrame: () => Promise<void>
@@ -1032,6 +1036,64 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       }
     },
 
+    loadAuthoredScene: async (inventory, recipe) => {
+      resetInternal()
+      clearUrlSource()
+      markPerformanceEvent('scene-load-start', { dataset: 'authored-local' })
+      set({
+        status: 'loading', error: null, errorCode: null,
+        loadStep: 'opening' as LoadStep, loadProgress: 0,
+        currentFrame: null, currentFrameIndex: 0, isPlaying: false,
+      })
+      try {
+        const compiledRecipe = compileRecipeV1(recipe, bundledPhase2OperatorRegistry)
+        const binding = await bindRecipeSceneV1({ compiledRecipe, source: inventory.resolveAuthorizedSource(), inventory })
+        const manifest = binding.scene.manifest
+        setAdapter(new RecipeBackedDatasetAdapter(recipe, bundledPhase2OperatorRegistry, compiledRecipe))
+        internal.datasetId = manifest.id
+        internal.conformanceSceneFactory = async (candidateRecipe = compiledRecipe) => (await bindRecipeSceneV1({
+          compiledRecipe: candidateRecipe, source: inventory.resolveAuthorizedSource(), inventory,
+        })).scene
+        internal.normalizedScene = manageNormalizedSceneV1(binding.scene, {
+          workerTimestamps: binding.metadata.timestamps,
+          delegateOwnsFramePayloads: true,
+        })
+        applyMetadataBundle({
+          ...binding.metadata,
+          hasBoxData: manifest.capabilities.has('boxes3d'),
+          hasSegmentation: manifest.capabilities.has('lidarSegmentation'),
+          hasKeypoints: manifest.capabilities.has('keypoints3d') || manifest.capabilities.has('keypoints2d'),
+          hasCameraSegmentation: manifest.capabilities.has('cameraSegmentation'),
+        }, set, get)
+        const visibleSensors = new Set(manifest.sensors.filter((sensor) => sensor.modality !== 'camera').map((sensor) => sensor.rendererId))
+        const scene = internal.normalizedScene
+        const frame = await loadRendererFrame(scene, 0)
+        if (scene !== internal.normalizedScene || scene.disposed) return
+        const sceneId = binding.scene.index.segments[0]?.id ?? recipe.identity.name
+        set({
+          status: 'ready', error: null, errorCode: null, loadProgress: 1,
+          loadStep: 'first-frame' as LoadStep,
+          availableComponents: [...new Set(inventory.snapshot().entries.map((entry) => entry.path.split('/')[0]))].sort(),
+          availableSegments: [sceneId],
+          currentSegment: sceneId,
+          currentFrameIndex: 0,
+          currentFrame: frame,
+          playbackWindow: null,
+          isPlaying: false,
+          cachedFrames: [...scene.cachedPointFrames()],
+          cameraCachedFrames: [...scene.cachedCameraFrames()],
+          cameraLoadedCount: 0,
+          cameraTotalCount: 0,
+          visibleSensors,
+          activeCam: null,
+          showLidarOverlay: true,
+        })
+        markPerformanceEvent('dataset-ready', { dataset: manifest.id, sceneGeneration: scene.sceneGeneration })
+      } catch (error) {
+        resetInternal()
+        failLoad(set, error, 'loadAuthoredScene')
+      }
+    },
     loadFrame: async (frameIndex) => {
       if (frameIndex < 0 || frameIndex >= internal.timestamps.length) return
       const scene = internal.normalizedScene

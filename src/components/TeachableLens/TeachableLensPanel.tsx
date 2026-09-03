@@ -1,5 +1,7 @@
 import { declaredSensorSummaryV1 } from '../../teachable/authoring/sensorConfiguration'
 import AgentPromptHint from './AgentPromptHint'
+import type { EgoLensAdapterRecipeV1 } from '../../teachable/recipe/types'
+import type { SourceInventoryV1 } from '../../teachable/authoring/SourceInventory'
 import { revisionRequestTextV1 } from '../../teachable/authoring/revisionRequest'
 import { HUMAN_REVIEW_ISSUES_V1, type HumanReviewIssueV1 } from '../../teachable/authoring/review'
 import { useRef, useState, useSyncExternalStore } from 'react'
@@ -22,7 +24,12 @@ function Pill({ children, tone = 'default' }: { children: React.ReactNode; tone?
 
 export default function TeachableLensPanel({
   session = teachableAuthoringSession,
-}: { session?: TeachableAuthoringSessionV1 }) {
+  onOpenInteractivePreview,
+}: {
+  session?: TeachableAuthoringSessionV1
+  /** Provided by the full viewer only: render the validated recipe against the live inventory in the 3D viewer. */
+  onOpenInteractivePreview?: (inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1) => void
+}) {
   const state = useSyncExternalStore(session.subscribe, session.getState, session.getState)
   const preview = useSyncExternalStore(authoringPreviewStoreV1.subscribe, authoringPreviewStoreV1.getSnapshot, authoringPreviewStoreV1.getSnapshot)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -159,6 +166,19 @@ export default function TeachableLensPanel({
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input ref={fileInput} type="file" accept=".json,.egolens-adapter.json,application/json" hidden onChange={(event) => void importRecipe(event.target.files?.[0])} />
               <button disabled={busy} onClick={() => fileInput.current?.click()} style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.border}`, background: colors.bgOverlay, color: colors.textPrimary, cursor: busy ? 'wait' : 'pointer' }}>Import JSON</button>
+              {onOpenInteractivePreview && (state.phase === 'review' || state.phase === 'finalized') && state.currentArtifact && (
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    const liveInventory = session.getInventory()
+                    if (liveInventory) onOpenInteractivePreview(liveInventory, state.currentArtifact!)
+                  }}
+                  title="Render the current validated recipe against this folder in the interactive 3D viewer"
+                  style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accentBlue}`, background: alpha(colors.accentBlue, 0.12), color: colors.textPrimary, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Open interactive preview
+                </button>
+              )}
               {state.phase === 'review' && <button disabled={busy} onClick={() => void finalize()} style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.12), color: colors.accent, cursor: busy ? 'wait' : 'pointer' }}>Finalize</button>}
               {state.exportReady && state.currentArtifact && <button onClick={() => { try { downloadRecipeArtifactV1(state.currentArtifact!); setLocalError(null) } catch (error) { setLocalError(error instanceof Error ? error.message : String(error)) } }} style={{ padding: '8px 12px', borderRadius: radius.sm, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}>Export JSON</button>}
             </div>
