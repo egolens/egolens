@@ -17,6 +17,8 @@ export interface SensorConfigurationV1 {
   readonly camera: number
   /** Optional stream names per modality; when present, declared sensor ids must be exactly this set. */
   readonly names?: Readonly<Partial<Record<SensorModalityV1, readonly string[]>>>
+  /** Human-chosen recipe name; when present, identity.name must be exactly this. */
+  readonly datasetName?: string
 }
 
 export interface DeclaredSensorSummaryV1 {
@@ -57,6 +59,12 @@ export function assertValidSensorConfigurationV1(value: unknown): SensorConfigur
       names[modality] = [...list]
     }
     if (Object.keys(names).length > 0) configuration.names = names
+  }
+  if (input.datasetName !== undefined) {
+    if (typeof input.datasetName !== 'string') throw new Error('Sensor configuration datasetName must be a string.')
+    const trimmed = input.datasetName.trim()
+    if (trimmed.length > 120) throw new Error('Sensor configuration datasetName must be at most 120 characters.')
+    if (trimmed.length > 0) (configuration as { datasetName?: string }).datasetName = trimmed
   }
   return configuration
 }
@@ -120,11 +128,20 @@ export function declaredSensorSummaryV1(recipe: Pick<EgoLensAdapterRecipeV1, 'sc
 
 /** Compile-stage diagnostics when the declared sensors disagree with the confirmed layout. */
 export function sensorConfigurationDiagnosticsV1(
-  recipe: Pick<EgoLensAdapterRecipeV1, 'scene'>,
+  recipe: Pick<EgoLensAdapterRecipeV1, 'scene'> & { readonly identity?: { readonly name?: string } },
   configuration: SensorConfigurationV1 | null,
 ): readonly AdapterDiagnostic[] {
   if (!configuration) return []
-  return declaredSensorSummaryV1(recipe).flatMap(({ modality, ids }) => {
+  const nameDiagnostics: AdapterDiagnostic[] = configuration.datasetName && recipe.identity?.name !== configuration.datasetName
+    ? [{
+        stage: 'compile' as const,
+        severity: 'error' as const,
+        code: 'IDENTITY_NAME_UNMET',
+        jsonPointer: '/identity/name',
+        hint: `The person named this dataset "${configuration.datasetName}"; set identity.name to exactly that (the recipe declares "${recipe.identity?.name ?? ''}").`,
+      }]
+    : []
+  return [...nameDiagnostics, ...declaredSensorSummaryV1(recipe).flatMap(({ modality, ids }) => {
     const expected = configuration[modality]
     const declared = ids.length === 0 ? 'none' : ids.join(', ')
     if (ids.length !== expected) {
@@ -148,5 +165,5 @@ export function sensorConfigurationDiagnosticsV1(
       jsonPointer: '/scene/sensors',
       hint: `The confirmed ${modality} sensor ids are ${expectedNames.join(', ')}; the recipe declares ${declared}${missing.length > 0 ? ` (missing: ${missing.join(', ')})` : ''}${extra.length > 0 ? ` (unexpected: ${extra.join(', ')})` : ''}. Use exactly the confirmed ids as scene sensor ids.`,
     }]
-  })
+  })]
 }

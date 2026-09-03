@@ -184,6 +184,7 @@ export class TeachableAuthoringSessionV1 {
     const configuration: SensorConfigurationV1 = {
       lidar: byModality('lidar').length, radar: byModality('radar').length, camera: byModality('camera').length,
       names: { lidar: byModality('lidar'), radar: byModality('radar'), camera: byModality('camera') },
+      datasetName: recipe.identity.name,
     }
     this.start(inventory, { sensorConfiguration: configuration })
     const { hashes: _hashes, ...rest } = recipe
@@ -220,7 +221,8 @@ export class TeachableAuthoringSessionV1 {
   }
 
   start(inventory: SourceInventoryV1, options: { readonly sensorConfiguration?: SensorConfigurationV1 | null } = {}): void {
-    this.#inventory?.revoke()
+    // Restarting on the same folder (name or layout edited on the P0 screen) keeps its authorization.
+    if (this.#inventory && this.#inventory !== inventory) this.#inventory.revoke()
     this.#inventory = inventory
     const sensorConfiguration = options.sensorConfiguration ? assertValidSensorConfigurationV1(options.sensorConfiguration) : null
     this.#set({ ...initialState(), phase: 'inspecting', inventory: inventory.snapshot(), sensorConfiguration })
@@ -253,7 +255,7 @@ export class TeachableAuthoringSessionV1 {
       ...(requested ? { example: requested } : {}),
       engineVersion: RECIPE_ENGINE_VERSION,
       authoringGuide: [
-        '1. egolens_teachable_get_state: read the confirmed sensor layout (counts and ids). The recipe must declare and bind exactly those sensors; a different layout is rejected.',
+        '1. egolens_teachable_get_state: read the confirmed sensor layout (counts and ids) and, when present, sensorConfiguration.datasetName. The recipe must declare and bind exactly those sensors and use that name as identity.name; a different layout or name is rejected. Without a datasetName, choose a short descriptive identity.name yourself.',
         '2. egolens_teachable_inspect: inventory first, then metadata/text/json/json-sample/table-schema on one example of every file kind (bounded maxBytes). Never guess a column name you could read.',
         '3. Read recipeSchema and operators below. Call get_contract again with { example: "<id>" } (ids in exampleRecipes) to read a complete, sealed recipe for the closest layout and adapt it: change identity, match, sources, sensor ids, and provenance, keep the operator patterns. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your lowercase agent id (e.g. "chatgpt", "codex"), provenance.createdAt to now.',
         '4. egolens_teachable_apply_revision with the COMPLETE recipe every time (a rejected revision keeps nothing). Diagnostics name the input or field to fix. Bind timeline first, then pointClouds and cameraImages, then boxes3d, egoPoses, segmentation, segmentMetadata.',

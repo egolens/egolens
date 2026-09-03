@@ -79,7 +79,9 @@ Evidence from this week (each agent turn under ten minutes):
    `egolens-sample-pandaset-001-6frames.zip` (32 MB, quick) or
    `egolens-sample-pandaset-001-full.zip` (439 MB, all 80 frames for
    playback). Unzip and drop the folder on the page. "A wild format
-   appeared!" opens: the detected sensors (6 cameras, 1 lidar) are the
+   appeared!" opens: name the dataset (that name becomes the recipe's
+   identity and the sealed reader's name; leave it empty and the agent
+   proposes one), the detected sensors (6 cameras, 1 lidar) are the
    contract the recipe must meet — press **Edit** if they are wrong — and
    the agent card names your host (Codex, ChatGPT, or your agent) with the
    prompt and a **Copy prompt** button. Without a WebMCP host the same card
