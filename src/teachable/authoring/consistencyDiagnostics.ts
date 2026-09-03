@@ -12,6 +12,41 @@ export interface ConsistencyInputV1 {
   readonly frames: readonly NormalizedFrameV1[]
   readonly cameraCalibrations: ReadonlyMap<string, NormalizedCameraCalibrationV1>
   readonly timestampsMicros: readonly bigint[]
+  /** Authorized source paths, used to compare the timeline against per-frame file counts. */
+  readonly inventoryPaths?: readonly string[]
+}
+
+const PER_FRAME_EXTENSIONS = /\.(?:jpg|jpeg|png|webp|bin|pcd|pkl|pickle|npz|ply|feather|laz|las)(?:\.gz)?$/iu
+const TIMELINE_COVERAGE_FRACTION = 0.5
+/** Anything below one hour since the epoch is not wall-clock time. */
+const EPOCH_MIN_MICROS = 3_600n * 1_000_000n
+
+/**
+ * A timeline much shorter than the per-frame files in the folder (one frame
+ * against six camera images) or timestamps that look like frame indices mean
+ * the author invented the timeline instead of reading it.
+ */
+export function timelineCoverageDiagnosticsV1(input: ConsistencyInputV1): AdapterDiagnostic[] {
+  const out: AdapterDiagnostic[] = []
+  const frameCount = input.timestampsMicros.length
+  if (frameCount > 0 && input.timestampsMicros.every((value) => value >= 0n && value < EPOCH_MIN_MICROS)) {
+    out.push(warning('TIMESTAMPS_SUSPECT_SYNTHETIC', `All ${frameCount} timeline timestamps are below one hour since the epoch (first ${input.timestampsMicros[0]} µs); they look like frame indices or placeholders. Read the dataset's timestamp table and convert its unit (records.derive scale/integer for float seconds).`, '/pipelines'))
+  }
+  if (input.inventoryPaths && frameCount > 0) {
+    const perDirectory = new Map<string, number>()
+    for (const path of input.inventoryPaths) {
+      if (!PER_FRAME_EXTENSIONS.test(path)) continue
+      const directory = path.slice(0, path.lastIndexOf('/'))
+      perDirectory.set(directory, (perDirectory.get(directory) ?? 0) + 1)
+    }
+    let largest = 0
+    let largestDirectory = ''
+    for (const [directory, count] of perDirectory) if (count > largest) { largest = count; largestDirectory = directory }
+    if (largest > 1 && frameCount < largest * TIMELINE_COVERAGE_FRACTION) {
+      out.push(warning('TIMELINE_FRAME_COUNT_SUSPECT', `The timeline has ${frameCount} frame${frameCount === 1 ? '' : 's'} but ${largestDirectory}/ holds ${largest} per-frame files; most of the data is not reachable. Build the timeline from the dataset's timestamp table so every frame is listed.`, '/pipelines'))
+    }
+  }
+  return out
 }
 
 const CAMERA_MIN_POINTS = 1000
@@ -135,6 +170,7 @@ export function consistencyDiagnosticsV1(input: ConsistencyInputV1): readonly Ad
   return [
     ...cameraProjectionDiagnosticsV1(input),
     ...timelineSpacingDiagnosticsV1(input),
+    ...timelineCoverageDiagnosticsV1(input),
     ...boxPointDensityDiagnosticsV1(input),
     ...egoPoseContinuityDiagnosticsV1(input),
   ]

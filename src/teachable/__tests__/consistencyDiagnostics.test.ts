@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   boxPointDensityDiagnosticsV1, cameraProjectionDiagnosticsV1, consistencyDiagnosticsV1,
-  egoPoseContinuityDiagnosticsV1, timelineSpacingDiagnosticsV1,
+  egoPoseContinuityDiagnosticsV1, timelineSpacingDiagnosticsV1, timelineCoverageDiagnosticsV1,
 } from '../authoring/consistencyDiagnostics'
 import type { NormalizedCameraCalibrationV1, NormalizedFrameV1, NormalizedPointCloudV1 } from '../runtime/normalizedScene'
 
@@ -65,7 +65,15 @@ describe('self-consistency diagnostics', () => {
 
   it('combines every check into warnings only', () => {
     const all = consistencyDiagnosticsV1({ frames: [frame(0), frame(1)], cameraCalibrations: new Map([['cam', displacedCamera]]), timestampsMicros: timestamps(10, 6) })
-    expect(all.map((item) => item.code)).toEqual(['CAMERA_PROJECTION_EMPTY', 'TIMELINE_SPACING_IRREGULAR'])
+    expect(all.map((item) => item.code)).toEqual(['CAMERA_PROJECTION_EMPTY', 'TIMELINE_SPACING_IRREGULAR', 'TIMESTAMPS_SUSPECT_SYNTHETIC'])
     expect(all.every((item) => item.severity === 'warning')).toBe(true)
+  })
+
+  it('flags a one-frame placeholder timeline against a folder of per-frame files', () => {
+    const paths = ['meta/timestamps.json', ...Array.from({ length: 6 }, (_, i) => `lidar/0${i}.pkl`), ...Array.from({ length: 6 }, (_, i) => `camera/front_camera/0${i}.jpg`)]
+    const out = timelineCoverageDiagnosticsV1({ frames: [], cameraCalibrations: new Map(), timestampsMicros: [1000n], inventoryPaths: paths })
+    expect(out.map((d) => d.code).sort()).toEqual(['TIMELINE_FRAME_COUNT_SUSPECT', 'TIMESTAMPS_SUSPECT_SYNTHETIC'])
+    const ok = timelineCoverageDiagnosticsV1({ frames: [], cameraCalibrations: new Map(), timestampsMicros: Array.from({ length: 6 }, (_, i) => 1557539924499810n + BigInt(i) * 100000n), inventoryPaths: paths })
+    expect(ok).toEqual([])
   })
 })
