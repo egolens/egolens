@@ -832,6 +832,20 @@ function App() {
         ) : (
           <>
             <SensorView embedControls={isEmbed ? embedParams.controls : 'full'} />
+            {!isEmbed && authoringState.phase === 'idle' && useSceneStore.getState().actions.authoredScene() && (
+              <button
+                data-testid="edit-recipe"
+                onClick={() => {
+                  const authored = useSceneStore.getState().actions.authoredScene()
+                  if (!authored) return
+                  const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([])
+                  void teachableAuthoringSession.resumeFromArtifact(authored.inventory, authored.recipe)
+                }}
+                style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20, padding: '7px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.bgSurface, 0.92), color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >
+                ✎ Edit recipe
+              </button>
+            )}
             {!isEmbed && (authoringState.phase === 'review' || authoringState.phase === 'finalized') && (
               <button
                 data-testid="back-to-review"
