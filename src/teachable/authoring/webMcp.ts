@@ -114,10 +114,10 @@ export async function registerTeachableWebMcpToolsV1(
     },
     {
       name: 'egolens_teachable_get_contract',
-      description: 'Step 3: read the adapter recipe schema, the operator vocabulary with JSON-schema params, and the authoringGuide (rules and the expected order of steps). A recipe is declarative JSON that binds files through operators to outputs; it never contains code.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      description: 'Step 3: read the adapter recipe schema, the operator vocabulary with JSON-schema params, and the authoringGuide (rules and the expected order of steps). Pass { example: "kitti-raw" | "pandaset" | "a2d2" } to also get a complete sealed recipe for that layout family to adapt. A recipe is declarative JSON that binds files through operators to outputs; it never contains code.',
+      inputSchema: { type: 'object', properties: { example: { type: 'string', enum: ['kitti-raw', 'pandaset', 'a2d2'], description: 'Return one complete sealed example recipe for this layout family in addition to the contract.' } }, additionalProperties: false },
       annotations: { readOnlyHint: true },
-      execute: engage(async () => session.getContract()),
+      execute: engage(async (input: { example?: string }) => session.getContract({ example: input.example })),
     },
     {
       name: 'egolens_teachable_apply_revision',

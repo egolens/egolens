@@ -1,0 +1,1747 @@
+{
+  "kind": "egolens-adapter",
+  "schemaVersion": 1,
+  "engine": {
+    "minimumVersion": "1.0.0",
+    "requiredOperators": {
+      "json.records": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.derive": {
+        "major": 1,
+        "provider": "core"
+      },
+      "archive.npz_records": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.encoded_bytes": {
+        "major": 1,
+        "provider": "core"
+      },
+      "records.select": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.sort": {
+        "major": 1,
+        "provider": "core"
+      },
+      "timeline.join": {
+        "major": 1,
+        "provider": "core"
+      },
+      "image.bind_camera_frame": {
+        "major": 1,
+        "provider": "core"
+      },
+      "relations.token_join": {
+        "major": 1,
+        "provider": "core"
+      }
+    }
+  },
+  "identity": {
+    "name": "A2D2 sensor-fusion preview",
+    "description": "One A2D2 scene with six synchronized camera-view image streams and six camera-view lidar point streams."
+  },
+  "match": {
+    "inventory": {
+      "rootEntries": [
+        {
+          "path": "20180810_150607",
+          "required": true
+        },
+        {
+          "path": "cams_lidars.json",
+          "required": true
+        }
+      ]
+    },
+    "all": [
+      {
+        "kind": "path",
+        "glob": "20180810_150607/camera/*/*.json",
+        "minCount": 240,
+        "maxCount": 240
+      },
+      {
+        "kind": "path",
+        "glob": "20180810_150607/camera/*/*.png",
+        "minCount": 240,
+        "maxCount": 240
+      },
+      {
+        "kind": "path",
+        "glob": "20180810_150607/lidar/*/*.npz",
+        "minCount": 240,
+        "maxCount": 240
+      },
+      {
+        "kind": "path",
+        "glob": "cams_lidars.json",
+        "minCount": 1,
+        "maxCount": 1
+      }
+    ]
+  },
+  "sources": {
+    "sidecars": {
+      "reader": "json.records",
+      "files": {
+        "glob": "20180810_150607/camera/*/*.json",
+        "order": "numeric-path",
+        "minCount": 240,
+        "maxCount": 240
+      },
+      "params": {
+        "layout": "file-row",
+        "pathField": "path"
+      }
+    },
+    "viewCalibration": {
+      "reader": "json.records",
+      "files": {
+        "exact": "cams_lidars.json",
+        "order": "none",
+        "minCount": 1,
+        "maxCount": 1
+      },
+      "params": {
+        "layout": "object-rows",
+        "rootPath": "cameras",
+        "keyField": "name",
+        "flatten": true
+      }
+    },
+    "lidarRecords": {
+      "reader": "archive.npz_records",
+      "files": {
+        "glob": "20180810_150607/lidar/*/*.npz",
+        "order": "numeric-path",
+        "minCount": 240,
+        "maxCount": 240
+      },
+      "params": {
+        "arrays": [
+          {
+            "name": "pcloud_points",
+            "fields": [
+              "x",
+              "y",
+              "z"
+            ]
+          }
+        ],
+        "maxEntries": 32,
+        "maxExpandedBytes": 67108864,
+        "maxCompressionRatio": 10000,
+        "maxElements": 10000000,
+        "maxRank": 2
+      }
+    },
+    "imageBytes": {
+      "reader": "image.encoded_bytes",
+      "files": {
+        "glob": "20180810_150607/camera/*/*.png",
+        "order": "numeric-path",
+        "minCount": 240,
+        "maxCount": 240
+      },
+      "params": {
+        "mimeType": "image/png"
+      }
+    },
+    "sensorSidecars": {
+      "reader": "json.records",
+      "files": {
+        "glob": "20180810_150607/camera/*/*_000000083.json",
+        "order": "lexical-path",
+        "minCount": 6,
+        "maxCount": 6
+      },
+      "params": {
+        "layout": "file-row",
+        "pathField": "path"
+      }
+    }
+  },
+  "scene": {
+    "formatId": "a2d2",
+    "timeline": {
+      "timestampUnit": "us",
+      "nominalFrameRate": 30
+    },
+    "coordinateFrames": [
+      {
+        "id": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar_front_center_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar_front_left_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar_front_right_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar_rear_center_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar_side_left_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "lidar_side_right_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera_front_center_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera_front_left_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera_front_right_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera_rear_center_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera_side_left_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      },
+      {
+        "id": "camera_side_right_frame",
+        "parent": "ego",
+        "convention": {
+          "x": "forward",
+          "y": "left",
+          "z": "up",
+          "handedness": "right",
+          "lengthUnit": "m"
+        }
+      }
+    ],
+    "sensors": [
+      {
+        "id": "lidar_front_center",
+        "rendererId": 0,
+        "label": "Front center lidar view",
+        "modality": "lidar",
+        "frameId": "lidar_front_center_frame",
+        "color": "#E45756"
+      },
+      {
+        "id": "lidar_front_left",
+        "rendererId": 1,
+        "label": "Front left lidar view",
+        "modality": "lidar",
+        "frameId": "lidar_front_left_frame",
+        "color": "#F58518"
+      },
+      {
+        "id": "lidar_front_right",
+        "rendererId": 2,
+        "label": "Front right lidar view",
+        "modality": "lidar",
+        "frameId": "lidar_front_right_frame",
+        "color": "#FFBF00"
+      },
+      {
+        "id": "lidar_rear_center",
+        "rendererId": 3,
+        "label": "Rear center lidar view",
+        "modality": "lidar",
+        "frameId": "lidar_rear_center_frame",
+        "color": "#72B7B2"
+      },
+      {
+        "id": "lidar_side_left",
+        "rendererId": 4,
+        "label": "Side left lidar view",
+        "modality": "lidar",
+        "frameId": "lidar_side_left_frame",
+        "color": "#54A24B"
+      },
+      {
+        "id": "lidar_side_right",
+        "rendererId": 5,
+        "label": "Side right lidar view",
+        "modality": "lidar",
+        "frameId": "lidar_side_right_frame",
+        "color": "#4C78A8"
+      },
+      {
+        "id": "camera_front_center",
+        "rendererId": 100,
+        "label": "Front center camera",
+        "modality": "camera",
+        "frameId": "camera_front_center_frame",
+        "color": "#B279A2",
+        "image": {
+          "width": 1920,
+          "height": 1208,
+          "model": "pinhole",
+          "view": "front",
+          "povLabel": "Front center",
+          "aliases": [
+            "front_center",
+            "cam_front_center"
+          ]
+        }
+      },
+      {
+        "id": "camera_front_left",
+        "rendererId": 101,
+        "label": "Front left camera",
+        "modality": "camera",
+        "frameId": "camera_front_left_frame",
+        "color": "#FF9DA6",
+        "image": {
+          "width": 1920,
+          "height": 1208,
+          "model": "fisheye",
+          "view": "front-left",
+          "povLabel": "Front left",
+          "aliases": [
+            "front_left",
+            "cam_front_left"
+          ]
+        }
+      },
+      {
+        "id": "camera_front_right",
+        "rendererId": 102,
+        "label": "Front right camera",
+        "modality": "camera",
+        "frameId": "camera_front_right_frame",
+        "color": "#9D755D",
+        "image": {
+          "width": 1920,
+          "height": 1208,
+          "model": "fisheye",
+          "view": "front-right",
+          "povLabel": "Front right",
+          "aliases": [
+            "front_right",
+            "cam_front_right"
+          ]
+        }
+      },
+      {
+        "id": "camera_rear_center",
+        "rendererId": 103,
+        "label": "Rear center camera",
+        "modality": "camera",
+        "frameId": "camera_rear_center_frame",
+        "color": "#BAB0AC",
+        "image": {
+          "width": 1920,
+          "height": 1208,
+          "model": "fisheye",
+          "view": "rear",
+          "povLabel": "Rear center",
+          "aliases": [
+            "rear_center",
+            "cam_rear_center"
+          ]
+        }
+      },
+      {
+        "id": "camera_side_left",
+        "rendererId": 104,
+        "label": "Side left camera",
+        "modality": "camera",
+        "frameId": "camera_side_left_frame",
+        "color": "#59A14F",
+        "image": {
+          "width": 1920,
+          "height": 1208,
+          "model": "fisheye",
+          "view": "side-left",
+          "povLabel": "Side left",
+          "aliases": [
+            "side_left",
+            "cam_side_left"
+          ]
+        }
+      },
+      {
+        "id": "camera_side_right",
+        "rendererId": 105,
+        "label": "Side right camera",
+        "modality": "camera",
+        "frameId": "camera_side_right_frame",
+        "color": "#EDC948",
+        "image": {
+          "width": 1920,
+          "height": 1208,
+          "model": "fisheye",
+          "view": "side-right",
+          "povLabel": "Side right",
+          "aliases": [
+            "side_right",
+            "cam_side_right"
+          ]
+        }
+      }
+    ],
+    "taxonomies": [],
+    "pointAttributes": [
+      {
+        "id": "x",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "y",
+        "storage": "float32",
+        "unit": "m"
+      },
+      {
+        "id": "z",
+        "storage": "float32",
+        "unit": "m"
+      }
+    ],
+    "pointLayout": {
+      "interleavedAttributes": [
+        "x",
+        "y",
+        "z"
+      ],
+      "colorModes": [
+        "distance"
+      ]
+    }
+  },
+  "pipelines": {
+    "sidecarPipeline": {
+      "nodes": [
+        {
+          "id": "derive",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sidecars.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "imagePath",
+                "from": "path",
+                "pattern": "\\.json$",
+                "replacement": ".png",
+                "required": true
+              },
+              {
+                "field": "lidarPath",
+                "from": "path",
+                "pattern": "^([^/]+)/camera/([^/]+)/(.+)_camera_(.+)\\.json$",
+                "replacement": "$1/lidar/$2/$3_lidar_$4.npz",
+                "required": true
+              },
+              {
+                "field": "frameKey",
+                "from": "path",
+                "pattern": "^.*_([0-9]{9})\\.json$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "sceneId",
+                "from": "path",
+                "pattern": "^([^/]+)/.*$",
+                "replacement": "$1",
+                "required": true
+              },
+              {
+                "field": "cameraSensor",
+                "from": "cam_name",
+                "pattern": "^(.*)$",
+                "replacement": "camera_$1",
+                "required": true
+              },
+              {
+                "field": "lidarSensor",
+                "from": "cam_name",
+                "pattern": "^(.*)$",
+                "replacement": "lidar_$1",
+                "required": true
+              },
+              {
+                "field": "modality",
+                "from": "cam_name",
+                "pattern": "^.*$",
+                "replacement": "camera",
+                "required": true
+              },
+              {
+                "field": "syncKey",
+                "from": "path",
+                "pattern": "^(.*)$",
+                "replacement": "$1",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "frontSync",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "derive.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_front_(?:center|left|right)/.*_([0-9]{9})\\.json$",
+                "replacement": "$1",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync60",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "frontSync.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000060\\.json$",
+                "replacement": "000000083",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync61",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync60.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000061\\.json$",
+                "replacement": "000000084",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync62",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync61.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000062\\.json$",
+                "replacement": "000000085",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync63",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync62.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000063\\.json$",
+                "replacement": "000000086",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync64",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync63.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000064\\.json$",
+                "replacement": "000000087",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync65",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync64.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000065\\.json$",
+                "replacement": "000000088",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync66",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync65.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000066\\.json$",
+                "replacement": "000000089",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync67",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync66.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000067\\.json$",
+                "replacement": "000000090",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync68",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync67.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000068\\.json$",
+                "replacement": "000000091",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync69",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync68.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000069\\.json$",
+                "replacement": "000000092",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync70",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync69.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000070\\.json$",
+                "replacement": "000000093",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync71",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync70.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000071\\.json$",
+                "replacement": "000000094",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync72",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync71.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000072\\.json$",
+                "replacement": "000000095",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync73",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync72.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000073\\.json$",
+                "replacement": "000000096",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync74",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync73.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000074\\.json$",
+                "replacement": "000000097",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync75",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync74.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000075\\.json$",
+                "replacement": "000000098",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync76",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync75.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000076\\.json$",
+                "replacement": "000000099",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync77",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync76.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000077\\.json$",
+                "replacement": "000000100",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync78",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync77.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000078\\.json$",
+                "replacement": "000000101",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync79",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync78.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000079\\.json$",
+                "replacement": "000000102",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync80",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync79.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000080\\.json$",
+                "replacement": "000000103",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync81",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync80.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000081\\.json$",
+                "replacement": "000000104",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync82",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync81.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000082\\.json$",
+                "replacement": "000000105",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync83",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync82.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000083\\.json$",
+                "replacement": "000000106",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync84",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync83.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000084\\.json$",
+                "replacement": "000000107",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync85",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync84.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000085\\.json$",
+                "replacement": "000000108",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync86",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync85.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000086\\.json$",
+                "replacement": "000000109",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync87",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync86.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000087\\.json$",
+                "replacement": "000000110",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync88",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync87.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000088\\.json$",
+                "replacement": "000000111",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync89",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync88.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000089\\.json$",
+                "replacement": "000000112",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync90",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync89.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000090\\.json$",
+                "replacement": "000000113",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync91",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync90.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000091\\.json$",
+                "replacement": "000000114",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync92",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync91.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000092\\.json$",
+                "replacement": "000000115",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync93",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync92.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000093\\.json$",
+                "replacement": "000000116",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync94",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync93.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000094\\.json$",
+                "replacement": "000000117",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync95",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync94.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000095\\.json$",
+                "replacement": "000000118",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync96",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync95.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000096\\.json$",
+                "replacement": "000000119",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync97",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync96.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000097\\.json$",
+                "replacement": "000000120",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync98",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync97.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000098\\.json$",
+                "replacement": "000000121",
+                "required": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "sync99",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sync98.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "syncKey",
+                "from": "syncKey",
+                "pattern": "^.*camera/cam_(?:rear_center|side_left|side_right)/.*_000000099\\.json$",
+                "replacement": "000000122",
+                "required": false
+              }
+            ]
+          }
+        }
+      ],
+      "result": "sync99.rows"
+    },
+    "timelinePipeline": {
+      "nodes": [
+        {
+          "id": "sort",
+          "op": "timeline.sort",
+          "version": 1,
+          "inputs": {
+            "rows": "clockPipeline.result"
+          },
+          "params": {
+            "timestampField": "cam_tstamp",
+            "timestampUnit": "us",
+            "keyField": "syncKey",
+            "groupField": "sceneId"
+          }
+        }
+      ],
+      "result": "sort.frames"
+    },
+    "pointCloudPipeline": {
+      "nodes": [
+        {
+          "id": "join",
+          "op": "timeline.join",
+          "version": 1,
+          "inputs": {
+            "records": "lidarRecords.records",
+            "sampleData": "alignedSamplePipeline.result",
+            "calibration": "viewCalibration.rows",
+            "sensors": "sensorTablePipeline.result"
+          },
+          "params": {
+            "mode": "token",
+            "pathField": "lidarPath",
+            "frameKeyField": "syncKey",
+            "recordKeyField": "path",
+            "timestampField": "canonicalTimestamp",
+            "recordCalibrationKeyField": "cam_name",
+            "calibrationKeyField": "name",
+            "calibrationSensorKeyField": "name",
+            "sensorKeyField": "cam_name",
+            "sensorIdField": "lidarSensor",
+            "quaternionField": "view.x-axis",
+            "translationField": "view.origin",
+            "rotationForm": "axes",
+            "axisFields": [
+              "view.x-axis",
+              "view.y-axis"
+            ],
+            "outputFrame": "ego"
+          }
+        }
+      ],
+      "result": "join.pointClouds"
+    },
+    "cameraImagePipeline": {
+      "nodes": [
+        {
+          "id": "bind",
+          "op": "image.bind_camera_frame",
+          "version": 1,
+          "inputs": {
+            "bytes": "imageBytes.bytes",
+            "sampleData": "alignedSamplePipeline.result",
+            "calibration": "viewCalibration.rows",
+            "sensors": "sensorTablePipeline.result"
+          },
+          "params": {
+            "pathField": "imagePath",
+            "frameKeyField": "syncKey",
+            "timestampField": "canonicalTimestamp",
+            "recordCalibrationKeyField": "cam_name",
+            "calibrationKeyField": "name",
+            "calibrationSensorKeyField": "name",
+            "sensorKeyField": "cam_name",
+            "sensorIdField": "cameraSensor",
+            "modalityField": "modality",
+            "cameraModality": "camera",
+            "widthField": "width",
+            "heightField": "height",
+            "intrinsicMatrixField": "CamMatrix",
+            "quaternionField": "view.x-axis",
+            "translationField": "view.origin",
+            "rotationForm": "axes",
+            "axisFields": [
+              "view.x-axis",
+              "view.y-axis"
+            ],
+            "frameIdSuffix": "_frame",
+            "defaultWidth": 1920,
+            "defaultHeight": 1208
+          }
+        }
+      ],
+      "result": "bind.images"
+    },
+    "segmentMetadataPipeline": {
+      "nodes": [
+        {
+          "id": "select",
+          "op": "records.select",
+          "version": 1,
+          "inputs": {
+            "rows": "sidecarPipeline.result"
+          },
+          "params": {
+            "fields": [
+              "sceneId",
+              "cam_tstamp",
+              "cam_name",
+              "cameraSensor",
+              "lidarSensor",
+              "path"
+            ],
+            "where": [
+              {
+                "field": "cam_name",
+                "equals": "front_center"
+              }
+            ],
+            "segmentIdentity": {
+              "labelFromSceneId": true,
+              "metadataKey": "recording"
+            }
+          }
+        }
+      ],
+      "result": "select.records"
+    },
+    "sensorTablePipeline": {
+      "nodes": [
+        {
+          "id": "derive",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "sensorSidecars.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "cameraSensor",
+                "from": "cam_name",
+                "pattern": "^(.*)$",
+                "replacement": "camera_$1",
+                "required": true
+              },
+              {
+                "field": "lidarSensor",
+                "from": "cam_name",
+                "pattern": "^(.*)$",
+                "replacement": "lidar_$1",
+                "required": true
+              },
+              {
+                "field": "modality",
+                "from": "cam_name",
+                "pattern": "^.*$",
+                "replacement": "camera",
+                "required": true
+              }
+            ]
+          }
+        }
+      ],
+      "result": "derive.rows"
+    },
+    "clockPipeline": {
+      "nodes": [
+        {
+          "id": "select",
+          "op": "records.select",
+          "version": 1,
+          "inputs": {
+            "rows": "sidecarPipeline.result"
+          },
+          "params": {
+            "fields": [
+              "cam_tstamp",
+              "cam_name",
+              "syncKey",
+              "sceneId",
+              "path"
+            ],
+            "where": [
+              {
+                "field": "cam_name",
+                "equals": "front_center"
+              }
+            ]
+          }
+        }
+      ],
+      "result": "select.records"
+    },
+    "alignedSamplePipeline": {
+      "nodes": [
+        {
+          "id": "join",
+          "op": "relations.token_join",
+          "version": 1,
+          "inputs": {
+            "left": "sidecarPipeline.result",
+            "right": "clockPipeline.result"
+          },
+          "params": {
+            "leftKey": "syncKey",
+            "rightKey": "syncKey",
+            "join": "inner",
+            "rightFields": {
+              "canonicalTimestamp": "cam_tstamp"
+            }
+          }
+        }
+      ],
+      "result": "join.rows"
+    }
+  },
+  "outputs": {
+    "timeline": "timelinePipeline.result",
+    "pointClouds": "pointCloudPipeline.result",
+    "cameraImages": "cameraImagePipeline.result",
+    "segmentMetadata": "segmentMetadataPipeline.result"
+  },
+  "validation": {
+    "sampleFrames": [
+      "first",
+      "middle",
+      "last"
+    ],
+    "assertions": [],
+    "humanReview": [
+      "timeline",
+      "pointClouds",
+      "cameraImages",
+      "segmentMetadata"
+    ]
+  },
+  "provenance": {
+    "author": "codex",
+    "createdAt": "2026-09-02T21:14:32.501Z",
+    "summary": "Initialize synchronization keys for every sidecar before conditional front and rear/side normalization.",
+    "assumptions": [
+      "cam_tstamp values are microseconds.",
+      "pcloud_points is an N-by-3 Cartesian point array in meters.",
+      "Each lidar NPZ stream is already expressed in its matching camera-view frame, as evidenced by pcld_view matching camera calibration view.",
+      "No trustworthy vehicle pose transform was identified, so egoPoses is omitted."
+    ],
+    "parentRecipeHash": "sha256:f981a77f372520a62c657c5a9cf2dd1eb7839c0965e66750f4eb53589e3d85bc",
+    "datasetFingerprint": "sha256:751762a283a8369574688cab125bf60102883e52a7b44c1f08d8da611ee4bfc1",
+    "validatorVersion": "1.0.0",
+    "validationSummary": {
+      "passed": true,
+      "stages": [
+        "schema",
+        "compile",
+        "bind",
+        "sample",
+        "cross-output"
+      ],
+      "sampleFrames": [
+        0,
+        19,
+        39
+      ],
+      "frameCount": 40,
+      "sensorSamples": {
+        "lidar_front_center": [
+          17314,
+          17024,
+          16855
+        ],
+        "lidar_front_left": [
+          47335,
+          43866,
+          44045
+        ],
+        "lidar_front_right": [
+          48584,
+          45874,
+          44951
+        ],
+        "lidar_rear_center": [
+          45586,
+          46870,
+          48292
+        ],
+        "lidar_side_left": [
+          47237,
+          48241,
+          48377
+        ],
+        "lidar_side_right": [
+          44298,
+          47127,
+          46275
+        ],
+        "camera_front_center": [
+          1,
+          1,
+          1
+        ],
+        "camera_front_left": [
+          1,
+          1,
+          1
+        ],
+        "camera_front_right": [
+          1,
+          1,
+          1
+        ],
+        "camera_rear_center": [
+          1,
+          1,
+          1
+        ],
+        "camera_side_left": [
+          1,
+          1,
+          1
+        ],
+        "camera_side_right": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "humanReviewReceipt": {
+      "version": 1,
+      "items": [
+        {
+          "recipeHash": "sha256:fb080a22f1fc3948c82dbfd17e184cadd76a8215fd630e3455ea52803f05e212",
+          "capability": "timeline",
+          "frameIndices": [
+            0,
+            19,
+            39
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:fb080a22f1fc3948c82dbfd17e184cadd76a8215fd630e3455ea52803f05e212",
+          "capability": "pointClouds",
+          "frameIndices": [
+            0,
+            19,
+            39
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:fb080a22f1fc3948c82dbfd17e184cadd76a8215fd630e3455ea52803f05e212",
+          "capability": "cameraImages",
+          "frameIndices": [
+            0,
+            19,
+            39
+          ],
+          "verdict": "accepted"
+        },
+        {
+          "recipeHash": "sha256:fb080a22f1fc3948c82dbfd17e184cadd76a8215fd630e3455ea52803f05e212",
+          "capability": "projection",
+          "frameIndices": [
+            0,
+            19,
+            39
+          ],
+          "verdict": "accepted"
+        }
+      ]
+    }
+  },
+  "hashes": {
+    "recipeHash": "sha256:fb080a22f1fc3948c82dbfd17e184cadd76a8215fd630e3455ea52803f05e212",
+    "formatFingerprint": "sha256:73d095aef2a292c84114ffdb8ea1f456561e92112dbf295cf0970d6a7081c501",
+    "operatorSetFingerprint": "sha256:2295095080c61c396da64a2ee75db0a0069ed841c7e11a437e9f0874bf45bfa9",
+    "artifactHash": "sha256:44ffa15e0e4ad04cd261cf211856c28a3bfc9bcaac196fa39c0f2ee209dba59e"
+  }
+}
