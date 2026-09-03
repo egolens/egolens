@@ -360,6 +360,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     keyField: { type: 'string', minLength: 1, maxLength: 256 },
     rootPath: { type: 'string', minLength: 1, maxLength: 512 },
     flatten: { type: 'boolean' },
+    indexField: { type: 'string', minLength: 1, maxLength: 128 },
   }, []), recordContract(['rows'])],
   ['text.table', byteInputContract, closedParams({
     layout: { enum: ['delimited', 'key-values', 'lines'] },
