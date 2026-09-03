@@ -149,9 +149,15 @@ function validateObject(value: unknown): RecipeValidationResult {
   }
 }
 
+/** Bytes kept free for the `hashes` block that finalization appends to an in-memory recipe. */
+const ARTIFACT_HASHES_RESERVE_BYTES = 2048
+
 export function validateRecipeV1(input: string | unknown): RecipeValidationResult {
-  if (typeof input !== 'string') return validateObject(input)
-  const byteLength = new TextEncoder().encode(input).byteLength
+  // An in-memory recipe is measured as the artifact it will export (pretty-printed), so an
+  // oversized revision fails at apply time with a diagnostic instead of at the export button.
+  const byteLength = typeof input === 'string'
+    ? new TextEncoder().encode(input).byteLength
+    : new TextEncoder().encode(JSON.stringify(input, null, 2) ?? '').byteLength + ARTIFACT_HASHES_RESERVE_BYTES
   if (byteLength > MAX_RECIPE_BYTES_V1) {
     return {
       ok: false,
@@ -161,10 +167,11 @@ export function validateRecipeV1(input: string | unknown): RecipeValidationResul
         code: 'RESOURCE_LIMIT_ARTIFACT_SIZE',
         got: byteLength,
         expected: MAX_RECIPE_BYTES_V1,
-        hint: `Adapter artifacts may not exceed ${MAX_RECIPE_BYTES_V1} bytes.`,
+        hint: `Adapter artifacts may not exceed ${MAX_RECIPE_BYTES_V1} bytes when pretty-printed. Replace per-frame rule tables with generic derivations (records.derive supports pad for zero-padded indices).`,
       }],
     }
   }
+  if (typeof input !== 'string') return validateObject(input)
 
   const parseErrors: ParseError[] = []
   const root = parseTree(input, parseErrors, { allowTrailingComma: false, disallowComments: true })

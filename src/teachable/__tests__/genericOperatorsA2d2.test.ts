@@ -95,6 +95,10 @@ describe('generic operators surfaced by the A2D2 rung', () => {
 
   it('derives fields with regular expressions and drops rows a required derivation misses', async () => {
     const derive = coreGraphOperatorImplementationsV1['records.derive']!
+    const padded = await derive({ rows: { kind: 'records', rows: [{ index: 7 }, { index: 1234 }] } }, {
+      derive: [{ field: 'path', from: 'index', pattern: '^(\\d+)$', replacement: '$1', pad: 10 }],
+    }, context({})) as { rows: { rows: { path: string }[] } }
+    expect(padded.rows.rows.map((row) => row.path)).toEqual(['0000000007', '0000001234'])
     const result = await derive({ rows: { kind: 'records', rows: [
       { path: '20180810_150607/camera/cam_front_center/20180810150607_camera_frontcenter_000000083.json' },
       { path: 'README.txt' },
