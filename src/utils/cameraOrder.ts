@@ -68,3 +68,16 @@ export function orderCamerasByYawV1(cameras: readonly CameraSensorDef[], calibra
   const rotated = startIndex > 0 ? [...sorted.slice(startIndex), ...sorted.slice(0, startIndex)] : sorted
   return [...rotated, ...unknown]
 }
+
+const LABEL_WORDS: Record<string, string> = { FRONT: 'F', BACK: 'B', REAR: 'B', LEFT: 'L', RIGHT: 'R', SIDE: 'S', CENTER: '', CENTRE: '', CAMERA: '', CAM: '' }
+
+/**
+ * Short camera label for narrow tiles: "FRONT-LEFT CAMERA" → "FL", "BACK CAMERA" → "B",
+ * "SIDE LEFT" → "SL". Unknown words keep their initial so custom names stay distinct.
+ */
+export function abbreviateCameraLabelV1(label: string): string {
+  const words = label.toUpperCase().split(/[\s_-]+/u).filter(Boolean)
+  if (words.length < 2 && !LABEL_WORDS[words[0] ?? '']) return label
+  const short = words.map((word) => LABEL_WORDS[word] ?? word[0] ?? '').join('')
+  return short.length > 0 ? short : label
+}
