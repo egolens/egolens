@@ -14,6 +14,10 @@
  */
 
 import { create } from 'zustand'
+import { orderCamerasByYawV1 } from '../utils/cameraOrder'
+
+/** Bundled adapters keep their curated camera tile order; recipe datasets are re-ordered by mounting yaw. */
+const BUNDLED_ADAPTER_IDS = new Set(['waymo', 'nuscenes', 'argoverse2'])
 import type { ParquetRow } from '../utils/merge'
 import {
   type LidarCalibration,
@@ -26,7 +30,7 @@ import type { SegmentMeta } from '../types/waymo'
 import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
 import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
-import { getAdapterById, getManifest, setAdapter } from '../adapters/registry'
+import { getAdapterById, getManifest, setAdapter, setManifest } from '../adapters/registry'
 import { RecipeBackedDatasetAdapter } from '../teachable/runtime/RecipeBackedDatasetAdapter'
 import {
   detectNuScenesVersionRoot,
@@ -1958,6 +1962,14 @@ function applyMetadataBundle(
   if (bundle.cameraSeg) {
     internal.cameraSeg = bundle.cameraSeg
     setCameraSegByFrameRef(bundle.cameraSeg)
+  }
+
+  // Recipe-driven datasets list cameras in authoring order; re-order the tiles
+  // as a head-turn sweep from the mounting yaws now that calibrations are known.
+  // Bundled adapters keep their curated order.
+  if (!BUNDLED_ADAPTER_IDS.has(getManifest().id) && bundle.cameraCalibrations.length > 1) {
+    const manifest = getManifest()
+    setManifest({ ...manifest, cameraSensors: orderCamerasByYawV1(manifest.cameraSensors, bundle.cameraCalibrations) })
   }
 
   // Zustand state updates
