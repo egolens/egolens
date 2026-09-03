@@ -65,20 +65,22 @@ function isAsyncBuffer(value: ByteSourceBackingV1): value is AsyncBuffer {
  * URL catalog validation is deliberately outside this first local-source slice.
  */
 export class MappedByteSourceV1 implements ByteSourceV1 {
-  protected readonly entries = new Map<string, ByteSourceBackingV1>()
+  // Private on purpose: graph release walks reachable objects, and a caller-owned
+  // source must never be clearable by reflection (see releaseGraphValue).
+  readonly #entries = new Map<string, ByteSourceBackingV1>()
   protected revoked = false
 
   constructor(entries: Iterable<readonly [string, ByteSourceBackingV1]>) {
     for (const [rawPath, backing] of entries) {
       const path = normalizeSourcePathV1(rawPath)
-      if (this.entries.has(path)) throw new Error(`SOURCE_PATH_DUPLICATE: ${path}`)
-      this.entries.set(path, backing)
+      if (this.#entries.has(path)) throw new Error(`SOURCE_PATH_DUPLICATE: ${path}`)
+      this.#entries.set(path, backing)
     }
   }
 
   has(rawPath: string): boolean {
     this.assertActive()
-    return this.entries.has(normalizeSourcePathV1(rawPath))
+    return this.#entries.has(normalizeSourcePathV1(rawPath))
   }
 
   byteLength(rawPath: string): number | null {
@@ -118,7 +120,7 @@ export class MappedByteSourceV1 implements ByteSourceV1 {
 
   revoke(): void {
     this.revoked = true
-    this.entries.clear()
+    this.#entries.clear()
   }
 
   protected assertActive(): void {
@@ -128,7 +130,7 @@ export class MappedByteSourceV1 implements ByteSourceV1 {
   private resolve(rawPath: string): ByteSourceBackingV1 {
     this.assertActive()
     const path = normalizeSourcePathV1(rawPath)
-    const backing = this.entries.get(path)
+    const backing = this.#entries.get(path)
     if (!backing) throw new Error(`SOURCE_PATH_UNAVAILABLE: ${path}`)
     return backing
   }

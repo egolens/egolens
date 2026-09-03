@@ -21,3 +21,12 @@ describe('graph release and caller-owned sources', () => {
     expect(context.scratch.size).toBe(1)
   })
 })
+
+describe('mapped byte source hardening', () => {
+  it('exposes no enumerable map that a reflective walk could clear', () => {
+    const source = new MappedByteSourceV1([['a/b.json', new File(['1'], 'b.json')]])
+    for (const value of Object.values(source)) expect(value instanceof Map || value instanceof Set).toBe(false)
+    releaseGraphValue(source, new WeakSet())
+    expect(source.has('a/b.json')).toBe(true)
+  })
+})
