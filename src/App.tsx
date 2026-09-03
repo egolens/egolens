@@ -826,7 +826,7 @@ function App() {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {showDropZone && !isEmbed ? (
           showTeachableLens
-            ? <TeachableLensPanel />
+            ? <TeachableLensPanel onOpenInteractivePreview={(inventory, recipe) => { void useSceneStore.getState().actions.loadAuthoredScene(inventory, recipe) }} />
             : <DropZone onFilesLoaded={loadFromFiles} />
         ) : (
           <>
