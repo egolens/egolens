@@ -18,6 +18,37 @@ export function cameraYawFromExtrinsic(extrinsic: readonly number[], isOpticalFr
  * order, so a stereo rig stays left, right. Cameras without a calibration row
  * are appended in their given order.
  */
+/** Mounting yaw per camera id from calibration rows (radians, +left). */
+export function cameraYawsFromRowsV1(calibrationRows: readonly ParquetRow[]): Map<number, number> {
+  const yawById = new Map<number, number>()
+  for (const row of calibrationRows) {
+    const id = row['key.camera_name']
+    const extrinsic = row[`${CAM_PREFIX}.extrinsic.transform`]
+    if (typeof id !== 'number' || !Array.isArray(extrinsic) || extrinsic.length !== 16) continue
+    yawById.set(id, cameraYawFromExtrinsic(extrinsic as number[], Boolean(row.__isOpticalFrame)))
+  }
+  return yawById
+}
+
+/**
+ * Two-row layout for narrow screens: the forward hemisphere on top (left → right,
+ * so the front camera sits in the middle) and the rest below as seen from above
+ * (left side, rear, right side, so the rear camera sits in the middle). Returns
+ * null when fewer than two cameras have a calibration.
+ */
+export function splitCamerasIntoRowsV1(cameras: readonly CameraSensorDef[], calibrationRows: readonly ParquetRow[]): [CameraSensorDef[], CameraSensorDef[]] | null {
+  const yawById = cameraYawsFromRowsV1(calibrationRows)
+  const known = cameras.filter((camera) => yawById.has(camera.id))
+  if (known.length < 2) return null
+  const degrees = (camera: CameraSensorDef) => (yawById.get(camera.id)! * 180) / Math.PI
+  const forward = known.filter((camera) => Math.abs(degrees(camera)) < 85)
+  const rest = [...known.filter((camera) => Math.abs(degrees(camera)) >= 85), ...cameras.filter((camera) => !yawById.has(camera.id))]
+  const byYawDesc = (left: CameraSensorDef, right: CameraSensorDef) => Math.round(degrees(right) / 5) - Math.round(degrees(left) / 5) || known.indexOf(left) - known.indexOf(right)
+  const lateral = (camera: CameraSensorDef) => (yawById.has(camera.id) ? Math.sin(yawById.get(camera.id)!) : 0)
+  const byLateralDesc = (left: CameraSensorDef, right: CameraSensorDef) => Math.round((lateral(right) - lateral(left)) * 20) || cameras.indexOf(left) - cameras.indexOf(right)
+  return [forward.sort(byYawDesc), rest.sort(byLateralDesc)]
+}
+
 export function orderCamerasByYawV1(cameras: readonly CameraSensorDef[], calibrationRows: readonly ParquetRow[]): CameraSensorDef[] {
   const yawById = new Map<number, number>()
   for (const row of calibrationRows) {
