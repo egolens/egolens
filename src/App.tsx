@@ -43,6 +43,7 @@ import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
 import { inferSensorConfigurationV1, type SensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
 import type { SourceInventoryV1 } from './teachable/authoring/SourceInventory'
+import type { FinalizedArtifactRecordV1 } from './teachable/authoring/persistence'
 import SensorLayoutConfirm from './components/TeachableLens/SensorLayoutConfirm'
 import AgentPromptHint from './components/TeachableLens/AgentPromptHint'
 import { formatFingerprintV1, recipeHashV1 } from './teachable/authoring/hashes'
@@ -1364,7 +1365,7 @@ function DropZone({ onFilesLoaded }: {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
-  const [pendingAuthoring, setPendingAuthoring] = useState<{ inventory: SourceInventoryV1; configuration: SensorConfigurationV1 } | null>(null)
+  const [pendingAuthoring, setPendingAuthoring] = useState<{ inventory: SourceInventoryV1; configuration: SensorConfigurationV1; saved: readonly FinalizedArtifactRecordV1[] } | null>(null)
   const dragCounter = useRef(0)
   const directoryInputRef = useRef<HTMLInputElement>(null)
   const isMobile = useIsMobile()
@@ -1498,7 +1499,9 @@ function DropZone({ onFilesLoaded }: {
       if (inventory && inventory.snapshot().entries.length > 0) {
         // Authoring starts only after the human confirms the sensor layout, so
         // an agent cannot quietly collapse six cameras into none.
-        setPendingAuthoring({ inventory, configuration: inferSensorConfigurationV1(inventory.snapshot()) })
+        // Recipes finalized earlier in this browser for the same layout render without authoring.
+        const saved = await teachableAuthoringSession.findSavedRecipes(inventory).catch(() => [] as readonly FinalizedArtifactRecordV1[])
+        setPendingAuthoring({ inventory, configuration: inferSensorConfigurationV1(inventory.snapshot()), saved })
         setError(null)
         setScanning(false)
         return
@@ -1607,6 +1610,23 @@ function DropZone({ onFilesLoaded }: {
           <p style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 1.6, margin: 0 }}>
             No bundled adapter matches this folder. Confirm the physical sensors below; an agent using this page's WebMCP tools must then bind every one of them, and you review the rendering before anything is finalized.
           </p>
+          {pendingAuthoring.saved.length > 0 && (
+            <div data-testid="saved-recipes" style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, border: `1px solid ${colors.accent}`, background: colors.bgSurface }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>EgoLens already knows this layout</div>
+              <p style={{ margin: '4px 0 8px', color: colors.textSecondary, fontSize: 12, lineHeight: 1.5 }}>A recipe finalized in this browser matches these files. Render with it now, or teach a new one below.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {pendingAuthoring.saved.slice(0, 3).map((record) => (
+                  <button
+                    key={record.recipeHash}
+                    onClick={() => { void useSceneStore.getState().actions.loadAuthoredScene(pendingAuthoring.inventory, record.artifact); setPendingAuthoring(null) }}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Render with “{record.artifact.identity.name}” · {new Date(record.finalizedAt).toLocaleDateString()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <AgentPromptHint />
           <SensorLayoutConfirm
             inventory={pendingAuthoring.inventory}

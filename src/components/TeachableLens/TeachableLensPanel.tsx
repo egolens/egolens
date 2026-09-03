@@ -176,7 +176,7 @@ export default function TeachableLensPanel({
                   title="Render the current validated recipe against this folder in the interactive 3D viewer"
                   style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accentBlue}`, background: alpha(colors.accentBlue, 0.12), color: colors.textPrimary, fontWeight: 700, cursor: 'pointer' }}
                 >
-                  Open interactive preview
+                  {state.phase === 'finalized' ? 'Render this dataset' : 'Open interactive preview'}
                 </button>
               )}
               {state.phase === 'review' && <button disabled={busy} onClick={() => void finalize()} style={{ padding: '8px 12px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.12), color: colors.accent, cursor: busy ? 'wait' : 'pointer' }}>Finalize</button>}

@@ -87,6 +87,17 @@ export class TeachableArtifactCacheV1 {
     return await requestResult(transaction.objectStore('artifacts').get(preferred.recipeHash)) as FinalizedArtifactRecordV1 | undefined ?? null
   }
 
+  /** Every finalized artifact in this browser, newest first. */
+  async listAll(): Promise<readonly FinalizedArtifactRecordV1[]> {
+    if (!this.#indexedDb) {
+      return [...this.#memoryArtifacts.values()].sort((left, right) => right.finalizedAt.localeCompare(left.finalizedAt)).map((record) => structuredClone(record))
+    }
+    const database = await this.#database()
+    const transaction = database.transaction('artifacts', 'readonly')
+    const records = await requestResult(transaction.objectStore('artifacts').getAll()) as FinalizedArtifactRecordV1[]
+    return records.sort((left, right) => right.finalizedAt.localeCompare(left.finalizedAt))
+  }
+
   async listByFormat(formatFingerprint: string): Promise<readonly FinalizedArtifactRecordV1[]> {
     if (!this.#indexedDb) {
       return [...this.#memoryArtifacts.values()]

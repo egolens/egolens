@@ -10,7 +10,7 @@ import { assertValidRecipeV1 } from '../schema/validateSchema'
 import a2d2Example from '../examples/a2d2.egolens-adapter.json'
 import kittiRawExample from '../examples/kitti-raw.egolens-adapter.json'
 import pandasetExample from '../examples/pandaset.egolens-adapter.json'
-import { withComputedArtifactHashesV1, verifySuppliedHashesV1 } from './hashes'
+import { formatFingerprintV1, withComputedArtifactHashesV1, verifySuppliedHashesV1 } from './hashes'
 import { inspectSourceInventoryV1, INSPECTION_LIMITS_V1, type SourceInspectionRequestV1, type SourceInspectionResultV1 } from './inspection'
 import { TeachableArtifactCacheV1, type FinalizedArtifactRecordV1 } from './persistence'
 import { readRecipeArtifactFileV1, serializeRecipeArtifactV1 } from './portability'
@@ -148,6 +148,24 @@ export class TeachableAuthoringSessionV1 {
   /** The live user-authorized inventory, for rendering the current recipe in the viewer. */
   getInventory(): SourceInventoryV1 | null {
     return this.#inventory
+  }
+
+  /**
+   * Finalized recipes saved in this browser whose format fingerprint matches
+   * the dropped folder (same path templates and readers), newest first. Lets a
+   * taught format render again without authoring.
+   */
+  async findSavedRecipes(inventory: SourceInventoryV1): Promise<readonly FinalizedArtifactRecordV1[]> {
+    const records = await this.#cache.listAll()
+    const matches: FinalizedArtifactRecordV1[] = []
+    for (const record of records) {
+      try {
+        if (await formatFingerprintV1(record.artifact, inventory) === record.formatFingerprint) matches.push(record)
+      } catch {
+        // A record from an older engine that no longer fingerprints is simply not offered.
+      }
+    }
+    return matches
   }
 
   subscribe = (listener: () => void): (() => void) => {
