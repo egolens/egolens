@@ -45,7 +45,19 @@ function stateForTool(session: TeachableAuthoringSessionV1): Readonly<Record<str
     validation: state.validation,
     observableEffect: state.observableEffect,
     exportReady: state.exportReady,
+    nextStep: nextStepHint(state.phase, state.reviews.length > 0, state.exportReady),
   }
+}
+
+/** One sentence the agent can follow without a scripted prompt. */
+function nextStepHint(phase: string, hasReview: boolean, exportReady: boolean): string {
+  if (phase === 'idle') return 'Ask the user to drop a dataset folder onto the page and confirm the sensor layout; the tools work on that folder only.'
+  if (phase === 'revoked') return 'The user revoked access to the folder; ask them to drop it again.'
+  if (phase === 'finalized' || exportReady) return 'The recipe is sealed; the user can Export JSON or share it. Nothing more to submit.'
+  if (phase === 'review') return hasReview
+    ? 'Read latestHumanReview: fix every rejected capability (the issue names what looked wrong) and resubmit the complete recipe with parentRecipeHash set.'
+    : 'A revision is validated and rendered. Summarize what each capability binds to and wait for the user to review the preview on the page; do not finalize.'
+  return 'Inspect the inventory (egolens_teachable_inspect), read the contract (egolens_teachable_get_contract), then submit a complete recipe (egolens_teachable_apply_revision) that declares exactly the confirmed sensors.'
 }
 
 /** Register the five stable Site tools once in the top-level document. */
@@ -73,7 +85,7 @@ export async function registerTeachableWebMcpToolsV1(
   const tools: readonly WebMcpToolDefinition[] = [
     {
       name: 'egolens_teachable_inspect',
-      description: 'Inspect only the active user-authorized source inventory with strict byte and value limits.',
+      description: 'Step 2 of teaching EgoLens a dataset: look at the files the user dropped, within strict byte and value limits (raw bytes never leave the browser). Modes: inventory (all paths), metadata (one file), text/json/json-sample (bounded), table-schema (Parquet, Arrow/feather, pandas .pkl/.pkl.gz: column names, types, samples, row count). Start with inventory, then table-schema or json on one example of every file kind.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -91,14 +103,14 @@ export async function registerTeachableWebMcpToolsV1(
     },
     {
       name: 'egolens_teachable_get_contract',
-      description: 'Read the EgoLens adapter schema, normalized outputs, registered operators, limits, and diagnostics.',
+      description: 'Step 3: read the adapter recipe schema, the operator vocabulary with JSON-schema params, and the authoringGuide (rules and the expected order of steps). A recipe is declarative JSON that binds files through operators to outputs; it never contains code.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true },
       execute: engage(async () => session.getContract()),
     },
     {
       name: 'egolens_teachable_apply_revision',
-      description: 'Validate and transactionally apply one complete adapter recipe. The current parent recipe hash is required for revisions.',
+      description: 'Step 4: submit one complete adapter recipe (declarative JSON per the contract). EgoLens compiles it, samples three frames, and returns diagnostics that name the failing input or the missing field; fix and resubmit the whole recipe. Set provenance.author to your agent name and, after an accepted revision, provenance.parentRecipeHash to the current recipe hash from get_state. Do not call finalize yourself: the user reviews the rendered preview on the page and their feedback appears in get_state.latestHumanReview.',
       inputSchema: {
         type: 'object',
         properties: { recipe: { type: 'object' } },
@@ -110,14 +122,14 @@ export async function registerTeachableWebMcpToolsV1(
     },
     {
       name: 'egolens_teachable_get_state',
-      description: 'Read the current teaching phase, recipe identity, diagnostics, semantic diff, validation, and latest review without private notes.',
+      description: 'Step 1 and after every revision: the teaching phase, the sensor layout the user confirmed (counts and ids the recipe must declare exactly), validation results with per-sensor sample counts, diagnostics, and the latest human review. The nextStep field says what to do next.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true },
       execute: engage(async () => stateForTool(session)),
     },
     {
       name: 'egolens_teachable_finalize',
-      description: 'Finalize and cache the current engine-validated recipe only after every presented capability has accepted human review.',
+      description: 'Last step, only when the user asks: seal the reviewed recipe with hashes so it can be exported and shared. Refused until the user has accepted every presented capability on the page.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false },
       execute: engage(async () => {
