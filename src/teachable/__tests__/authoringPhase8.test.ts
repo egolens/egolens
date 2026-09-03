@@ -269,4 +269,26 @@ describe('Phase 8 diff, capability gap, and Site tools', () => {
     await tools.get('egolens_teachable_get_state')!.execute({})
     expect(authoring.getState().agentEngaged).toBe(true)
   })
+
+  it('accepts object, JSON-string, and empty inputs and returns strings on native hosts', async () => {
+    const authoring = session({ prepare: async () => prepared(vi.fn()) })
+    authoring.start(inventory())
+    const tools = new Map<string, { execute(input: unknown): Promise<unknown> }>()
+    const target = {
+      modelContext: {
+        registerTool: vi.fn((tool: { name: string; execute(input: unknown): Promise<unknown> }) => { tools.set(tool.name, tool) }),
+        executeTool: vi.fn(),
+      },
+    } as unknown as Document
+    expect(await registerTeachableWebMcpToolsV1(authoring, target)).toBe(true)
+    const getState = tools.get('egolens_teachable_get_state')!
+    for (const input of [{}, '{}', '', undefined]) {
+      const result = await getState.execute(input)
+      expect(typeof result).toBe('string')
+      expect(JSON.parse(result as string)).toMatchObject({ phase: expect.any(String), nextStep: expect.any(String) })
+    }
+    const inspect = tools.get('egolens_teachable_inspect')!
+    const fromString = JSON.parse(await inspect.execute(JSON.stringify({ mode: 'inventory' })) as string) as { mode: string }
+    expect(fromString.mode).toBe('inventory')
+  })
 })

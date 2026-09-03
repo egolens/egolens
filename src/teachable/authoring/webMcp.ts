@@ -7,7 +7,7 @@ interface WebMcpToolDefinition {
   readonly description: string
   readonly inputSchema: Readonly<Record<string, unknown>>
   readonly annotations?: { readonly readOnlyHint?: boolean }
-  readonly execute: (input: Record<string, unknown>) => unknown | Promise<unknown>
+  readonly execute: (input: unknown) => unknown | Promise<unknown>
 }
 
 interface WebMcpModelContext {
@@ -75,10 +75,21 @@ export async function registerTeachableWebMcpToolsV1(
   // execute(params, { signal }) and expects a string result; the counted broker's shim passes
   // objects through to its HTTP bridge. Serialize only for the native implementation.
   const native = typeof webDocument.modelContext.executeTool === 'function'
+  // Hosts differ by generation in how executeTool passes input: an object, a JSON
+  // string, or nothing for tools without parameters. Normalize before the handler.
+  const normalizeInput = (input: unknown): Record<string, unknown> => {
+    if (typeof input === 'string') {
+      const trimmed = input.trim()
+      if (trimmed.length === 0) return {}
+      const parsed: unknown = JSON.parse(trimmed)
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+    }
+    return typeof input === 'object' && input !== null && !Array.isArray(input) ? input as Record<string, unknown> : {}
+  }
   const engage = <T extends Record<string, unknown>>(handler: (input: T) => unknown | Promise<unknown>) =>
-    async (input: Record<string, unknown>): Promise<unknown> => {
+    async (input: unknown): Promise<unknown> => {
       session.markAgentEngaged()
-      const result = await handler((input ?? {}) as T)
+      const result = await handler(normalizeInput(input) as T)
       return native ? JSON.stringify(result ?? null) : result
     }
 
