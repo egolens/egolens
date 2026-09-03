@@ -30,7 +30,7 @@ import type { SegmentMeta } from '../types/waymo'
 import type { MetadataBundle } from '../types/dataset'
 import { memLog } from '../utils/memoryLogger'
 import { DataLoadError, type DataLoadErrorCode } from '../utils/errors'
-import { getAdapterById, getManifest, setAdapter, setManifest } from '../adapters/registry'
+import { getAdapterById, getManifest, setAdapter } from '../adapters/registry'
 import { RecipeBackedDatasetAdapter } from '../teachable/runtime/RecipeBackedDatasetAdapter'
 import {
   detectNuScenesVersionRoot,
@@ -1967,9 +1967,11 @@ function applyMetadataBundle(
   // Recipe-driven datasets list cameras in authoring order; re-order the tiles
   // as a head-turn sweep from the mounting yaws now that calibrations are known.
   // Bundled adapters keep their curated order.
+  // The manifest object is the registry's identity for the active recipe adapter, so the
+  // order is applied in place rather than by registering a copy.
   if (!BUNDLED_ADAPTER_IDS.has(getManifest().id) && bundle.cameraCalibrations.length > 1) {
-    const manifest = getManifest()
-    setManifest({ ...manifest, cameraSensors: orderCamerasByYawV1(manifest.cameraSensors, bundle.cameraCalibrations) })
+    const cameraSensors = getManifest().cameraSensors
+    cameraSensors.splice(0, cameraSensors.length, ...orderCamerasByYawV1(cameraSensors, bundle.cameraCalibrations))
   }
 
   // Zustand state updates
