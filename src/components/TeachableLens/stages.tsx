@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { colors, fonts, radius, alpha } from '../../theme'
-import { TEACH_PROMPT_V1, useWebMcpAgentV1, type WebMcpAgentV1 } from '../../teachable/authoring/agentDetection'
+import { TEACH_PROMPT_SHOWN_V1, TEACH_PROMPT_V1, useWebMcpAgentV1, type WebMcpAgentV1 } from '../../teachable/authoring/agentDetection'
 import type { AgentActivityV1 } from '../../teachable/authoring/AuthoringSession'
 import type { HumanReviewCapabilityV1, HumanReviewIssueV1 } from '../../teachable/authoring/review'
 
@@ -140,7 +140,7 @@ export function AgentAskCard({ agent, onPromptCopied }: { agent: WebMcpAgentV1; 
           {tile('https://chatgpt.com/download', 'ChatGPT app', 'Built-in browser, no flags needed')}
           {tile('https://developer.chrome.com/docs/ai/webmcp', 'Chrome 146+', 'chrome://flags/#enable-webmcp-testing', true)}
         </div>
-        <div style={{ marginTop: 12, fontSize: 11, color: colors.textDim }}>Once connected, ask: <span style={{ fontFamily: mono, color: colors.textSecondary }}>“{TEACH_PROMPT_V1}”</span></div>
+        <div style={{ marginTop: 12, fontSize: 11, color: colors.textDim }}>Once connected, ask: <span style={{ fontFamily: mono, color: colors.textSecondary }}>“{TEACH_PROMPT_SHOWN_V1}”</span></div>
       </div>
     )
   }
@@ -149,7 +149,7 @@ export function AgentAskCard({ agent, onPromptCopied }: { agent: WebMcpAgentV1; 
       {agent.chatLocation === 'sidebar-left' && <span aria-hidden style={{ fontSize: 22, color: colors.accentBlue }}>←</span>}
       <div style={{ flex: 1, minWidth: 220 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700 }}><AgentMark agent={agent} size={15} />{names.ask}</div>
-        <div style={{ marginTop: 7, fontFamily: mono, fontSize: 14, color: colors.textPrimary }}>“{TEACH_PROMPT_V1}”</div>
+        <div style={{ marginTop: 7, fontFamily: mono, fontSize: 14, color: colors.textPrimary }}>“{TEACH_PROMPT_SHOWN_V1}”</div>
         <div style={{ marginTop: 6, fontSize: 11, color: colors.textDim }}>Teaching starts on its first tool call — you review everything before it's saved.</div>
       </div>
       <button onClick={copy} style={{ padding: '11px 16px', borderRadius: 8, border: 0, background: colors.accentBlue, color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>{copied ? 'Copied' : 'Copy prompt'}</button>
