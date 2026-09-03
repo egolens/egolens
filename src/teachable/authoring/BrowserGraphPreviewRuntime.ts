@@ -199,6 +199,7 @@ export class BrowserGraphPreviewRuntimeV1 implements AuthoringPreviewRuntimeV1 {
       const consistency = consistencyDiagnosticsV1({
         frames, cameraCalibrations: binding.scene.relations.cameraCalibrations,
         timestampsMicros: binding.scene.index.timestampsMicros,
+        inventoryPaths: inventory.snapshot().entries.map((entry) => entry.path),
       })
       let committed = false
       return {
