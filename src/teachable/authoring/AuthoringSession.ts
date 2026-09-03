@@ -175,7 +175,7 @@ export class TeachableAuthoringSessionV1 {
       authoringGuide: [
         '1. egolens_teachable_get_state: read the confirmed sensor layout (counts and ids). The recipe must declare and bind exactly those sensors; a different layout is rejected.',
         '2. egolens_teachable_inspect: inventory first, then metadata/text/json/json-sample/table-schema on one example of every file kind (bounded maxBytes). Never guess a column name you could read.',
-        '3. Read recipeSchema and operators below. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your agent name, provenance.createdAt to now.',
+        '3. Read recipeSchema and operators below. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your lowercase agent id (e.g. "chatgpt", "codex"), provenance.createdAt to now.',
         '4. egolens_teachable_apply_revision with the COMPLETE recipe every time (a rejected revision keeps nothing). Diagnostics name the input or field to fix. Bind timeline first, then pointClouds and cameraImages, then boxes3d, egoPoses, segmentation, segmentMetadata.',
         '5. Conventions: ego frame is x-forward, y-left, z-up; camera frames are optical (x-right, y-down, z-forward); poses are ego ← sensor (compose or invert with poseChain when the dataset publishes the other direction or another axis convention); timestamps are integers in the declared unit (records.derive scale/integer converts float seconds).',
         '6. World-frame datasets: bind points with outputFrame "world" and boxes with frameId "world" and provide egoPoses; EgoLens converts them per frame.',
@@ -229,11 +229,11 @@ export class TeachableAuthoringSessionV1 {
       }
       // The finalized export is only ever attributed to the declared author;
       // a revision without one would silently export as "imported".
-      if (recipe.provenance?.author === undefined) {
+      if (recipe.provenance?.author === undefined || recipe.provenance.author === 'imported' || recipe.provenance.author === 'registry') {
         throw new AdapterCompileError([diagnostic(
           'compile',
           'PROVENANCE_AUTHOR_REQUIRED',
-          'Declare provenance.author ("codex" for an agent author) and provenance.createdAt on every revision; the export carries them unchanged.',
+          'Declare provenance.author as the authoring agent id (e.g. "codex", "chatgpt") and provenance.createdAt on every revision; "imported" and "registry" are reserved.',
           '/provenance/author',
         )])
       }
