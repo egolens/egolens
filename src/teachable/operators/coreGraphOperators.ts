@@ -774,10 +774,12 @@ const timelineSort: CoreOperatorImplementationV1 = async (inputs, params) => {
   })
   for (let index = 1; index < frames.length; index += 1) {
     if (frames[index].group === frames[index - 1].group && frames[index].timestamp <= frames[index - 1].timestamp) {
-      throw new Error('TIMESTAMPS_NOT_STRICTLY_INCREASING')
+      throw new Error(`TIMESTAMPS_NOT_STRICTLY_INCREASING: frame ${index - 1} (${frames[index - 1].key ?? '?'}) has ${frames[index - 1].timestamp} and frame ${index} (${frames[index].key ?? '?'}) has ${frames[index].timestamp} in group ${frames[index].group ?? '(none)'}; two rows share a timestamp or the timestamp field is not per-frame (a duplicated join, or the wrong column).`)
     }
   }
-  if (frames.length === 0) throw new Error('TIMELINE_BINDING_EMPTY')
+  if (frames.length === 0) {
+    throw new Error('TIMELINE_BINDING_EMPTY: timeline.sort received no rows. Usually an upstream records.derive with required: true dropped every row because its pattern matched nothing, a join matched no keys, or the source glob selected no files. Inspect the source rows and check each derive pattern against a real value.')
+  }
   return { frames: { kind: 'timeline', unit, frames } satisfies GraphTimelineV1 }
 }
 
