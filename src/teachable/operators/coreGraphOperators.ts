@@ -361,11 +361,22 @@ export async function loadGraphParquetFrameRowsV1(
   return rows
 }
 
+/** Actionable message for a records input that received something else. */
+function recordsInputInvalid(inputName: string, value: unknown): Error {
+  const kind = inputKindLabel(value)
+  const hint = kind === 'binary-collection' || kind === 'encoded-collection'
+    ? ' A binary collection is a per-file stream (point clouds, images, labels): feed it to timeline.join / image.bind_camera_frame / labels.attach_by_point_index, and give records operators the small metadata tables (timestamps, poses, cuboids) instead. Do not re-read point-cloud files with a row reader.'
+    : kind === 'point-cloud-plan' || kind === 'binary-point-cloud-plan'
+      ? ' A point-cloud plan is already bound; connect it to outputs.pointClouds or labels.attach_by_point_index, not to records operators.'
+      : ''
+  return new Error(`GRAPH_RECORDS_INPUT_INVALID: ${inputName} must be records (got ${kind}).${hint}`)
+}
+
 async function materialize(value: unknown): Promise<readonly Readonly<Record<string, unknown>>[]> {
   if (isRecords(value)) return value.rows
   if (isTable(value)) return await tableRows(value)
   if (isParquet(value)) return await loadGraphParquetRowsV1(value)
-  throw new Error('GRAPH_RECORDS_INPUT_INVALID')
+  throw recordsInputInvalid('inputs.rows', value)
 }
 
 function binaryCollection(
@@ -542,7 +553,7 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
  * of a filename. Records that do not match a required derivation are dropped.
  */
 const recordsDerive: CoreOperatorImplementationV1 = async (inputs, params) => {
-  if (!isRecords(inputs.rows)) throw new Error(`GRAPH_RECORDS_INPUT_INVALID: inputs.rows must be records (got ${inputKindLabel(inputs.rows)})`)
+  if (!isRecords(inputs.rows)) throw recordsInputInvalid('inputs.rows', inputs.rows)
   const derivations = (params.derive as readonly { field: string; from: string; pattern?: string; replacement?: string; required?: boolean; pad?: number; padChar?: string; scale?: number; offset?: number; integer?: boolean }[]).map((entry) => ({
     ...entry, regex: entry.pattern === undefined ? null : new RegExp(entry.pattern, 'u'),
   }))
