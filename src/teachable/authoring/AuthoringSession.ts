@@ -59,9 +59,23 @@ export interface AuthoringValidationStateV1 {
   readonly summary: JsonObject
 }
 
+/** One agent tool call as shown in the review dock's activity feed. */
+export interface AgentActivityV1 {
+  readonly at: number
+  readonly tool: string
+  readonly arg: string
+  readonly ms: number
+  readonly result: string
+  readonly kind: 'ok' | 'bad' | 'info'
+}
+
 export interface AuthoringSessionStateV1 {
   readonly phase: AuthoringPhaseV1
   readonly agentEngaged: boolean
+  /** Newest last; capped at 200 entries. Reset when a folder is (re)started. */
+  readonly activity: readonly AgentActivityV1[]
+  readonly revisionCount: number
+  readonly inspectionCount: number
   readonly inventory: SourceInventorySnapshotV1 | null
   /** Human-confirmed sensor layout; null when authoring started without one. */
   readonly sensorConfiguration: SensorConfigurationV1 | null
@@ -111,6 +125,9 @@ function initialState(): AuthoringSessionStateV1 {
   return {
     phase: 'idle',
     agentEngaged: false,
+    activity: [],
+    revisionCount: 0,
+    inspectionCount: 0,
     inventory: null,
     sensorConfiguration: null,
     currentArtifact: null,
@@ -144,6 +161,17 @@ export class TeachableAuthoringSessionV1 {
   }
 
   getState = (): AuthoringSessionStateV1 => this.#state
+
+  /** Append one tool call to the activity feed (the WebMCP wrapper calls this). */
+  recordActivity(entry: Omit<AgentActivityV1, 'at'>): void {
+    const activity = [...this.#state.activity, { ...entry, at: Date.now() }].slice(-200)
+    this.#set({
+      ...this.#state,
+      activity,
+      revisionCount: this.#state.revisionCount + (entry.tool === 'apply_revision' ? 1 : 0),
+      inspectionCount: this.#state.inspectionCount + (entry.tool === 'inspect' ? 1 : 0),
+    })
+  }
 
   /**
    * Reopen authoring on a folder that is already rendering with a recipe: the
