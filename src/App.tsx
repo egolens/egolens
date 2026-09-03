@@ -946,7 +946,7 @@ function Header() {
       ? (status === 'ready' ? 'sealed' : `${authoring.currentArtifact?.identity.name ?? 'recipe'} · sealed`)
       : authoring.currentArtifact
         ? (status === 'ready' ? `revision #${authoring.revisionCount}` : `${authoring.currentArtifact.identity.name} · revision #${authoring.revisionCount}`)
-        : authoring.agentEngaged ? 'unknown folder · teaching' : 'unknown folder'
+        : (() => { const named = authoring.sensorConfiguration?.datasetName?.trim(); const label = named || 'unknown folder'; return authoring.agentEngaged ? `${label} · teaching` : label })()
   const showEditRecipe = status === 'ready' && authoredScene !== null && (authoring.phase === 'idle' || authoring.phase === 'finalized' || authoring.phase === 'revoked')
   const editRecipe = () => {
     const scene = useSceneStore.getState().actions.authoredScene()
