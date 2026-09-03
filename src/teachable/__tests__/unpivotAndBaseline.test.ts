@@ -34,6 +34,7 @@ describe('KITTI calibration reshaping', () => {
     const calibration = plan.calibrations.get('02')!
     expect(calibration.intrinsics).toEqual([fx, fx, 600, 180])
     // identity rotation: the camera sits +0.54 m along its x axis (to the right of camera 00)
-    expect(round(calibration.egoFromCamera).slice(12, 15)).toEqual([baselineMeters, 0, 0])
+    const t = round(calibration.egoFromCamera)
+    expect([t[3], t[7], t[11]]).toEqual([baselineMeters, 0, 0])
   })
 })

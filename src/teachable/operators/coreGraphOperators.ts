@@ -878,12 +878,8 @@ function rowMajorPoseFromFields(calibration: Readonly<Record<string, unknown>>, 
   return [r(0, 0), r(0, 1), r(0, 2), t[0]!, r(1, 0), r(1, 1), r(1, 2), t[1]!, r(2, 0), r(2, 1), r(2, 2), t[2]!, 0, 0, 0, 1]
 }
 
-function columnMajorFromRowMajor(m: readonly number[]): number[] {
-  return [m[0]!, m[4]!, m[8]!, m[12]!, m[1]!, m[5]!, m[9]!, m[13]!, m[2]!, m[6]!, m[10]!, m[14]!, m[3]!, m[7]!, m[11]!, m[15]!]
-}
-
 /**
- * Sensor pose (ego ← sensor, column-major 4×4) from a calibration row: unit quaternion, two basis
+ * Sensor pose (ego ← sensor, row-major 4×4 like every other runtime matrix) from a calibration row: unit quaternion, two basis
  * axes (z = x × y), an identity, or row-major matrices. `rotationMatrixFields` composes several
  * matrices left to right (KITTI: R_rect_00 · [R|T]_velo_to_cam) and `invertPose` flips a matrix
  * that was published in the sensor ← ego direction.
@@ -900,7 +896,7 @@ function calibrationPose(calibration: Readonly<Record<string, unknown>>, params:
     let pose = rowMajorPoseFromFields(calibration, chain[0]!.matrixField, chain[0]!.translationField ?? null)
     for (const link of chain.slice(1)) pose = multiplyRowMajor4x4(pose, rowMajorPoseFromFields(calibration, link.matrixField, link.translationField ?? null))
     if (params.invertPose === true) pose = invertRowMajor4x4(pose)
-    return columnMajorFromRowMajor(pose)
+    return pose
   }
   if (params.rotationForm === 'axes') {
     const axisFields = fieldList(params, 'axisFields', [])
@@ -912,8 +908,8 @@ function calibrationPose(calibration: Readonly<Record<string, unknown>>, params:
     const yOrtho = y.map((value, index) => value - (ux[0]! * y[0]! + ux[1]! * y[1]! + ux[2]! * y[2]!) * ux[index]!)
     const uy = norm(yOrtho)
     const uz = [ux[1]! * uy[2]! - ux[2]! * uy[1]!, ux[2]! * uy[0]! - ux[0]! * uy[2]!, ux[0]! * uy[1]! - ux[1]! * uy[0]!]
-    // Column-major 4×4 with columns = sensor axes expressed in the ego frame.
-    return [ux[0]!, ux[1]!, ux[2]!, 0, uy[0]!, uy[1]!, uy[2]!, 0, uz[0]!, uz[1]!, uz[2]!, 0, translation[0], translation[1], translation[2], 1]
+    // Row-major 4×4 whose columns are the sensor axes expressed in the ego frame.
+    return [ux[0]!, uy[0]!, uz[0]!, translation[0], ux[1]!, uy[1]!, uz[1]!, translation[1], ux[2]!, uy[2]!, uz[2]!, translation[2], 0, 0, 0, 1]
   }
   const rotation = finiteTuple(calibration[String(params.quaternionField)], 4, String(params.quaternionField)) as [number, number, number, number]
   return quaternionToMatrix4x4(rotation, translation)
@@ -1168,10 +1164,10 @@ function relationalCameraPlan(
       const ty = fy !== 0 ? -flat[7]! / fy : 0
       const tz = -flat[11]!
       const shifted = new Float64Array(egoFromSensor)
-      // column-major: translation += R · t (columns 0..2 are the camera axes in ego)
-      shifted[12] += shifted[0] * tx + shifted[4] * ty + shifted[8] * tz
-      shifted[13] += shifted[1] * tx + shifted[5] * ty + shifted[9] * tz
-      shifted[14] += shifted[2] * tx + shifted[6] * ty + shifted[10] * tz
+      // row-major: translation += R · t (columns 0..2 of R are the camera axes in ego)
+      shifted[3] += shifted[0] * tx + shifted[1] * ty + shifted[2] * tz
+      shifted[7] += shifted[4] * tx + shifted[5] * ty + shifted[6] * tz
+      shifted[11] += shifted[8] * tx + shifted[9] * ty + shifted[10] * tz
       egoFromCameraMatrix = shifted
     }
     const [width, height] = dimensionsByCalibration.get(key) ?? [Number(params.defaultWidth), Number(params.defaultHeight)]
