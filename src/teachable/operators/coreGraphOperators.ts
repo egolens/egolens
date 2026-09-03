@@ -61,7 +61,14 @@ function numericPath(path: string): bigint {
 
 function finite(value: unknown, label: string): number {
   const number = Number(value)
-  if (!Number.isFinite(number)) throw new Error(`GRAPH_VALUE_NONFINITE: ${label}`)
+  if (!Number.isFinite(number)) {
+    const shown = value === undefined ? 'undefined (field missing on this row: check the field name, the join that should carry it, or a dotted path for nested JSON)'
+      : value === null ? 'null'
+        : typeof value === 'string' ? `string ${JSON.stringify(value.slice(0, 40))} (derive a numeric field with records.derive { field, from, scale: 1 }, or fix the regex that extracted it)`
+          : typeof value === 'object' ? `object with keys ${Object.keys(value as object).slice(0, 8).join(', ')} (point at a leaf value, e.g. a dotted path)`
+            : `${typeof value} ${String(value).slice(0, 40)}`
+    throw new Error(`GRAPH_VALUE_NONFINITE: ${label} is ${shown}`)
+  }
   return number
 }
 
@@ -1053,8 +1060,15 @@ function relationalPointCloudPlan(
   inputs: Readonly<Record<string, unknown>>,
   params: Readonly<Record<string, unknown>>,
 ): GraphBinaryPointCloudPlanV1 {
-  if (!isBinary(inputs.records) || !isRecords(inputs.sampleData) || !isRecords(inputs.calibration) || !isRecords(inputs.sensors)) {
-    throw new Error('GRAPH_POINT_RELATION_INPUT_INVALID')
+  const expected: [string, boolean, string][] = [
+    ['inputs.records', isBinary(inputs.records), 'a binary collection straight from a point-cloud reader (archive.pickle_records, binary/npz readers)'],
+    ['inputs.sampleData', isRecords(inputs.sampleData), 'records: one row per point-cloud file with the path, frame key, timestamp, sensor id, and calibration key'],
+    ['inputs.calibration', isRecords(inputs.calibration), 'records: one row per calibration key with the pose fields (rotationForm identity is fine when points are already in the output frame)'],
+    ['inputs.sensors', isRecords(inputs.sensors), 'records: one row per sensor key with the sensor id'],
+  ]
+  const wrong = expected.filter(([, ok]) => !ok)
+  if (wrong.length > 0) {
+    throw new Error(`GRAPH_POINT_RELATION_INPUT_INVALID: timeline.join needs ${wrong.map(([name, , want]) => `${name} = ${want} (got ${inputKindLabel(inputs[name.slice(7)])})`).join('; ')}. The same records may feed sampleData, calibration, and sensors when one table carries every field.`)
   }
   const pathField = String(params.pathField)
   const frameKeyField = String(params.frameKeyField)
