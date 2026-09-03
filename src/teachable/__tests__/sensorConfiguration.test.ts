@@ -77,4 +77,13 @@ describe('sensor configuration', () => {
     unconstrained.start(inventoryOf(['frames.json']))
     expect(unconstrained.getState().sensorConfiguration).toBeNull()
   })
+
+  it('counts a PandaSet-style lidar folder of pickle frames as one lidar stream', () => {
+    const entries = ['lidar/00.pkl', 'lidar/01.pkl', 'lidar/poses.json', 'camera/front_camera/00.jpg', 'camera/back_camera/00.jpg', 'annotations/cuboids/00.pkl', 'annotations/semseg/00.pkl']
+      .map((path) => ({ path, size: 1, extension: path.slice(path.lastIndexOf('.')), lastModified: 0 }))
+    const configuration = inferSensorConfigurationV1({ sessionId: 's', entries, truncated: false, revoked: false } as never)
+    expect(configuration.lidar).toBe(1)
+    expect(configuration.camera).toBe(2)
+    expect(configuration.names?.lidar).toEqual(['lidar'])
+  })
 })
