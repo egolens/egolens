@@ -71,8 +71,17 @@ function resolve(reference: string, local: ReadonlyMap<string, Readonly<Record<s
   return value
 }
 
-function releaseGraphValue(value: unknown, seen: WeakSet<object>): void {
+function isSharedRuntimeObject(value: object): boolean {
+  // The execution context and the byte source behind it are owned by the caller
+  // (an authoring inventory can back many scenes in a row); never walk into them.
+  const candidate = value as { read?: unknown; has?: unknown; throwIfAborted?: unknown; resources?: unknown }
+  return (typeof candidate.read === 'function' && typeof candidate.has === 'function')
+    || (typeof candidate.throwIfAborted === 'function' && candidate.resources !== undefined)
+}
+
+export function releaseGraphValue(value: unknown, seen: WeakSet<object>): void {
   if (typeof value !== 'object' || value === null || seen.has(value)) return
+  if (isSharedRuntimeObject(value)) return
   seen.add(value)
   if ('retainedReleases' in value && (value as { retainedReleases?: unknown }).retainedReleases instanceof Map) {
     const collection = value as {
