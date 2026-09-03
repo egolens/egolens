@@ -118,4 +118,15 @@ describe('generic gaps surfaced by the KITTI Raw rung', () => {
     }, ctx)).images as { calibrations: Map<string, { intrinsics: number[] }> }
     expect(plan.calibrations.get('front_camera')!.intrinsics).toEqual([1970, 1970, 970, 483])
   })
+
+  it('json.records array layout emits row indices, flattens nested objects, and wraps scalar items', async () => {
+    const poses = new TextEncoder().encode(JSON.stringify([{ position: { x: 1 }, heading: { w: 1 } }, { position: { x: 2 }, heading: { w: 0.9 } }]))
+    const stamps = new TextEncoder().encode(JSON.stringify([1557539924.49981, 1557539924.59979]))
+    const files = { 'lidar/poses.json': poses, 'meta/timestamps.json': stamps }
+    const c = { ...ctx, read: async (path: string) => files[path as keyof typeof files] }
+    const out = await ops['json.records']!({ files: [{ path: 'lidar/poses.json', size: 1 }] }, { layout: 'array', flatten: true, indexField: 'frame', pathField: 'path' }, c as typeof ctx) as { rows: { rows: Record<string, unknown>[] } }
+    expect(out.rows.rows[1]).toEqual({ 'position.x': 2, 'heading.w': 0.9, frame: 1, path: 'lidar/poses.json' })
+    const scalars = await ops['json.records']!({ files: [{ path: 'meta/timestamps.json', size: 1 }] }, { layout: 'array', indexField: 'frame' }, c as typeof ctx) as { rows: { rows: Record<string, unknown>[] } }
+    expect(scalars.rows.rows).toEqual([{ value: 1557539924.49981, frame: 0 }, { value: 1557539924.59979, frame: 1 }])
+  })
 })

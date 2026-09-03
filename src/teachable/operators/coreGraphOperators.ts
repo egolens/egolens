@@ -457,13 +457,26 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
   const layout = String(params.layout ?? 'array')
   const pathField = typeof params.pathField === 'string' ? params.pathField : null
   const keyField = String(params.keyField ?? 'key')
+  // indexField adds each row's zero-based position within its file (array and
+  // object-rows layouts), the frame index for per-frame arrays such as
+  // PandaSet lidar/poses.json or meta/timestamps.json.
+  const indexField = typeof params.indexField === 'string' ? params.indexField : null
   const rows: Readonly<Record<string, unknown>>[] = []
   for (const file of inputs.files as readonly { path: string }[]) {
     const bytes = await context.read(file.path)
     let fileRows: Record<string, unknown>[]
     try {
       if (layout === 'array') {
-        fileRows = decodeJsonRecordsV1<Record<string, unknown>>(new TextDecoder().decode(bytes))
+        const flattenArray = params.flatten === true
+        const flatRow = (value: Record<string, unknown>, prefix = ''): Record<string, unknown> => Object.fromEntries(Object.entries(value).flatMap(([key, entry]) => (
+          flattenArray && typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+            ? Object.entries(flatRow(entry as Record<string, unknown>, `${prefix}${key}.`))
+            : [[`${prefix}${key}`, entry]]
+        )))
+        // Scalar items (a bare array of timestamps) become { value } rows.
+        fileRows = decodeJsonRecordsV1<unknown>(new TextDecoder().decode(bytes)).map((item) => (
+          typeof item === 'object' && item !== null && !Array.isArray(item) ? flatRow(item as Record<string, unknown>) : { value: item }
+        ))
       } else {
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`expected a JSON object for layout ${layout}`)
@@ -497,7 +510,9 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
         `GRAPH_JSON_DECODE_FAILED: ${file.path}: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
-    for (const row of fileRows) rows.push(pathField ? { ...row, [pathField]: file.path } : row)
+    fileRows.forEach((row, index) => {
+      rows.push({ ...row, ...(indexField ? { [indexField]: index } : {}), ...(pathField ? { [pathField]: file.path } : {}) })
+    })
   }
   return { rows: { kind: 'records', rows } satisfies GraphRecordsV1 }
 }
