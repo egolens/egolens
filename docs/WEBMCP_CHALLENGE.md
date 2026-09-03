@@ -74,7 +74,7 @@ Evidence from this week (each agent turn under ten minutes):
    and relaunch. ChatGPT's in-app browser needs no flag.
 2. Open https://egolens.org. The five tools are registered on the top-level
    document as soon as the page loads (DevTools → Application → WebMCP).
-3. Download a sample dataset (PandaSet 001, CC BY 4.0 with attribution) from
+3. Download the sample driving log (80 frames, six cameras, one LiDAR; CC BY 4.0, attribution in the release notes) from
    https://github.com/egolens/egolens/releases/tag/webmcp-sample:
    `egolens-sample-pandaset-001-6frames.zip` (32 MB, quick) or
    `egolens-sample-pandaset-001-full.zip` (439 MB, all 80 frames for
@@ -105,7 +105,7 @@ Evidence from this week (each agent turn under ten minutes):
    scene rendered later from the saved recipe offers **✎ Edit recipe** in the
    header to reopen authoring on the same folder.
 6. Shortcut: import the finished recipe from the same release
-   (`pandaset-001.egolens-adapter.json`, sealed against this six-frame sample)
+   (`pandaset-001.egolens-adapter.json`, sealed against the six-frame sample; the archive's README deliberately does not describe the layout, so the agent must read the files)
    with **Import JSON** after confirming the layout to see the end state
    without authoring; `pandaset-001-review.png` and
    `pandaset-001-viewer.png` show the expected review page and viewer.
@@ -117,8 +117,8 @@ Nothing in this flow uploads dataset bytes; inspection is bounded and audited.
 | Time | Screen | Voice |
 |---|---|---|
 | 0:00–0:20 | egolens.org with Waymo scene playing | "EgoLens renders driving datasets in the browser. But every team has a dataset it does not know." |
-| 0:20–0:45 | Drop the PandaSet folder → "Unknown dataset" → confirm 6 cameras / 1 lidar | "Drop an unknown folder. EgoLens asks you to confirm the sensor layout and registers five WebMCP tools on document.modelContext. No bytes leave the browser." |
+| 0:20–0:45 | Drop the sample folder → "Unknown dataset" → confirm 6 cameras / 1 lidar | "Drop an unknown folder. EgoLens asks you to confirm the sensor layout and registers five WebMCP tools on document.modelContext. No bytes leave the browser." |
 | 0:45–1:30 | Agent chat: inspect → get_contract → apply_revision; DevTools WebMCP panel showing calls | "The agent inspects files within byte limits, reads the operator contract, and submits a recipe — declarative JSON, never code. EgoLens validates and renders three sample frames." |
 | 1:30–2:10 | Review panel: thumbnails with projected points, BEV, declared sensors; reject one with `misaligned`; agent revises; accept all | "The human reviews the rendering and rejects with a concrete issue. get_state carries that back to the agent, which revises. Every call is audited." |
-| 2:10–2:40 | Finalize → Export JSON → share URL → viewer renders PandaSet with POV camera and LiDAR→camera overlay | "Finalize seals the recipe with hashes. Anyone can open the dataset with this adapter from a link." |
+| 2:10–2:40 | Finalize → Export JSON → share URL → viewer renders the sample with POV camera and LiDAR→camera overlay | "Finalize seals the recipe with hashes. Anyone can open the dataset with this adapter from a link." |
 | 2:40–3:00 | KITTI and A2D2 renders side by side | "Three unknown datasets this week, each in a handful of agent turns, adding only dataset-neutral vocabulary. That is Teachable Lens." |

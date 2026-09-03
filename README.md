@@ -81,7 +81,7 @@ and the app's capabilities keep growing. Files never leave the browser.
 <p align="center">
   <img src="assets/teachable-review.png" alt="Teachable Lens review: the production viewer docked next to the agent activity feed and per-capability review" width="720" />
 </p>
-<p align="center"><sub>An agent's third revision of a PandaSet adapter, rendered in the production viewer. Each capability is accepted or rejected by looking, and the verdict flows back to the agent.</sub></p>
+<p align="center"><sub>An agent's third revision of an adapter for the sample driving log, rendered in the production viewer. Each capability is accepted or rejected by looking, and the verdict flows back to the agent.</sub></p>
 
 ### How it works
 
@@ -102,7 +102,7 @@ browser, the Codex app, and Chrome 146+ with
 
 ### Try it
 
-1. Download and unzip the sample: [PandaSet sequence 001, 80 frames, 439 MB](https://github.com/egolens/egolens/releases/download/webmcp-sample/egolens-sample-pandaset-001-full.zip) or the [6-frame version, 32 MB](https://github.com/egolens/egolens/releases/download/webmcp-sample/egolens-sample-pandaset-001-6frames.zip) (CC BY 4.0).
+1. Download and unzip the sample driving log: [80 frames, 439 MB](https://github.com/egolens/egolens/releases/download/webmcp-sample/egolens-sample-pandaset-001-full.zip) or the [6-frame version, 32 MB](https://github.com/egolens/egolens/releases/download/webmcp-sample/egolens-sample-pandaset-001-6frames.zip) (six cameras, one LiDAR, 3D cuboids, per-point labels; CC BY 4.0, attribution in the release notes).
 2. Open [egolens.org](https://egolens.org) in a WebMCP-enabled browser and drop the folder.
 3. Say **"Teach EgoLens this dataset."** and review each capability as it renders.
 
