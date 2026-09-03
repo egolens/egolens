@@ -47,7 +47,8 @@ Every commit is on `main` of https://github.com/egolens/egolens with CI.
    that name the input and the kind received, plus self-consistency warnings
    (camera projection empty, timeline spacing irregular, ego pose jump).
 4. Human reviews the rendered preview: per-sensor sample counts against the
-   confirmed layout, camera thumbnails with projected LiDAR, BEV thumbnail.
+   confirmed layout, camera thumbnails with projected LiDAR, BEV thumbnail,
+   or the same recipe live in the interactive viewer.
    Accept, or reject with an issue (`mirrored`, `wrong-scale`, `out-of-sync`,
    …). `egolens_teachable_get_state` carries the review back to the agent.
 5. Agent revises; human finalizes; `egolens_teachable_finalize` seals the
@@ -82,8 +83,11 @@ Evidence from this week (each agent turn under ten minutes):
    a `nextStep` hint, `get_contract` carries an `authoringGuide` with the
    order of steps and the frame conventions, and every diagnostic names the
    field to fix. No scripted tool sequence is needed.
-5. Review the thumbnails, accept or reject with an issue, and let the agent
-   revise. Finalize and Export JSON when the rendering is right.
+5. Review the thumbnails, or press **Open interactive preview** to explore
+   the validated recipe in the full 3D viewer (orbit, POV cameras,
+   LiDAR→camera overlay, boxes, playback) and come back with
+   **← Back to review**. Accept or reject each capability with an issue and
+   let the agent revise. Finalize and Export JSON when the rendering is right.
 6. Shortcut: import the finished recipe from the same release
    (`pandaset-001.egolens-adapter.json`, sealed against this six-frame sample)
    with **Import JSON** after confirming the layout to see the end state
