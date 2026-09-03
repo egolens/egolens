@@ -134,7 +134,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
                 onChange={(event) => setNameDraft(event.currentTarget.value)}
                 onBlur={commitName}
                 onKeyDown={(event) => { if (event.key === 'Enter') { event.currentTarget.blur() } }}
-                placeholder="e.g. PandaSet sequence 001 — leave empty and the agent will propose one"
+                placeholder="e.g. Downtown night drive 07 — leave empty and the agent will propose one"
                 maxLength={120}
                 style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, padding: '8px 10px', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary, fontSize: 13, fontWeight: 600, outline: 'none' }}
               />

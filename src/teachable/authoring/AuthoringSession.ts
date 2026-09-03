@@ -7,9 +7,6 @@ import { AdapterCompileError, AdapterValidationError, type AdapterDiagnostic } f
 import type { EgoLensAdapterRecipeV1, JsonObject } from '../recipe/types'
 import type { NormalizedCapabilityV1 } from '../runtime/normalizedScene'
 import { assertValidRecipeV1 } from '../schema/validateSchema'
-import a2d2Example from '../examples/a2d2.egolens-adapter.json'
-import kittiRawExample from '../examples/kitti-raw.egolens-adapter.json'
-import pandasetExample from '../examples/pandaset.egolens-adapter.json'
 import { formatFingerprintV1, withComputedArtifactHashesV1, verifySuppliedHashesV1 } from './hashes'
 import { inspectSourceInventoryV1, INSPECTION_LIMITS_V1, type SourceInspectionRequestV1, type SourceInspectionResultV1 } from './inspection'
 import { TeachableArtifactCacheV1, type FinalizedArtifactRecordV1 } from './persistence'
@@ -142,6 +139,31 @@ function initialState(): AuthoringSessionStateV1 {
 }
 
 /** Shared command layer for the human UI, imports, and top-level WebMCP tools. */
+const RECIPE_SKELETON_V1 = {
+  kind: 'egolens-adapter', schemaVersion: 1,
+  engine: { minimumVersion: '1.0.0', requiredOperators: { '<reader-or-operator id>': { major: 1, provider: 'core' } } },
+  identity: { name: '<sensorConfiguration.datasetName>', description: '<one sentence>' },
+  match: { inventory: { rootEntries: [{ path: '<top-level folder>', required: true }] }, all: [{ kind: 'path', glob: '<folder>/*.<ext>', minCount: 1 }] },
+  sources: { '<sourceId>': { reader: '<reader id from operators>', files: { glob: '<folder>/*.<ext>', order: 'numeric-path' }, params: { '<reader param>': '<value>' } } },
+  pipelines: {
+    timeline: { nodes: [{ id: '<nodeId>', op: '<operator id>', version: 1, inputs: { rows: '<sourceId>.rows' }, params: {} }], result: '<nodeId>.frames' },
+    pointClouds: { nodes: [{ id: '<nodeId>', op: '<operator id>', version: 1, inputs: { records: '<sourceId>.records' }, params: {} }], result: '<nodeId>.pointClouds' },
+    cameraImages: { nodes: [], result: '<nodeId>.images' },
+    boxes3d: { nodes: [], result: '<nodeId>.boxes' },
+    egoPoses: { nodes: [], result: '<nodeId>.poses' },
+  },
+  outputs: { timeline: 'timeline.result', pointClouds: 'pointClouds.result', cameraImages: 'cameraImages.result', boxes3d: 'boxes3d.result', egoPoses: 'egoPoses.result' },
+  scene: {
+    formatId: '<lowercase-id>', timeline: { timestampUnit: 'us', nominalFrameRate: 10 },
+    coordinateFrames: [{ id: 'ego', convention: { x: 'forward', y: 'left', z: 'up', handedness: 'right', lengthUnit: 'm' } }],
+    sensors: [{ id: '<sensor id from sensorConfiguration.names>', modality: 'lidar | camera | radar', frameId: '<frame id>', label: '<label>', color: '#38BDF8', rendererId: 0 }],
+    taxonomies: [], pointAttributes: [{ id: 'x', storage: 'float32', unit: 'm' }, { id: 'y', storage: 'float32', unit: 'm' }, { id: 'z', storage: 'float32', unit: 'm' }],
+    pointLayout: { interleavedAttributes: ['x', 'y', 'z'], colorModes: ['distance'] },
+  },
+  validation: { sampleFrames: ['first', 'middle', 'last'], assertions: [], humanReview: ['timeline', 'pointClouds', 'cameraImages', 'boxes3d', 'egoPoses'] },
+  provenance: { author: '<agent id>', createdAt: '<ISO time>', assumptions: ['<each convention you inferred>'] },
+} as const
+
 export class TeachableAuthoringSessionV1 {
   readonly #evaluator: AuthoringRevisionEvaluatorV1
   readonly #cache: TeachableArtifactCacheV1
@@ -242,25 +264,20 @@ export class TeachableAuthoringSessionV1 {
     return await inspectSourceInventoryV1(this.#requireInventory(), request, signal)
   }
 
-  getContract(options: { readonly example?: string } = {}): Readonly<Record<string, unknown>> {
-    const examples: Record<string, { readonly summary: string; readonly recipe: unknown }> = {
-      'kitti-raw': { summary: 'Ego-frame dataset: text timestamp tables, per-camera rectified calibration from key-value calib files, Velodyne bin records, XML tracklets exploded into boxes.', recipe: kittiRawExample },
-      pandaset: { summary: 'World-frame dataset: JSON arrays of float-second timestamps and quaternion poses (records.derive scale/integer, json.records indexField), pandas pickle points and cuboids, poseChain with a constant axis fix, outputFrame "world".', recipe: pandasetExample },
-      a2d2: { summary: 'Per-file sidecars: JSON per camera frame, NPZ per lidar view, axis-vector calibration, path-derived linkage.', recipe: a2d2Example },
-    }
-    const requested = options.example && examples[options.example] ? { example: options.example, ...examples[options.example]! } : undefined
+  getContract(): Readonly<Record<string, unknown>> {
     return {
       schemaVersion: 1,
-      exampleRecipes: Object.fromEntries(Object.entries(examples).map(([id, entry]) => [id, entry.summary])),
-      ...(requested ? { example: requested } : {}),
+      // Dataset-agnostic shape of a finished recipe. Placeholders only: the
+      // agent learns the structure here and every value from inspect.
+      recipeSkeleton: RECIPE_SKELETON_V1,
       engineVersion: RECIPE_ENGINE_VERSION,
       authoringGuide: [
         '1. egolens_teachable_get_state: read the confirmed sensor layout (counts and ids) and, when present, sensorConfiguration.datasetName. The recipe must declare and bind exactly those sensors and use that name as identity.name; a different layout or name is rejected. Without a datasetName, choose a short descriptive identity.name yourself.',
         '2. egolens_teachable_inspect: inventory first, then metadata/text/json/json-sample/table-schema on one example of every file kind (bounded maxBytes). Never guess a column name you could read.',
-        '3. Read recipeSchema and operators below. Call get_contract again with { example: "<id>" } (ids in exampleRecipes) to read a complete, sealed recipe for the closest layout and adapt it: change identity, match, sources, sensor ids, and provenance, keep the operator patterns. Recipes are declarative: sources (readers) → pipelines of operators → outputs bound as "<pipelineId>.result". Set scene.formatId to the dataset id, provenance.author to your lowercase agent id (e.g. "chatgpt", "codex"), provenance.createdAt to now.',
+        '3. Read recipeSchema and operators below; every operator lists its params as JSON schema. A finished recipe binds every capability the folder can support (timeline alone is never a finished revision) and declares only readers and operators listed here.',
         '4. egolens_teachable_apply_revision with the COMPLETE recipe every time (a rejected revision keeps nothing). Diagnostics name the input or field to fix. Bind timeline first, then pointClouds and cameraImages, then boxes3d, egoPoses, segmentation, segmentMetadata.',
         '5. Conventions: ego frame is x-forward, y-left, z-up; camera frames are optical (x-right, y-down, z-forward); poses are ego ← sensor (compose or invert with poseChain when the dataset publishes the other direction or another axis convention); timestamps are integers in the declared unit (records.derive scale/integer converts float seconds).',
-        '6. World-frame datasets: bind points with outputFrame "world" and boxes with frameId "world" and provide egoPoses; EgoLens converts them per frame. Box headings must point along the length axis (dimensions[0]); when a dataset yaw points along the width axis (PandaSet), derive heading = yaw + pi/2 with records.derive offset before geometry.normalize_boxes3d.',
+        '6. World-frame datasets: bind points with outputFrame "world" and boxes with frameId "world" and provide egoPoses; EgoLens converts them per frame. Box headings must point along the length axis (dimensions[0]); when a dataset yaw points along the width axis, derive heading = yaw + pi/2 with records.derive offset before geometry.normalize_boxes3d.',
         '7. After each accepted revision call get_state and stop when validation passes: summarize the bindings and let the user review the rendered preview. Their accept/reject per capability (with an issue name) arrives in get_state.latestHumanReview; revise from it. Do not call finalize unless the user asks.',
       ],
       recipeSchema: schema,
