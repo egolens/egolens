@@ -37,12 +37,14 @@ export interface SourceInspectionResultV1 {
   readonly data: unknown
 }
 
+// Agents routinely ask for more than a mode allows; clamping keeps the call
+// useful and the result reports the effective limit through `truncated`.
 function boundedInteger(requested: number | undefined, fallback: number, maximum: number, name: string): number {
-  const value = requested ?? fallback
-  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
-    throw new Error(`${name} must be between 1 and ${maximum}.`)
+  if (requested === undefined) return fallback
+  if (typeof requested !== 'number' || !Number.isFinite(requested)) {
+    throw new Error(`${name} must be an integer between 1 and ${maximum}.`)
   }
-  return value
+  return Math.min(maximum, Math.max(1, Math.trunc(requested)))
 }
 
 function abortIfNeeded(signal?: AbortSignal): void {

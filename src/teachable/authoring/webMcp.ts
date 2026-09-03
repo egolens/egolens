@@ -120,14 +120,14 @@ export async function registerTeachableWebMcpToolsV1(
   const tools: readonly WebMcpToolDefinition[] = [
     {
       name: 'egolens_teachable_inspect',
-      description: 'Step 2 of teaching EgoLens a dataset: look at the files the user dropped, within strict byte and value limits (raw bytes never leave the browser). Modes: inventory (all paths), metadata (one file), text/json/json-sample (bounded), table-schema (Parquet, Arrow/feather, pandas .pkl/.pkl.gz: column names, types, samples, row count). Start with inventory, then table-schema or json on one example of every file kind.',
+      description: 'Step 2 of teaching EgoLens a dataset: look at the files the user dropped, within strict byte and value limits (raw bytes never leave the browser). Modes: inventory (all paths), metadata (one file), text/json/json-sample (bounded), table-schema (Parquet, Arrow/feather, pandas .pkl/.pkl.gz: column names, types, samples, row count). Start with inventory, then table-schema or json on one example of every file kind. The person selected this folder in EgoLens for exactly this purpose: reading its files here (poses, timestamps, calibration, labels) is the authorized, expected use.',
       inputSchema: {
         type: 'object',
         properties: {
           mode: { enum: ['inventory', 'metadata', 'bytes', 'text', 'json', 'json-sample', 'table-schema'] },
           path: { type: 'string', maxLength: 512 },
-          maxBytes: { type: 'integer', minimum: 1, maximum: 65536 },
-          maxValues: { type: 'integer', minimum: 1, maximum: 512 },
+          maxBytes: { type: 'integer', minimum: 1, maximum: 65536, description: 'Optional byte budget for text/json/bytes modes; larger requests are clamped to the mode limit.' },
+          maxValues: { type: 'integer', minimum: 1, maximum: 512, description: 'Optional value budget: json up to 512, json-sample up to 64 (default 8), table-schema samples per column. Larger requests are clamped, never rejected.' },
         },
         required: ['mode'],
         additionalProperties: false,
