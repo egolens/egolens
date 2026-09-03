@@ -190,6 +190,25 @@ function fieldNames(count: number): OperatorJsonSchema {
   }
 }
 
+/** Pose links composed left to right into one ego ← sensor pose; each link reads row fields or holds a constant quaternion. */
+const poseChainContract: OperatorJsonSchema = {
+  type: 'array', minItems: 1, maxItems: 8,
+  items: {
+    type: 'object',
+    properties: {
+      quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
+      quaternionFields: fieldNames(4),
+      matrixField: { type: 'string', minLength: 1, maxLength: 256 },
+      translationField: { type: 'string', minLength: 1, maxLength: 256 },
+      translationFields: fieldNames(3),
+      quaternion: { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number' } },
+      translation: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+      invert: { type: 'boolean' },
+    },
+    additionalProperties: false,
+  },
+}
+
 const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
   ['geometry.normalize_boxes2d', {
     oneOf: [
@@ -301,21 +320,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         invertPose: { type: 'boolean' },
         quaternionFields: fieldNames(4),
         translationFields: fieldNames(3),
-        poseChain: {
-          type: 'array', minItems: 1, maxItems: 8,
-          items: {
-            type: 'object',
-            properties: {
-              quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
-              quaternionFields: fieldNames(4),
-              matrixField: { type: 'string', minLength: 1, maxLength: 256 },
-              translationField: { type: 'string', minLength: 1, maxLength: 256 },
-              translationFields: fieldNames(3),
-              invert: { type: 'boolean' },
-            },
-            additionalProperties: false,
-          },
-        },
+        poseChain: poseChainContract,
         frameIdSuffix: { type: 'string', minLength: 1, maxLength: 32 },
         defaultWidth: positiveLimit,
         defaultHeight: positiveLimit,
@@ -486,6 +491,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     translationField: { type: 'string', minLength: 1, maxLength: 256 },
     translationFields: fieldNames(3),
     invert: { type: 'boolean' },
+    poseChain: poseChainContract,
   }, ['timestampField']), recordContract(['poses'])],
   ['geometry.geodetic_poses', recordContract(['rows']), closedParams({
     timestampField: { type: 'string', minLength: 1, maxLength: 256 },
@@ -583,21 +589,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         invertPose: { type: 'boolean' },
         quaternionFields: fieldNames(4),
         translationFields: fieldNames(3),
-        poseChain: {
-          type: 'array', minItems: 1, maxItems: 8,
-          items: {
-            type: 'object',
-            properties: {
-              quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
-              quaternionFields: fieldNames(4),
-              matrixField: { type: 'string', minLength: 1, maxLength: 256 },
-              translationField: { type: 'string', minLength: 1, maxLength: 256 },
-              translationFields: fieldNames(3),
-              invert: { type: 'boolean' },
-            },
-            additionalProperties: false,
-          },
-        },
+        poseChain: poseChainContract,
       }, [
         'output', 'sampleDataCalibrationKeyField', 'calibrationKeyField', 'calibrationSensorKeyField',
         'sensorKeyField', 'sensorIdField', 'preferredSensorId', 'poseReferenceField', 'poseKeyField',
@@ -648,21 +640,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
         invertPose: { type: 'boolean' },
         quaternionFields: fieldNames(4),
         translationFields: fieldNames(3),
-        poseChain: {
-          type: 'array', minItems: 1, maxItems: 8,
-          items: {
-            type: 'object',
-            properties: {
-              quaternionField: { type: 'string', minLength: 1, maxLength: 256 },
-              quaternionFields: fieldNames(4),
-              matrixField: { type: 'string', minLength: 1, maxLength: 256 },
-              translationField: { type: 'string', minLength: 1, maxLength: 256 },
-              translationFields: fieldNames(3),
-              invert: { type: 'boolean' },
-            },
-            additionalProperties: false,
-          },
-        },
+        poseChain: poseChainContract,
         outputFrame: { type: 'string', minLength: 1, maxLength: 96 },
       }, [
         'mode', 'pathField', 'frameKeyField', 'recordKeyField', 'timestampField', 'recordCalibrationKeyField',

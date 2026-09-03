@@ -129,4 +129,15 @@ describe('generic gaps surfaced by the KITTI Raw rung', () => {
     const scalars = await ops['json.records']!({ files: [{ path: 'meta/timestamps.json', size: 1 }] }, { layout: 'array', indexField: 'frame' }, c as typeof ctx) as { rows: { rows: Record<string, unknown>[] } }
     expect(scalars.rows.rows).toEqual([{ value: 1557539924.49981, frame: 0 }, { value: 1557539924.59979, frame: 1 }])
   })
+  it('composes constant links (fixed axis convention) in pose chains and relative ego poses', async () => {
+    // PandaSet lidar frame: y forward, x right → ego ← lidar is a −90° yaw
+    const fix = { quaternion: [Math.SQRT1_2, 0, 0, -Math.SQRT1_2] }
+    const poses = await ops['geometry.relative_poses']!({ rows: records([
+      { ts: 1, q: [1, 0, 0, 0], t: [0, 0, 0] },
+      { ts: 2, q: [1, 0, 0, 0], t: [0, 5, 0] },
+    ]) }, { timestampField: 'ts', poseChain: [{ quaternionField: 'q', translationField: 't' }, { ...fix, invert: true }] }, ctx) as { poses: { worldFromEgoByTimestamp: Map<bigint, Float64Array> } }
+    // moving +5 along lidar y (forward) is +5 along ego x after the fix
+    const m = round(poses.poses.worldFromEgoByTimestamp.get(2n)!)
+    expect([m[3], m[7], m[11]]).toEqual([5, 0, 0])
+  })
 })
