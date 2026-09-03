@@ -19,7 +19,7 @@ export function usePulseKeyframes(): void {
     if (pulseInjected || typeof document === 'undefined') return
     pulseInjected = true
     const style = document.createElement('style')
-    style.textContent = '@keyframes tl-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } } @media (prefers-reduced-motion: reduce) { .tl-pulse { animation: none !important; } }'
+    style.textContent = '@keyframes tl-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } } @keyframes tl-arrive { 0% { background: rgba(56,189,248,0.28); } 100% { background: transparent; } } @media (prefers-reduced-motion: reduce) { .tl-pulse, .tl-arrive { animation: none !important; } }'
     document.head.appendChild(style)
   }, [])
 }
@@ -74,7 +74,10 @@ export function ActivityFeed({ activity, validating, agent, waitingForReview, ma
   compact?: boolean
 }) {
   const names = agentNames(agent)
-  const rows = maxRows ? activity.slice(-maxRows) : activity
+  // Newest first: the person watches what the agent is doing now, so the
+  // latest call must land at the top instead of below the fold.
+  const rows = [...(maxRows ? activity.slice(-maxRows) : activity)].reverse()
+  const newestAt = activity[activity.length - 1]?.at
   const color = (kind: AgentActivityV1['kind']) => kind === 'bad' ? colors.danger : kind === 'ok' ? colors.accent : colors.textSecondary
   const revisionIndex = new Map<AgentActivityV1, number>()
   let n = 0
@@ -82,20 +85,10 @@ export function ActivityFeed({ activity, validating, agent, waitingForReview, ma
   return (
     <div data-testid="agent-activity">
       <div style={{ fontSize: 10, fontWeight: 700, color: colors.textDim, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: compact ? 6 : 10 }}>Agent activity</div>
-      <div style={{ display: 'flex', flexDirection: compact ? 'column-reverse' : 'column', gap: compact ? 6 : 9, maxHeight: compact ? 72 : undefined, overflowY: compact ? 'auto' : undefined, fontFamily: mono, fontSize: 11, lineHeight: 1.5 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 6 : 9, maxHeight: compact ? 96 : 260, overflowY: 'auto', fontFamily: mono, fontSize: 11, lineHeight: 1.45, WebkitMaskImage: 'linear-gradient(to bottom, #000 82%, transparent)', maskImage: 'linear-gradient(to bottom, #000 82%, transparent)', paddingBottom: 12 }}>
         {rows.length === 0 && !validating && (
           <div style={{ color: colors.textDim }}>{agent.available ? `No tool calls yet — waiting for ${names.name}.` : 'No agent attached to this page yet.'}</div>
         )}
-        {rows.map((entry, index) => (
-          <div key={`${entry.at}-${index}`} style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-            <span style={{ color: colors.textDim, flexShrink: 0, width: 40, fontVariantNumeric: 'tabular-nums' }}>{formatMs(entry.ms)}</span>
-            <div style={{ minWidth: 0 }}>
-              <span style={{ color: entry.kind === 'ok' ? colors.accent : colors.accentBlue, fontWeight: 700 }}>{entry.tool}</span>
-              {(entry.arg || revisionIndex.has(entry)) && <span style={{ color: colors.textDim }}> {revisionIndex.has(entry) ? `#${revisionIndex.get(entry)}` : ''}{entry.arg ? ` ${entry.arg}` : ''}</span>}
-              <div style={{ color: color(entry.kind), overflowWrap: 'anywhere' }}>{entry.result}</div>
-            </div>
-          </div>
-        ))}
         {validating && (
           <div className="tl-pulse" style={{ display: 'flex', gap: 10, alignItems: 'baseline', ...pulse() }}>
             <span style={{ color: colors.textDim, flexShrink: 0, width: 40 }}>now</span>
@@ -108,6 +101,16 @@ export function ActivityFeed({ activity, validating, agent, waitingForReview, ma
             <div><span style={{ color: colors.textSecondary, fontWeight: 700 }}>get_state</span><div style={{ color: colors.textSecondary }}>{names.name === 'your agent' ? 'Your agent is waiting for your review' : `${names.name} is waiting for your review`}</div></div>
           </div>
         )}
+        {rows.map((entry, index) => (
+          <div key={`${entry.at}-${index}`} className={entry.at === newestAt ? 'tl-arrive' : undefined} style={{ display: 'flex', gap: 10, alignItems: 'baseline', borderRadius: 6, margin: '0 -4px', padding: '0 4px', ...(entry.at === newestAt ? { animation: 'tl-arrive 1.4s ease-out 1' } : {}) }}>
+            <span style={{ color: colors.textDim, flexShrink: 0, width: 40, fontVariantNumeric: 'tabular-nums' }}>{formatMs(entry.ms)}</span>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ color: entry.kind === 'ok' ? colors.accent : colors.accentBlue, fontWeight: 700 }}>{entry.tool}</span>
+              {(entry.arg || revisionIndex.has(entry)) && <span style={{ color: colors.textDim }}> {revisionIndex.has(entry) ? `#${revisionIndex.get(entry)}` : ''}{entry.arg ? ` ${entry.arg}` : ''}</span>}
+              <div style={{ color: color(entry.kind), overflowWrap: 'anywhere' }}>{entry.result}</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
