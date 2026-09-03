@@ -221,7 +221,8 @@ export class TeachableAuthoringSessionV1 {
   }
 
   start(inventory: SourceInventoryV1, options: { readonly sensorConfiguration?: SensorConfigurationV1 | null } = {}): void {
-    this.#inventory?.revoke()
+    // Restarting on the same folder (name or layout edited on the P0 screen) keeps its authorization.
+    if (this.#inventory && this.#inventory !== inventory) this.#inventory.revoke()
     this.#inventory = inventory
     const sensorConfiguration = options.sensorConfiguration ? assertValidSensorConfigurationV1(options.sensorConfiguration) : null
     this.#set({ ...initialState(), phase: 'inspecting', inventory: inventory.snapshot(), sensorConfiguration })
