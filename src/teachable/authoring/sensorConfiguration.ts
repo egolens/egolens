@@ -25,7 +25,7 @@ export interface DeclaredSensorSummaryV1 {
 }
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png'])
-const POINT_EXTENSIONS = new Set(['.bin', '.pcd', '.feather', '.npz', '.ply'])
+const POINT_EXTENSIONS = new Set(['.bin', '.pcd', '.feather', '.npz', '.ply', '.pkl', '.pickle', '.gz'])
 
 function assertCount(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 64) {
