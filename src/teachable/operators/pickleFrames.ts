@@ -278,10 +278,35 @@ export function dataFrameFromPickleV1(tree: unknown, limits: PickleLimitsV1 = {}
       else if (candidate.some((entry) => isGlobal(entry) && /Index$|_new_Index/u.test(entry.__global))) axes = candidate
     }
   }
-  if (blocks.length === 0 || axes.length === 0) throw new Error('PICKLE_DATAFRAME_INVALID: blocks or axes missing')
+  // Legacy BlockManager (pandas ≤ 1.x, PandaSet 2021 files): state tuple
+  // (axes, block values ndarrays, block items Index per block, …).
+  let legacyValues: unknown[] = []
+  let legacyItems: unknown[] = []
+  if (blocks.length === 0 && Array.isArray(managerState)) {
+    const indexLists = managerState.filter((entry): entry is unknown[] => Array.isArray(entry) && entry.length > 0 && entry.every((item) => isGlobal(item) && /Index$|_new_Index/u.test(item.__global)))
+    const valueLists = managerState.filter((entry): entry is unknown[] => Array.isArray(entry) && entry.length > 0 && entry.every((item) => isNdArray(item) || isGlobal(item)))
+    if (indexLists.length >= 2 && valueLists.length >= 1) {
+      axes = indexLists[0]!
+      legacyItems = indexLists[1]!
+      legacyValues = valueLists.find((entry) => entry !== axes && entry !== legacyItems && entry.some(isNdArray)) ?? []
+    }
+  }
+  if ((blocks.length === 0 && legacyValues.length === 0) || axes.length === 0) throw new Error('PICKLE_DATAFRAME_INVALID: blocks or axes missing')
   const names = indexLabels(axes[0])
   const columns: (number | string | boolean | null)[][] = names.map(() => [])
   let rowCount = -1
+  legacyValues.forEach((rawValues, blockIndex) => {
+    const values = blockValues(rawValues)
+    const itemNames = indexLabels(legacyItems[blockIndex])
+    itemNames.forEach((itemName, blockColumn) => {
+      const columnIndex = names.indexOf(itemName)
+      if (columnIndex < 0) throw new Error(`PICKLE_DATAFRAME_INVALID: unknown block item ${itemName}`)
+      const row = values[blockColumn] ?? []
+      columns[columnIndex] = row
+      rowCount = rowCount < 0 ? row.length : rowCount
+      if (row.length !== rowCount) throw new Error('PICKLE_DATAFRAME_INVALID: ragged blocks')
+    })
+  })
   for (const block of blocks) {
     if (!isGlobal(block)) continue
     const args = block.args ?? []
