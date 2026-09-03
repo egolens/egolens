@@ -74,11 +74,11 @@ Evidence from this week (each agent turn under ten minutes):
    and relaunch. ChatGPT's in-app browser needs no flag.
 2. Open https://egolens.org. The five tools are registered on the top-level
    document as soon as the page loads (DevTools → Application → WebMCP).
-3. Download the sample dataset (PandaSet 001, six frames, CC BY 4.0 with
-   attribution) from
-   https://github.com/egolens/egolens/releases/tag/webmcp-sample
-   (`egolens-sample-pandaset-001-6frames.zip`), unzip, and drop the folder on
-   the page. Confirm the layout: 6 cameras (front_camera, front_left_camera,
+3. Download a sample dataset (PandaSet 001, CC BY 4.0 with attribution) from
+   https://github.com/egolens/egolens/releases/tag/webmcp-sample:
+   `egolens-sample-pandaset-001-6frames.zip` (32 MB, quick) or
+   `egolens-sample-pandaset-001-full.zip` (439 MB, all 80 frames for
+   playback). Unzip and drop the folder on the page. Confirm the layout: 6 cameras (front_camera, front_left_camera,
    front_right_camera, back_camera, left_camera, right_camera), 1 lidar
    (lidar), 0 radar. The defaults are inferred from the folder; just confirm.
 4. Ask the agent in plain words, for example: *"Teach EgoLens this dataset."*
@@ -86,11 +86,14 @@ Evidence from this week (each agent turn under ten minutes):
    a `nextStep` hint, `get_contract` carries an `authoringGuide` with the
    order of steps and the frame conventions, and every diagnostic names the
    field to fix. No scripted tool sequence is needed.
-5. Review the thumbnails, or press **Open interactive preview** to explore
-   the validated recipe in the full 3D viewer (orbit, POV cameras,
-   LiDAR→camera overlay, boxes, playback) and come back with
-   **← Back to review**. Accept or reject each capability with an issue and
+5. As soon as a revision validates, the full 3D viewer loads it against your
+   folder and the review panel docks beside it: orbit, POV cameras,
+   LiDAR→camera overlay, boxes, colormaps, and playback all work on the real
+   rendering while the agent keeps iterating (each accepted revision
+   reloads the scene). Accept or reject each capability with an issue and
    let the agent revise. Finalize and Export JSON when the rendering is right.
+   A scene rendered later from the saved recipe offers **✎ Edit recipe** to
+   reopen authoring on the same folder.
 6. Shortcut: import the finished recipe from the same release
    (`pandaset-001.egolens-adapter.json`, sealed against this six-frame sample)
    with **Import JSON** after confirming the layout to see the end state
