@@ -86,4 +86,12 @@ describe('sensor configuration', () => {
     expect(configuration.camera).toBe(2)
     expect(configuration.names?.lidar).toEqual(['lidar'])
   })
+
+  it('rejects a recipe whose identity.name differs from the human-chosen dataset name', () => {
+    const recipe = { identity: { name: 'agent-name' }, scene: { sensors: [{ id: 'lidar', modality: 'lidar' }] } } as never
+    const configuration = assertValidSensorConfigurationV1({ lidar: 1, radar: 0, camera: 0, datasetName: '  My drive 7  ' })
+    expect(configuration.datasetName).toBe('My drive 7')
+    expect(sensorConfigurationDiagnosticsV1(recipe, configuration).map((d) => d.code)).toContain('IDENTITY_NAME_UNMET')
+    expect(sensorConfigurationDiagnosticsV1({ ...recipe, identity: { name: 'My drive 7' } } as never, configuration)).toEqual([])
+  })
 })

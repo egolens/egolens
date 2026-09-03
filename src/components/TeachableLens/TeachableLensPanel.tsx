@@ -92,6 +92,12 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
   const inventory = session.getInventory()
   const configuration = state.sensorConfiguration ?? (state.inventory ? inferSensorConfigurationV1(state.inventory) : { lidar: 0, radar: 0, camera: 0 })
   const [draft, setDraft] = useState<SensorConfigurationV1>(configuration)
+  const [nameDraft, setNameDraft] = useState(configuration.datasetName ?? '')
+  const commitName = () => {
+    const trimmed = nameDraft.trim()
+    if (!inventory || trimmed === (configuration.datasetName ?? '')) return
+    session.start(inventory, { sensorConfiguration: { ...configuration, ...(trimmed ? { datasetName: trimmed } : { datasetName: undefined }) } })
+  }
   const names = (modality: 'camera' | 'lidar' | 'radar') => configuration.names?.[modality] ?? []
   return (
     <div style={{ flex: 1, overflow: 'auto', display: 'grid', placeItems: 'center', padding: '32px 24px' }}>
@@ -119,6 +125,21 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
         <AgentAskCard agent={agent} />
 
         <div style={{ marginTop: 12, padding: '12px 16px', border: `1px solid ${colors.border}`, borderRadius: 12, background: colors.bgSurface }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${colors.borderSubtle}` }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>Name this dataset <span style={{ fontWeight: 400, color: colors.textDim }}>— the recipe and the sealed reader carry this name</span></div>
+              <input
+                aria-label="Dataset name"
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.currentTarget.value)}
+                onBlur={commitName}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.currentTarget.blur() } }}
+                placeholder="e.g. PandaSet sequence 001 — leave empty and the agent will propose one"
+                maxLength={120}
+                style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, padding: '8px 10px', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.bgBase, color: colors.textPrimary, fontSize: 13, fontWeight: 600, outline: 'none' }}
+              />
+            </div>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>Detected sensors <span style={{ fontWeight: 400, color: colors.textDim }}>— correct this if it's wrong</span></div>
@@ -135,7 +156,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
               inventory={inventory}
               configuration={draft}
               onChange={setDraft}
-              onConfirm={() => { session.start(inventory, { sensorConfiguration: draft }); setEditing(false) }}
+              onConfirm={() => { session.start(inventory, { sensorConfiguration: { ...draft, ...(nameDraft.trim() ? { datasetName: nameDraft.trim() } : {}) } }); setEditing(false) }}
             />
           )}
         </div>
