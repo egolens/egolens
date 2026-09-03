@@ -9,7 +9,7 @@ import {
   loadGraphParquetFrameRowsV1,
   loadGraphTableV1,
 } from '../operators/coreGraphOperators'
-import { projectBox3dPinholeV1 } from '../operators/sceneGeometry'
+import { egoBoxFromWorldV1, projectBox3dPinholeV1 } from '../operators/sceneGeometry'
 import type { AdapterDiagnostic } from '../recipe/diagnostics'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
 import type {
@@ -599,8 +599,14 @@ export function assembleGraphSceneV1(input: {
         }
       }
       if (requested.has('boxes3d') || requested.has('boxes2d')) {
-        ;(frame.boxes3d as NormalizedBox3dV1[]).push(...boxesForFrame(boxes, timelineFrame).map((box) => ({
-          ...box, classId: classIds.has(box.classId) ? box.classId : fallbackClassId,
+        const rawFrameBoxes = boxesForFrame(boxes, timelineFrame)
+        const needsWorldPose = rawFrameBoxes.some((box) => box.frameId === 'world')
+        const egoFromWorldForFrame = needsWorldPose ? egoFromWorldAt(timelineFrame.timestamp) : null
+        if (needsWorldPose && !egoFromWorldForFrame) {
+          throw new Error(`GRAPH_WORLD_FRAME_POSE_MISSING: boxes are declared in the world frame but no ego pose exists at timestamp ${timelineFrame.timestamp}`)
+        }
+        ;(frame.boxes3d as NormalizedBox3dV1[]).push(...rawFrameBoxes.map((box) => ({
+          ...egoBoxFromWorldV1(box, egoFromWorldForFrame), classId: classIds.has(box.classId) ? box.classId : fallbackClassId,
         })))
       }
       if (requested.has('boxes2d') && projected) {
@@ -758,17 +764,7 @@ export function assembleGraphSceneV1(input: {
     if (rawFrameBoxes.some((box) => box.frameId === 'world') && !egoFromWorld) {
       throw new Error(`GRAPH_WORLD_FRAME_POSE_MISSING: boxes are declared in the world frame but no ego pose exists at timestamp ${timelineFrame.timestamp}`)
     }
-    const frameBoxes = rawFrameBoxes.map((box) => {
-      if (box.frameId !== 'world' || !egoFromWorld) return box
-      const m = egoFromWorld
-      const [x, y, z] = box.center
-      const center: [number, number, number] = [
-        m[0]! * x + m[1]! * y + m[2]! * z + m[3]!,
-        m[4]! * x + m[5]! * y + m[6]! * z + m[7]!,
-        m[8]! * x + m[9]! * y + m[10]! * z + m[11]!,
-      ]
-      return { ...box, center, heading: (box.heading ?? 0) + Math.atan2(m[4]!, m[0]!), frameId: 'ego' }
-    })
+    const frameBoxes = rawFrameBoxes.map((box) => egoBoxFromWorldV1(box, egoFromWorld))
     const frameCounts = new Map<number, number>()
     lidarBoxByFrame.set(timestamps[index], frameBoxes.map((box) => ({
       'key.laser_object_id': box.id,

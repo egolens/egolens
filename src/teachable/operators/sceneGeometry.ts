@@ -56,3 +56,60 @@ export function projectBox3dPinholeV1(
     dimensions: [right - left, bottom - top],
   }
 }
+
+function quaternionWxyzFromRowMajorV1(m: ArrayLike<number>): [number, number, number, number] {
+  const r00 = m[0]!, r01 = m[1]!, r02 = m[2]!, r10 = m[4]!, r11 = m[5]!, r12 = m[6]!, r20 = m[8]!, r21 = m[9]!, r22 = m[10]!
+  const trace = r00 + r11 + r22
+  if (trace > 0) {
+    const s = Math.sqrt(trace + 1) * 2
+    return [0.25 * s, (r21 - r12) / s, (r02 - r20) / s, (r10 - r01) / s]
+  }
+  if (r00 > r11 && r00 > r22) {
+    const s = Math.sqrt(1 + r00 - r11 - r22) * 2
+    return [(r21 - r12) / s, 0.25 * s, (r01 + r10) / s, (r02 + r20) / s]
+  }
+  if (r11 > r22) {
+    const s = Math.sqrt(1 + r11 - r00 - r22) * 2
+    return [(r02 - r20) / s, (r01 + r10) / s, 0.25 * s, (r12 + r21) / s]
+  }
+  const s = Math.sqrt(1 + r22 - r00 - r11) * 2
+  return [(r10 - r01) / s, (r02 + r20) / s, (r12 + r21) / s, 0.25 * s]
+}
+
+function multiplyQuaternionWxyzV1(
+  a: readonly [number, number, number, number],
+  b: readonly [number, number, number, number],
+): [number, number, number, number] {
+  const [aw, ax, ay, az] = a
+  const [bw, bx, by, bz] = b
+  return [
+    aw * bw - ax * bx - ay * by - az * bz,
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+  ]
+}
+
+/**
+ * Re-express a world-frame box in the ego frame given a row-major ego←world
+ * matrix. Center, orientation, and heading all move together; boxes already in
+ * another frame are returned untouched.
+ */
+export function egoBoxFromWorldV1<T extends {
+  readonly frameId: string
+  readonly center: readonly [number, number, number]
+  readonly orientation: readonly [number, number, number, number]
+  readonly heading?: number
+}>(box: T, egoFromWorld: ArrayLike<number> | null): T {
+  if (box.frameId !== 'world' || !egoFromWorld) return box
+  const m = egoFromWorld
+  const [x, y, z] = box.center
+  const center: [number, number, number] = [
+    m[0]! * x + m[1]! * y + m[2]! * z + m[3]!,
+    m[4]! * x + m[5]! * y + m[6]! * z + m[7]!,
+    m[8]! * x + m[9]! * y + m[10]! * z + m[11]!,
+  ]
+  const orientation = multiplyQuaternionWxyzV1(quaternionWxyzFromRowMajorV1(m), box.orientation)
+  const heading = (box.heading ?? headingFromQuaternionWxyzV1(box.orientation)) + Math.atan2(m[4]!, m[0]!)
+  return { ...box, center, orientation, heading, frameId: 'ego' }
+}

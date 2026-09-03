@@ -754,6 +754,28 @@ Body outline (claim only what is listed in
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
 
+### 2026-09-03 — World-frame boxes were never converted on the normalized-frame path
+
+Reported by the user while reviewing the Codex-authored PandaSet recipe in the
+docked viewer: cuboids did not follow the lidar. Measured with a scratch probe
+on the full 80-frame sequence (points inside vehicle boxes, frames 0/39/79):
+
+| state | points in boxes (f0 / f39 / f79) |
+|---|---|
+| before | 3132 / 3199 / 1806 — box centers identical in every frame |
+| after ego←world on `loadFrame` | 13322 / 11557 / 11151 |
+| after heading = yaw + π/2 in the recipe | 29815 / 26689 / 24016 |
+
+Two causes. `GraphSceneAssembler` applied ego←world only to the legacy
+`lidarBoxByFrame` bundle; the normalized `loadFrame` path (what the authored
+viewer and the review thumbnails consume) pushed raw world boxes. Fixed by
+sharing `egoBoxFromWorldV1` (center, orientation, heading) on both paths. And
+PandaSet cuboid yaw points along the width axis, so with `dimensionFields`
+[y, x, z] the heading needs +π/2; the example recipe now derives
+`yaw_length_axis` and the authoring guide states the length-axis convention.
+The agent's recipe was parameter-for-parameter identical to the example, so
+this was not an authoring gap.
+
 ## Creating PR B after PR A merges
 
 1. Fetch the latest `origin/main` and create a clean PR B candidate checkout

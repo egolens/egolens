@@ -3698,11 +3698,29 @@
           }
         },
         {
+          "id": "headingToLength",
+          "op": "records.derive",
+          "version": 1,
+          "inputs": {
+            "rows": "joinBoxTime.rows"
+          },
+          "params": {
+            "derive": [
+              {
+                "field": "yaw_length_axis",
+                "from": "yaw",
+                "scale": 1,
+                "offset": 1.5707963267948966
+              }
+            ]
+          }
+        },
+        {
           "id": "normalizeBoxes",
           "op": "geometry.normalize_boxes3d",
           "version": 1,
           "inputs": {
-            "rows": "joinBoxTime.rows"
+            "rows": "headingToLength.rows"
           },
           "params": {
             "quaternionOrder": "wxyz",
@@ -3720,7 +3738,7 @@
               "dimensions.x",
               "dimensions.z"
             ],
-            "headingField": "yaw",
+            "headingField": "yaw_length_axis",
             "classMap": {
               "Car": "car",
               "Pickup Truck": "pickup_truck",
@@ -3878,7 +3896,8 @@
       "PandaSet camera mounts are rigid and are computed from frame-0 world poses.",
       "Both lidar heads are intentionally exposed as one pandar stream while retaining the d head attribute.",
       "JPEG dimensions are 1920x1080, confirmed from the encoded image header.",
-      "PandaSet cuboid dimensions.x is the width and dimensions.y the length (y-forward frame), so dimensionFields are [y, x, z]."
+      "PandaSet cuboid dimensions.x is the width and dimensions.y the length (y-forward frame), so dimensionFields are [y, x, z].",
+      "PandaSet cuboid yaw points along the box's local x axis, which is the width axis (length is dimensions.y). EgoLens headings point along the length axis, so the heading is yaw + pi/2 with dimensionFields [y, x, z]."
     ],
     "datasetFingerprint": "sha256:6fa289d2360b64a6092286a4711eb6fa99061cd9f2f6770756e39685e542481a",
     "validatorVersion": "1.0.0",
@@ -4012,9 +4031,9 @@
     }
   },
   "hashes": {
-    "recipeHash": "sha256:3472d1d6911cd09bee52b0516a971f0e59e6994ed5a723517ba297f8bd11f485",
+    "recipeHash": "sha256:fb19ae30b66304d4e542c1d2288a890651f357ca0fa32e8e60f02de605e93c38",
     "formatFingerprint": "sha256:edd1f4969dbbfc4f3a3604b8352e129e3895ff7765a801b7a631f9c2237722a2",
     "operatorSetFingerprint": "sha256:ef85b7d1c971dd91ddb24018f18d9e6ae5ff9d9a1bce17e9dc60d65370f242bb",
-    "artifactHash": "sha256:55ae769d45ef7dd3ac0665e270a9f8f4602b5cf436b70023982f122990303040"
+    "artifactHash": "sha256:5e9b81f4ce0eba6a492337165b9c1cfa209e524bd3b478ce1e9020278300d426"
   }
 }
