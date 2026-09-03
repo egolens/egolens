@@ -70,6 +70,18 @@ One tool for the three most widely used AV datasets. Drop a folder or paste a UR
 
 Dataset format is auto-detected from folder structure.
 
+## Teachable Lens (WebMCP)
+
+Drop a folder EgoLens does not recognize and the page becomes a WebMCP tool
+provider: five tools on `document.modelContext` let an agent (ChatGPT's
+in-app browser, Chrome 146+ with `chrome://flags/#enable-webmcp-testing`, or
+Codex through the audited broker) inspect the files within byte limits, read
+the operator contract, and submit adapter recipes as declarative JSON. You
+confirm the sensor layout first, review the rendered preview per capability,
+and finalize a hash-sealed recipe that renders the dataset for anyone through
+a share link. See [docs/WEBMCP_CHALLENGE.md](docs/WEBMCP_CHALLENGE.md) for the
+loop, judge instructions, and the sample dataset.
+
 ## Quick Start
 
 ### Local files (drag & drop)
