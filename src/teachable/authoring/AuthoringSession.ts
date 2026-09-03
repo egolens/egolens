@@ -145,6 +145,11 @@ export class TeachableAuthoringSessionV1 {
 
   getState = (): AuthoringSessionStateV1 => this.#state
 
+  /** The live user-authorized inventory, for rendering the current recipe in the viewer. */
+  getInventory(): SourceInventoryV1 | null {
+    return this.#inventory
+  }
+
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
