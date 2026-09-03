@@ -7,6 +7,27 @@ import { assertValidFeatherColumnsParamsV1 } from './featherColumns'
 import { assertValidParquetColumnsParamsV1 } from './parquetColumns'
 import { coreGraphOperatorImplementationsV1 } from './coreGraphOperators'
 
+/**
+ * Input/output semantics that JSON schema cannot express. Shown to agents
+ * through get_contract. These describe the vocabulary, never a dataset.
+ */
+export const OPERATOR_DOCS_V1: Readonly<Record<string, string>> = {
+  'archive.pickle_records': 'Streaming point-cloud reader. Output `records` is a binary collection: one entry per matched file, decoded lazily per frame (fields: files[].path). Params: `columns` = DataFrame column names to read in order, `attributes` = names they get in the point layout (x, y, z first). Feed `records` to timeline.join (inputs.records) or labels.attach_by_point_index; never to records operators.',
+  'archive.pickle_rows': 'Whole-file row reader for small metadata tables (cuboids, poses): every row of every matched file becomes one record; `pathField` adds the file path, `indexField` the row index. Hard budget 250k rows across all files. Not for point clouds.',
+  'json.records': 'Reads JSON files into records. layout "array": each element is a row (indexField adds its index). layout "object-rows": each top-level key is a row (key under keyField). layout "file-row": the whole object is one row (flatten: true turns nested keys into dotted fields). pathField adds the file path.',
+  'text.table': 'Reads a text file into rows. layout "delimited" with `delimiter`, `columns` (names), `header` (whether row 1 is a header), `numeric` (parse numbers), `maxRows`/`maxColumns`. A one-line JSON array can be split with delimiter "," into one row of N columns.',
+  'records.unpivot': 'Turns columns into rows. `pattern` (regex with groups) matches column names; `keyGroup` is the group that becomes the row key (stored under `keyField`), `fieldGroup` the group that becomes the output field name. Use it to turn 80 columns "00_x, 01_x…" into 80 rows with key 00, 01… and field x.',
+  'records.derive': 'Adds fields to each record. Each derivation: `field` (new name), `from` (source field; dotted paths reach nested JSON), optional `pattern`/`replacement` (regex rewrite; `required: true` drops rows that do not match), `pad`/`padChar` (zero-pad), `scale`/`offset`/`integer` (numeric conversion: float seconds → integer microseconds is { scale: 1000000, integer: true }).',
+  'relations.token_join': 'Inner or left join of two record sets on `leftKey` = `rightKey`; `rightFields` maps right-hand fields into the left rows ({ outputName: rightField }). Output `rows`.',
+  'timeline.sort': 'Builds the timeline from records: `timestampField` (integer, unit = `timestampUnit`), `keyField` (frame key that other tables join on), `groupField` (the scene/segment id; the same constant for every row of one log). Output `frames`.',
+  'timeline.join': 'mode "token": binds one point-cloud file per frame. inputs.records = binary collection from a point-cloud reader; inputs.sampleData = records with one row per file carrying `pathField` (path that must equal a records file path), `frameKeyField`, `timestampField` (integer microseconds), `sensorIdField`, and `recordCalibrationKeyField`; inputs.calibration = records keyed by `calibrationKeyField` with the pose (rotationForm identity when points are already in the output frame; quaternion/matrix/axes fields otherwise; `invertPose` when the file stores the inverse); inputs.sensors = records keyed by `sensorKeyField` with `sensorIdField`. One table can serve sampleData, calibration, and sensors. `outputFrame` "world" means the points are in the world frame and EgoLens converts them per frame using egoPoses. Output `pointClouds`.',
+  'geometry.relative_poses': 'Builds egoPoses from records: `timestampField` (integer microseconds, must match timeline timestamps) and a `poseChain` of links composed left to right, each { quaternionFields (w,x,y,z) / translationFields } or { quaternion: [w,x,y,z] constant } with optional `invert: true`. Output `poses`.',
+  'geometry.normalize_boxes3d': '3D boxes from records: `centerFields` (x,y,z), `dimensionFields` (length, width, height — length must be the axis the heading points along), `headingField` (yaw in radians) or quaternion fields with `quaternionOrder`, `classField` + `classMap` (dataset label → taxonomy class id), `objectIdField`, `timestampField`, `frameId` ("ego", a sensor frame, or "world"). Output `boxes`.',
+  'image.bind_camera_frame': 'Binds camera images: inputs.bytes = encoded-bytes collection of the image files; inputs.sampleData = records with `pathField`, `frameKeyField`, `timestampField`, `sensorIdField`, `calibrationKeyField`; inputs.calibration = records keyed by `recordCalibrationKeyField` with `intrinsicFields` (fx, fy, cx, cy) and the camera pose (poseChain or quaternion/translation fields, ego ← camera-optical); inputs.sensors = records with `sensorIdField`, `widthField`/`heightField` (or defaultWidth/defaultHeight). Output `images`.',
+  'labels.attach_by_point_index': 'Per-point labels aligned by point index: inputs.pointClouds = the bound point clouds, inputs.labels = binary collection of label files (one column), inputs.labelIndex = records mapping `indexRecordKeyField` (the point-cloud file path) to `indexPathField` (the label file path). `taxonomy` names the lidar-semantics taxonomy id. Output `segmentation`.',
+}
+
+
 const objectContract: OperatorJsonSchema = {
   type: 'object',
 }
@@ -677,6 +698,7 @@ const strictGraphOperators: readonly CoreOperatorDescriptor[] = [
     objectIdField: { type: 'string', minLength: 1, maxLength: 256 },
   }, ['objectIdField']), recordContract(['trajectories'])],
 ].map(([name, inputContract, operatorParamsContract, outputContract]): CoreOperatorDescriptor => ({
+  doc: OPERATOR_DOCS_V1[String(name)],
   name: name as string,
   majorVersion: 1,
   provider: 'core',
@@ -720,6 +742,7 @@ const pickleRowsParamsContract: OperatorJsonSchema = {
 const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
   {
     name: 'archive.pickle_records',
+    doc: OPERATOR_DOCS_V1['archive.pickle_records'],
     majorVersion: 1,
     provider: 'core',
     tier: 1,
@@ -732,6 +755,7 @@ const strictBinaryOperators: readonly CoreOperatorDescriptor[] = [
   },
   {
     name: 'archive.pickle_rows',
+    doc: OPERATOR_DOCS_V1['archive.pickle_rows'],
     majorVersion: 1,
     provider: 'core',
     tier: 1,

@@ -289,6 +289,7 @@ export class TeachableAuthoringSessionV1 {
       operators: this.#operators.list().map((operator) => ({
         name: operator.name,
         majorVersion: operator.majorVersion,
+        ...(operator.doc ? { doc: operator.doc } : {}),
         provider: operator.provider,
         execution: operator.execution,
         inputContract: operator.inputContract,

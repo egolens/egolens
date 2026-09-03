@@ -1067,7 +1067,7 @@ function relationalPointCloudPlan(
     ['inputs.sensors', isRecords(inputs.sensors), 'records: one row per sensor key with the sensor id'],
   ]
   const wrong = expected.filter(([, ok]) => !ok)
-  if (wrong.length > 0) {
+  if (wrong.length > 0 || !isBinary(inputs.records) || !isRecords(inputs.sampleData) || !isRecords(inputs.calibration) || !isRecords(inputs.sensors)) {
     throw new Error(`GRAPH_POINT_RELATION_INPUT_INVALID: timeline.join needs ${wrong.map(([name, , want]) => `${name} = ${want} (got ${inputKindLabel(inputs[name.slice(7)])})`).join('; ')}. The same records may feed sampleData, calibration, and sensors when one table carries every field.`)
   }
   const pathField = String(params.pathField)
