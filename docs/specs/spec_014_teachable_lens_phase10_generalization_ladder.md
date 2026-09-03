@@ -84,15 +84,34 @@ Argoverse 2 (shipped) and A2D2 (held-out), egolens#47 through egolens#64.
    inferred blind; the practical loop is confirmed layout + rendered review
    + self-consistency diagnostics, with the parity judge kept as a
    development report.
+6. **Vocabulary gaps are dataset-neutral one-liners, not adapters.** The
+   KITTI Raw rung (seven Codex turns) needed zero-padded indices
+   (`records.derive pad`), an index offset (`records.explode
+   indexOffsetField`), and composed/inverted matrix poses
+   (`rotationMatrixFields`, `invertPose`, `rotationForm: identity`). Each is
+   a few lines that every later dataset can reuse; none encodes KITTI.
+   Without them the author worked around the gap (432 per-frame regex rules,
+   points moved into the camera frame), which is the signature to watch for.
+7. **Count-only review is not enough.** Sensor sample counts and projection
+   point counts stayed plausible while the cloud sat in the camera frame and
+   while the runtime applied transposed rotations; the rendered thumbnails
+   and the production viewer caught both. The reviewer must look at the
+   images. The transposition was a runtime bug (matrix/axes poses were
+   column-major while everything else is row-major), fixed in egolens#77.
+8. **The likely first real users are "known dataset plus in-house
+   inference output".** A recipe derived from a bundled dataset with one
+   extra boxes/segmentation pipeline in a private format is the small
+   divergence this loop handles in one or two turns (owner observation,
+   2026-09-02).
 
 ### Action items (priority order)
 
 | # | Owner | Item | Status |
 |---|---|---|---|
-| 1 | owner | Download one sequence each of KITTI Raw (synced + calib), ONCE, PandaSet (accounts required) | blocked on owner |
+| 1 | owner | Download one sequence each of KITTI Raw (synced + calib), ONCE, PandaSet (accounts required) | KITTI Raw done (public S3); PandaSet pending; ONCE needs account |
 | 2 | Claude | Self-consistency diagnostics at apply time: camera reprojection coverage, timeline spacing irregularity, box point density, ego pose continuity (warnings, non-blocking) | next |
-| 3 | Claude | Reader vocabulary ahead of the rungs: whitespace/CSV text tables (KITTI calib, timestamps), XML records (KITTI tracklets); decide the PandaSet input path (JSON, not pickle) | after 2 |
-| 4 | Claude + owner | Run each rung as a collaborative session as archives arrive; keep first-failure artifacts and generic-operator fixes | as datasets arrive |
+| 3 | Claude | Reader vocabulary ahead of the rungs: whitespace/CSV text tables (KITTI calib, timestamps), XML records (KITTI tracklets); PandaSet gzip+pickle DataFrames (`archive.pickle_records`, `archive.pickle_rows`, egolens#73) | done |
+| 4 | Claude + owner | Run each rung as a collaborative session as archives arrive; keep first-failure artifacts and generic-operator fixes | A2D2 and KITTI Raw done; PandaSet/ONCE pending |
 | 5 | Claude | Review UX: BEV thumbnail, channel-name defaults in the layout confirmation, one-click "revision request" text for the Codex chat | after 3 |
 | 6 | Claude | `poses.integrate`: ego poses from raw GPS/IMU/velocity signals (A2D2 bus, KITTI OXTS) | after 5 |
 | 7 | Claude | PR B redefinition: confirmed sensor contract in `phase9-requirements.json`, judge ignores presentation-only fields, rerun; kept as a development report rather than a merge gate | last |

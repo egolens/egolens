@@ -706,6 +706,30 @@ Body outline (claim only what is listed in
 - 2026-09-02: findings and the prioritized action list are in Spec 014
   ("Findings and action items"). Work continues with item 2 (self-consistency
   diagnostics); items 1 and 4 wait for owner-downloaded archives.
+- 2026-09-02, KITTI Raw rung (collaborative; Claude as operator and
+  reviewer): `2011_09_26` calib files + drive 0001 synced (108 frames, 4
+  cameras, Velodyne, OXTS, tracklets) from the public KITTI S3 mirror, no
+  account. Confirmed layout 4 cameras / 1 lidar / 0 radar. One Codex session
+  (01a06440…) over seven turns, each under ten minutes: text tables and
+  calendar timestamps (egolens#66-#69 era), matrix calibration, exploded
+  tracklets, unpivoted per-camera calibration; turn 4 was accepted in review
+  but the export failed silently at 291 KB (apply measured compact JSON,
+  export pretty-printed; egolens#74 fixes both and adds `records.derive
+  pad`); turn 5 shrank the recipe to 37 KB but collapsed tracklets onto
+  frame 0 (`records.explode indexOffsetField`, egolens#75); turn 6 restored
+  boxes but had moved the point cloud into the cam00 frame because matrix
+  poses could not be composed or inverted (`rotationMatrixFields`,
+  `invertPose`, `rotationForm: identity`, egolens#76); turn 7 validated all
+  six capabilities (cameras [1,1,1] ×4, lidar ~121K points, boxes [5,4,6]),
+  reviewed with thumbnails, finalized, exported (`sha256:3022e089…`). The
+  first viewer render showed a solid LiDAR-to-camera block: matrix/axes
+  poses were column-major while the runtime is row-major, and camera
+  renderer id 0 was skipped (egolens#77). After that fix the production
+  viewer renders four cameras with correct depth projection and the Velodyne
+  cloud. Artifacts (local, not committed):
+  `~/Workspace/egolens-p7/collab-kitti-raw/` (feedback1-6, codex-turn1-7
+  logs, success/{recipe, review-page.png, viewer-0.png}). PandaSet reader
+  landed ahead of its rung (egolens#73).
 - PR B's candidate commit is this branch's head at the time each counted run
   starts; the workflow uses the PR head SHA as `EXPECTED_CANDIDATE_COMMIT`, so
   Phase 9 judging must complete before any evidence commit is pushed here.
