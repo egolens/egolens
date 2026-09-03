@@ -46,7 +46,7 @@ export function buildCameraProjectors(rows: ParquetRow[]): Map<number, CameraPro
 
   for (const row of rows) {
     const cameraName = row['key.camera_name'] as number
-    if (!cameraName) continue
+    if (cameraName === undefined || cameraName === null) continue
 
     const extrinsic = row[`${CAM_PREFIX}.extrinsic.transform`] as number[]
     const width = row[`${CAM_PREFIX}.width`] as number

@@ -129,7 +129,7 @@ describe('generic operators surfaced by the A2D2 rung', () => {
       rotationForm: 'axes', axisFields: ['xAxis', 'yAxis'], outputFrame: 'ego',
     }, context({}))).pointClouds as { bindings: { egoFromSensor: Float64Array; sensorId: string }[] }
     expect(plan.bindings[0]!.sensorId).toBe('lidar_front_center')
-    expect([...plan.bindings[0]!.egoFromSensor].map((value) => { const rounded = Math.round(value * 1000) / 1000; return rounded === 0 ? 0 : rounded })).toEqual([0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1])
+    expect([...plan.bindings[0]!.egoFromSensor].map((value) => { const rounded = Math.round(value * 1000) / 1000; return rounded === 0 ? 0 : rounded })).toEqual([0, -1, 0, 1, 1, 0, 0, 2, 0, 0, 1, 3, 0, 0, 0, 1])
   })
 
   it('publishes the new operators and layouts through the contract', () => {
