@@ -104,11 +104,13 @@ Evidence from this week (each agent turn under ten minutes):
    this dataset, Export JSON, Import JSON/URL, and the recipe hashes. A
    scene rendered later from the saved recipe offers **✎ Edit recipe** in the
    header to reopen authoring on the same folder.
-6. Shortcut: import the finished recipe from the same release
-   (`pandaset-001.egolens-adapter.json`, sealed against the six-frame sample; the archive's README deliberately does not describe the layout, so the agent must read the files)
-   with **Import JSON** after confirming the layout to see the end state
-   without authoring; `pandaset-001-review.png` and
-   `pandaset-001-viewer.png` show the expected review page and viewer.
+6. No finished recipe is published anywhere. The sample archive's README
+   deliberately does not describe the layout, and the contract carries no
+   dataset examples, so the agent must read the files. If an agent reports
+   finding "the published EgoLens adapter" online, that is not the intended
+   path; add "do not search the web" to the prompt (the Copy prompt text
+   already says so). `pandaset-001-review.png` and `pandaset-001-viewer.png`
+   show the expected review page and viewer.
 
 Nothing in this flow uploads dataset bytes; inspection is bounded and audited.
 

@@ -106,10 +106,6 @@ browser, the Codex app, and Chrome 146+ with
 2. Open [egolens.org](https://egolens.org) in a WebMCP-enabled browser and drop the folder.
 3. Say **"Teach EgoLens this dataset."** and review each capability as it renders.
 
-No agent handy? Click "teach a new adapter instead", then Import JSON with the
-[sealed recipe](https://github.com/egolens/egolens/releases/download/webmcp-sample/pandaset-001.egolens-adapter.json)
-from the release to render immediately.
-
 Datasets taught this way so far: A2D2, KITTI Raw, PandaSet. Judge notes, the
 prior-vs-new work split, and run logs are in
 [docs/WEBMCP_CHALLENGE.md](docs/WEBMCP_CHALLENGE.md). The WebMCP entry point is
