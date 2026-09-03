@@ -525,7 +525,7 @@
       "additionalProperties": false,
       "required": ["author", "createdAt"],
       "properties": {
-        "author": { "enum": ["codex", "imported", "registry"] },
+        "author": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,31}$" },
         "createdAt": { "type": "string", "format": "date-time" },
         "parentRecipeHash": { "$ref": "#/$defs/hash" },
         "summary": { "type": "string", "maxLength": 1000 },

@@ -132,6 +132,11 @@ export default function TeachableLensPanel({
             {preview.capabilitySamples && <div style={{ marginTop: 8, fontSize: 11, color: colors.textDim, lineHeight: 1.6 }}>
               {Object.entries(preview.capabilitySamples).map(([capability, counts]) => `${capability}: [${counts.join(', ')}]`).join(' · ')}
             </div>}
+            {(!preview.thumbnails || preview.thumbnails.length === 0) && (
+              <div data-testid="preview-placeholder" style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, border: `1px dashed ${colors.border}`, fontSize: 11, lineHeight: 1.5, color: colors.textDim }}>
+                Nothing to look at yet: no camera or LiDAR data is bound on the sampled frames. Camera thumbnails with projected points and a bird's-eye view appear here once cameraImages and pointClouds are bound.
+              </div>
+            )}
             {preview.thumbnails && preview.thumbnails.length > 0 && (
               <div data-testid="review-thumbnails" style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
                 {preview.thumbnails.map((thumbnail) => (

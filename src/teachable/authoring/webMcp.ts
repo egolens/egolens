@@ -121,7 +121,7 @@ export async function registerTeachableWebMcpToolsV1(
     },
     {
       name: 'egolens_teachable_apply_revision',
-      description: 'Step 4: submit one complete adapter recipe (declarative JSON per the contract). EgoLens compiles it, samples three frames, and returns diagnostics that name the failing input or the missing field; fix and resubmit the whole recipe. Set provenance.author to your agent name and, after an accepted revision, provenance.parentRecipeHash to the current recipe hash from get_state. Do not call finalize yourself: the user reviews the rendered preview on the page and their feedback appears in get_state.latestHumanReview.',
+      description: 'Step 4: submit one complete adapter recipe (declarative JSON per the contract). EgoLens compiles it, samples three frames, and returns diagnostics that name the failing input or the missing field; fix and resubmit the whole recipe. Set provenance.author to your agent id (lowercase, e.g. "chatgpt" or "codex") and, after an accepted revision, provenance.parentRecipeHash to the current recipe hash from get_state. Do not call finalize yourself: the user reviews the rendered preview on the page and their feedback appears in get_state.latestHumanReview.',
       inputSchema: {
         type: 'object',
         properties: { recipe: { type: 'object' } },

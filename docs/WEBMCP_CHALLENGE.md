@@ -76,7 +76,7 @@ Evidence from this week (each agent turn under ten minutes):
    (`egolens-sample-pandaset-001-6frames.zip`), unzip, and drop the folder on
    the page. Confirm the layout: 6 cameras (front_camera, front_left_camera,
    front_right_camera, back_camera, left_camera, right_camera), 1 lidar
-   (pandar), 0 radar.
+   (lidar), 0 radar. The defaults are inferred from the folder; just confirm.
 4. Ask the agent in plain words, for example: *"Teach EgoLens this dataset."*
    The tools describe themselves: `get_state` returns the confirmed layout and
    a `nextStep` hint, `get_contract` carries an `authoringGuide` with the
@@ -85,8 +85,9 @@ Evidence from this week (each agent turn under ten minutes):
 5. Review the thumbnails, accept or reject with an issue, and let the agent
    revise. Finalize and Export JSON when the rendering is right.
 6. Shortcut: import the finished recipe from the same release
-   (`pandaset-001.egolens-adapter.json`) with **Import JSON** to see the end
-   state without authoring; `pandaset-001-review.png` and
+   (`pandaset-001.egolens-adapter.json`, sealed against this six-frame sample)
+   with **Import JSON** after confirming the layout to see the end state
+   without authoring; `pandaset-001-review.png` and
    `pandaset-001-viewer.png` show the expected review page and viewer.
 
 Nothing in this flow uploads dataset bytes; inspection is bounded and audited.
