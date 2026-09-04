@@ -30,6 +30,7 @@ rendering, timeline, POV cameras, share links, embed themes, GA4, SEO.
 | 09-02 | #56, #58, #59, #64, #68, #70 | Human-agent loop: confirmed sensor layout before authoring, declared-sensor summary, rendered review thumbnails (camera projections + BEV), per-capability accept/reject with issue, one-click revision request text |
 | 09-02 | #61, #62, #66–#69, #73–#81 | Dataset-neutral vocabulary discovered by authoring held-out datasets (A2D2, KITTI Raw, PandaSet): JSON/text/XML/NPZ/pickle readers, derive/explode/unpivot, matrix/quaternion pose forms, world-frame conversion, apply-time diagnostics |
 | 09-02 | #82 | Native WebMCP compatibility: string results for `execute(params, { signal })` |
+| 09-03 | #109–#135 | Flow redesign (P0 naming + sensor contract, docked production renderer in review, sealed screen, trained-format recognition), no example recipes in the contract (placeholder skeleton + operator docs), diagnostics that name inputs and values, `records.from_files`, runtime fixes found in live agent runs (shared byte source on dispose, world-frame boxes on the normalized path, derive-without-pattern), convergence strategy in the guide, real-page WebMCP bridge runs recorded with Codex |
 
 Every commit is on `main` of https://github.com/egolens/egolens with CI.
 
