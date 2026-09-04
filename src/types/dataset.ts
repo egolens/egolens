@@ -26,7 +26,11 @@ export interface CameraSensorDef extends SensorDef {
   height: number
   /** Relative flex weight for panel sizing (larger = wider panel) */
   flex?: number
+  /** Declared mounting direction (recipe `image.view`); when every camera has one it decides tile order. */
+  view?: CameraViewV1
 }
+
+export type CameraViewV1 = 'front' | 'front-left' | 'front-right' | 'side-left' | 'side-right' | 'rear' | 'rear-left' | 'rear-right'
 
 /** Which 3D model to render in "model" box mode */
 export type BoxModelType = 'vehicle' | 'pedestrian' | 'cyclist' | 'motorcycle' | 'bicycle' | 'sign' | 'cone' | 'barrier' | 'box'

@@ -143,6 +143,7 @@ export function normalizedManifestToDatasetManifest(
       width: sensor.image?.width ?? 1,
       height: sensor.image?.height ?? 1,
       flex: cameraFlex(sensor.image?.width ?? 1, sensor.image?.height ?? 1, sensor.image?.view ?? ''),
+      ...(sensor.image?.view ? { view: sensor.image.view } : {}),
     })),
     boxTypes: classes.map((entry) => ({
       id: entry.rendererId,
