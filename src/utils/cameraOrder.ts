@@ -1,4 +1,4 @@
-import type { CameraSensorDef } from '../types/dataset'
+import type { CameraSensorDef, CameraViewV1 } from '../types/dataset'
 import type { ParquetRow } from './merge'
 
 const CAM_PREFIX = '[CameraCalibrationComponent]'
@@ -37,6 +37,11 @@ export function cameraYawsFromRowsV1(calibrationRows: readonly ParquetRow[]): Ma
  * null when fewer than two cameras have a calibration.
  */
 export function splitCamerasIntoRowsV1(cameras: readonly CameraSensorDef[], calibrationRows: readonly ParquetRow[]): [CameraSensorDef[], CameraSensorDef[]] | null {
+  if (allHaveViews(cameras)) {
+    const forward = cameras.filter((camera) => FORWARD_VIEWS.includes(camera.view)).sort((a, b) => FORWARD_VIEWS.indexOf(a.view) - FORWARD_VIEWS.indexOf(b.view) || cameras.indexOf(a) - cameras.indexOf(b))
+    const rest = cameras.filter((camera) => !FORWARD_VIEWS.includes(camera.view)).sort((a, b) => REAR_ROW.indexOf(a.view) - REAR_ROW.indexOf(b.view) || cameras.indexOf(a) - cameras.indexOf(b))
+    return [forward, rest]
+  }
   const yawById = cameraYawsFromRowsV1(calibrationRows)
   const known = cameras.filter((camera) => yawById.has(camera.id))
   if (known.length < 2) return null
@@ -49,7 +54,27 @@ export function splitCamerasIntoRowsV1(cameras: readonly CameraSensorDef[], cali
   return [forward.sort(byYawDesc), rest.sort(byLateralDesc)]
 }
 
+
+/**
+ * Head-turn sweep by declared view: left side → front-left → front → front-right →
+ * right side → rear-right → rear → rear-left. A recipe author (or the agent, when a
+ * person asks) controls tile order through `image.view`; yaw is the fallback.
+ */
+const VIEW_SWEEP: readonly CameraViewV1[] = ['side-left', 'front-left', 'front', 'front-right', 'side-right', 'rear-right', 'rear', 'rear-left']
+const FORWARD_VIEWS: readonly CameraViewV1[] = ['front-left', 'front', 'front-right']
+/** Rear row as seen from above, left → right: left side, rear-left, rear, rear-right, right side. */
+const REAR_ROW: readonly CameraViewV1[] = ['side-left', 'rear-left', 'rear', 'rear-right', 'side-right']
+
+function allHaveViews(cameras: readonly CameraSensorDef[]): cameras is readonly (CameraSensorDef & { view: CameraViewV1 })[] {
+  return cameras.length > 1 && cameras.every((camera) => camera.view !== undefined)
+}
+
+export function orderCamerasByViewV1(cameras: readonly (CameraSensorDef & { view: CameraViewV1 })[]): CameraSensorDef[] {
+  return [...cameras].sort((left, right) => VIEW_SWEEP.indexOf(left.view) - VIEW_SWEEP.indexOf(right.view) || cameras.indexOf(left) - cameras.indexOf(right))
+}
+
 export function orderCamerasByYawV1(cameras: readonly CameraSensorDef[], calibrationRows: readonly ParquetRow[]): CameraSensorDef[] {
+  if (allHaveViews(cameras)) return orderCamerasByViewV1(cameras)
   const yawById = new Map<number, number>()
   for (const row of calibrationRows) {
     const id = row['key.camera_name']

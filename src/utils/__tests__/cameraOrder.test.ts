@@ -34,3 +34,19 @@ describe('orderCamerasByYawV1', () => {
       .toEqual(['FL', 'F', 'FR', 'B', 'L', 'R', 'SL', 'B', 'GL'])
   })
 })
+
+describe('declared views decide tile order', () => {
+  const v = (id: number, label: string, view: string) => ({ id, label, color: '#fff', width: 1, height: 1, view: view as never })
+  it('orders by view when every camera declares one, ignoring yaw', () => {
+    const cameras = [v(1, 'front', 'front'), v(2, 'back', 'rear'), v(3, 'right', 'side-right'), v(4, 'left', 'side-left'), v(5, 'front_right', 'front-right'), v(6, 'front_left', 'front-left')]
+    const rows = [yawRow(1, 0), yawRow(2, 180), yawRow(3, 90), yawRow(4, -90), yawRow(5, 45), yawRow(6, -45)]
+    expect(orderCamerasByYawV1(cameras, rows).map((c) => c.label)).toEqual(['left', 'front_left', 'front', 'front_right', 'right', 'back'])
+    const [top, bottom] = splitCamerasIntoRowsV1(cameras, rows)!
+    expect(top.map((c) => c.label)).toEqual(['front_left', 'front', 'front_right'])
+    expect(bottom.map((c) => c.label)).toEqual(['left', 'back', 'right'])
+  })
+  it('falls back to yaw when a camera has no view', () => {
+    const cameras = [v(1, 'front', 'front'), { id: 2, label: 'back', color: '#fff', width: 1, height: 1 }]
+    expect(orderCamerasByYawV1(cameras, [yawRow(1, 0), yawRow(2, 180)]).map((c) => c.label)).toEqual(['front', 'back'])
+  })
+})

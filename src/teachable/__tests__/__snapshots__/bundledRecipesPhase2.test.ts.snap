@@ -218,6 +218,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 1,
         "label": "REAR LEFT",
+        "view": "rear-left",
         "width": 1550,
       },
       {
@@ -226,6 +227,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 2,
         "label": "SIDE LEFT",
+        "view": "side-left",
         "width": 1550,
       },
       {
@@ -234,6 +236,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 3,
         "label": "FRONT LEFT",
+        "view": "front-left",
         "width": 1550,
       },
       {
@@ -242,6 +245,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 4,
         "label": "FRONT",
+        "view": "front",
         "width": 1550,
       },
       {
@@ -250,6 +254,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 5,
         "label": "FRONT RIGHT",
+        "view": "front-right",
         "width": 1550,
       },
       {
@@ -258,6 +263,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 6,
         "label": "SIDE RIGHT",
+        "view": "side-right",
         "width": 1550,
       },
       {
@@ -266,6 +272,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 2048,
         "id": 7,
         "label": "REAR RIGHT",
+        "view": "rear-right",
         "width": 1550,
       },
     ],
@@ -425,6 +432,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 900,
         "id": 4,
         "label": "BACK LEFT",
+        "view": "rear-left",
         "width": 1600,
       },
       {
@@ -433,6 +441,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 900,
         "id": 1,
         "label": "FRONT LEFT",
+        "view": "front-left",
         "width": 1600,
       },
       {
@@ -441,6 +450,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 900,
         "id": 2,
         "label": "FRONT",
+        "view": "front",
         "width": 1600,
       },
       {
@@ -449,6 +459,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 900,
         "id": 3,
         "label": "FRONT RIGHT",
+        "view": "front-right",
         "width": 1600,
       },
       {
@@ -457,6 +468,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 900,
         "id": 6,
         "label": "BACK RIGHT",
+        "view": "rear-right",
         "width": 1600,
       },
       {
@@ -465,6 +477,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 900,
         "id": 5,
         "label": "BACK",
+        "view": "rear",
         "width": 1600,
       },
     ],
@@ -972,6 +985,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 886,
         "id": 4,
         "label": "SIDE LEFT",
+        "view": "side-left",
         "width": 1920,
       },
       {
@@ -980,6 +994,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 1280,
         "id": 2,
         "label": "FRONT LEFT",
+        "view": "front-left",
         "width": 1920,
       },
       {
@@ -988,6 +1003,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 1280,
         "id": 1,
         "label": "FRONT",
+        "view": "front",
         "width": 1920,
       },
       {
@@ -996,6 +1012,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 1280,
         "id": 3,
         "label": "FRONT RIGHT",
+        "view": "front-right",
         "width": 1920,
       },
       {
@@ -1004,6 +1021,7 @@ exports[`bundled Phase 2 recipes > projects behavior-normalized compatibility ma
         "height": 886,
         "id": 5,
         "label": "SIDE RIGHT",
+        "view": "side-right",
         "width": 1920,
       },
     ],
