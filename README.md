@@ -78,6 +78,59 @@ app. Drop a folder EgoLens does not recognize and the page becomes a WebMCP
 tool provider. Your agent teaches EgoLens the format, you approve the render,
 and the app's capabilities keep growing. Files never leave the browser.
 
+> **Built during the WebMCP Challenge (Aug 29 – Sep 3, 2026).** EgoLens existed
+> before as a browser viewer for three built-in datasets with remote loading and
+> share links. Everything in this section is submission-period work: the recipe
+> language and runtime, the five `document.modelContext` tools, the authoring
+> session and review UI, the three-host compatibility, and the sample release.
+> The commit-by-commit split is in
+> [docs/WEBMCP_CHALLENGE.md](docs/WEBMCP_CHALLENGE.md#prior-work-vs-work-in-the-submission-period)
+> (PRs #23–#135).
+
+### Why WebMCP fits this use case
+
+Driving logs are large and often confidential, so the data has to stay in the
+browser. The expertise needed to read a new format is in the agent; the judgment
+of whether a render is right is in the person looking at it. WebMCP puts the
+tools where the data already is and gives both sides the same page: the agent
+gets typed tools, the person gets the viewer. Any WebMCP host works with zero
+agent-specific code.
+
+### How it creates a better user experience
+
+- Adding a dataset format no longer means converting your data or forking the
+  project. You drop the folder, say one sentence, and review renders.
+- Every validated revision renders in the production viewer, docked next to the
+  review panel, so problems are found by looking, not by reading JSON.
+- Review is per capability with named issues; verdicts reach the agent through
+  `get_state`, so you never copy error text into a chat.
+- Drag-and-drop and **Select Folder** both work in in-app browsers (ChatGPT,
+  Codex) and in Chrome; no File System Access API is required.
+- A taught format is remembered: drop that layout again and it renders in one
+  click, or share it as a link.
+
+### What people and agents can now do together
+
+Before, an engineer wrote a loader for one dataset and it died with the
+notebook. Now a person and an agent author a reusable adapter in minutes, with
+the person's eyes as the acceptance test. During the challenge week three
+unknown datasets were taught this way: A2D2 (3 revisions), KITTI Raw (7),
+PandaSet (2–16 depending on the run, one human rejection each time). The agent
+reads files and writes bindings; the person looks at the scene and says what is
+wrong. Each does what it is best at, and the viewer keeps growing.
+
+### How we implemented WebMCP
+
+Five tools are registered with `document.modelContext.registerTool` while an
+unknown folder is open and removed when the session ends (see
+[`src/teachable/authoring/webMcp.ts`](src/teachable/authoring/webMcp.ts)).
+Tool descriptions are self-describing steps, inputs are normalized whether they
+arrive as objects or JSON strings, and results are strings, so ChatGPT's in-app
+browser, Chrome's native WebMCP, and the Codex app behave identically.
+Recipes are declarative JSON executed in an isolated graph runtime with
+resource limits; a wrong recipe renders wrong rather than running anything.
+Playwright probes drive Chrome's real WebMCP against the live site end to end.
+
 <p align="center">
   <img src="assets/teachable-review.png" alt="Teachable Lens review: the production viewer docked next to the agent activity feed and per-capability review" width="720" />
 </p>
