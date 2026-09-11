@@ -1,5 +1,6 @@
 import type { ByteSourceReadOptionsV1, ByteSourceV1 } from '../source/ByteSource'
 import { LocalFileByteSourceV1, normalizeSourcePathV1 } from '../source/ByteSource'
+import type { RemoteByteSourceOptionsV1, RemoteByteSourceV1 } from '../source/RemoteByteSource'
 
 // The complete official nuScenes mini extraction contains about 32k source
 // objects. Keep enumeration bounded while allowing that shipped baseline to
@@ -19,6 +20,17 @@ export interface SourceInventorySnapshotV1 {
   readonly entries: readonly SourceInventoryEntryV1[]
   readonly truncated: boolean
   readonly revoked: boolean
+}
+
+export interface RemoteSourceInventoryOptionsV1 extends Pick<RemoteByteSourceOptionsV1,
+  'rootUrl' | 'expectedSourceManifestHash' | 'fetch' | 'limits' | 'credentialGrant' | 'preferFullObjects'
+> {
+  readonly catalogUrl: string
+  readonly expectedCatalogHash: string
+  /** Cancels initialization only. Revoke the returned inventory to end its session. */
+  readonly signal?: AbortSignal
+  readonly sessionId?: string
+  readonly maxCatalogBytes?: number
 }
 
 function normalizeInventoryPath(path: string): string {
@@ -41,12 +53,13 @@ function createSessionId(): string {
     : `inventory-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-/** Session-only capability over files explicitly selected by the user. */
+/** Session-only capability over explicitly selected local files or a remote catalog. */
 export class SourceInventoryV1 {
   readonly sessionId: string
   readonly truncated: boolean
-  #source: LocalFileByteSourceV1
+  #source: LocalFileByteSourceV1 | RemoteByteSourceV1 | null
   #entries: readonly SourceInventoryEntryV1[]
+  #kind: 'local' | 'remote' = 'local'
   #revoked = false
 
   constructor(
@@ -78,6 +91,61 @@ export class SourceInventoryV1 {
     this.#entries = Object.freeze(entries)
   }
 
+  /**
+   * Fetches catalog metadata only; source objects remain lazy, verified reads.
+   * Inspection and dataset fingerprinting can expand small reads to catalog
+   * chunks (or full objects without chunk digests), under the remote limits.
+   */
+  static async fromRemote(options: RemoteSourceInventoryOptionsV1): Promise<SourceInventoryV1> {
+    const assertNotAborted = () => {
+      if (options.signal?.aborted) throw new DOMException('Source inventory initialization was aborted.', 'AbortError')
+    }
+    assertNotAborted()
+    // Keep the remote transport/catalog validator out of local initialization.
+    const { fetchSourceCatalogV1, RemoteByteSourceV1, RemoteSourceErrorV1 } = await import('../source/RemoteByteSource')
+    assertNotAborted()
+    if (!options.expectedCatalogHash) {
+      throw new RemoteSourceErrorV1('REMOTE_CATALOG_INVALID', 'Expected catalog hash is required.')
+    }
+    const validated = await fetchSourceCatalogV1(options.catalogUrl, {
+      expectedCatalogHash: options.expectedCatalogHash,
+      expectedSourceManifestHash: options.expectedSourceManifestHash,
+      fetch: options.fetch,
+      signal: options.signal,
+      maxBytes: options.maxCatalogBytes,
+      credentialGrant: options.credentialGrant,
+    })
+    assertNotAborted()
+    const inventory = new SourceInventoryV1([], { sessionId: options.sessionId })
+    const source = new RemoteByteSourceV1({
+      rootUrl: options.rootUrl,
+      catalog: validated.catalog,
+      expectedCatalogHash: validated.catalogHash,
+      expectedSourceManifestHash: validated.sourceManifestHash,
+      fetch: options.fetch,
+      limits: options.limits,
+      preferFullObjects: options.preferFullObjects,
+      credentialGrant: options.credentialGrant,
+      // Each inventory owns its cache so revocation clears verified bytes.
+    })
+    inventory.#source!.revoke()
+    inventory.#source = source
+    inventory.#kind = 'remote'
+    inventory.#entries = Object.freeze(source.catalog.entries.map((entry) => Object.freeze({
+      path: entry.path,
+      size: entry.size,
+      type: entry.mediaType ?? '',
+      // Catalog v1 has no modification time; zero means unknown, consistently.
+      lastModified: 0,
+      extension: extensionOf(entry.path),
+    })))
+    return inventory
+  }
+
+  get kind(): 'local' | 'remote' {
+    return this.#kind
+  }
+
   get revoked(): boolean {
     return this.#revoked
   }
@@ -105,7 +173,7 @@ export class SourceInventoryV1 {
   /** Capability used by readers after inventory matching; File never crosses it. */
   resolveAuthorizedSource(): ByteSourceV1 {
     this.#assertActive()
-    return this.#source
+    return this.#source!
   }
 
   readAuthorizedBytes(path: string, options?: ByteSourceReadOptionsV1): Promise<ArrayBuffer> {
@@ -114,16 +182,21 @@ export class SourceInventoryV1 {
     if (!this.#entries.some((entry) => entry.path === normalized)) {
       throw new Error(`Inventory path is not authorized: ${normalized}`)
     }
-    return this.#source.read(normalized, options)
+    return this.#source!.read(normalized, options)
   }
 
   revoke(): void {
+    if (this.#revoked) return
     this.#revoked = true
-    this.#source.revoke()
+    this.#source?.revoke()
+    this.#source = null
+    this.#entries = Object.freeze([])
   }
 
   #assertActive(): void {
-    if (this.#revoked) throw new Error('SOURCE_INVENTORY_REVOKED: select the dataset folder again.')
+    if (this.#revoked) throw new Error(this.#kind === 'remote'
+      ? 'SOURCE_INVENTORY_REVOKED: select the hosted source again.'
+      : 'SOURCE_INVENTORY_REVOKED: select the dataset folder again.')
   }
 }
 
@@ -132,4 +205,10 @@ export function sourceInventoryFromFilesV1(
   options?: { readonly truncated?: boolean },
 ): SourceInventoryV1 {
   return new SourceInventoryV1(files, options)
+}
+
+export async function sourceInventoryFromRemoteV1(
+  options: RemoteSourceInventoryOptionsV1,
+): Promise<SourceInventoryV1> {
+  return await SourceInventoryV1.fromRemote(options)
 }

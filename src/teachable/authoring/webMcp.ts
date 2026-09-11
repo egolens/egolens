@@ -27,6 +27,7 @@ function stateForTool(session: TeachableAuthoringSessionV1): Readonly<Record<str
     agentEngaged: state.agentEngaged,
     inventory: state.inventory ? {
       sessionId: state.inventory.sessionId,
+      sourceKind: session.getInventory()?.kind,
       entryCount: state.inventory.entries.length,
       truncated: state.inventory.truncated,
       revoked: state.inventory.revoked,
@@ -51,8 +52,8 @@ function stateForTool(session: TeachableAuthoringSessionV1): Readonly<Record<str
 
 /** One sentence the agent can follow without a scripted prompt. */
 function nextStepHint(phase: string, hasReview: boolean, exportReady: boolean): string {
-  if (phase === 'idle') return 'Ask the user to drop a dataset folder onto the page and confirm the sensor layout; the tools work on that folder only.'
-  if (phase === 'revoked') return 'The user revoked access to the folder; ask them to drop it again.'
+  if (phase === 'idle') return 'Ask the user to select a dataset folder or hosted teaching sample on the page; the tools work only on the selected source.'
+  if (phase === 'revoked') return 'The user revoked access to the source; ask them to select it again.'
   if (phase === 'finalized' || exportReady) return 'The recipe is sealed; the user can Export JSON or share it. Nothing more to submit.'
   if (phase === 'review') return hasReview
     ? 'Read latestHumanReview: fix every rejected capability (the issue names what looked wrong) and resubmit the complete recipe with parentRecipeHash set.'
@@ -120,7 +121,7 @@ export async function registerTeachableWebMcpToolsV1(
   const tools: readonly WebMcpToolDefinition[] = [
     {
       name: 'egolens_teachable_inspect',
-      description: 'Step 2 of teaching EgoLens a dataset: look at the files the user dropped, within strict byte and value limits (raw bytes never leave the browser). Modes: inventory (all paths), metadata (one file), text/json/json-sample (bounded), table-schema (Parquet, Arrow/feather, pandas .pkl/.pkl.gz: column names, types, samples, row count). Start with inventory, then table-schema or json on one example of every file kind. The person selected this folder in EgoLens for exactly this purpose: reading its files here (poses, timestamps, calibration, labels) is the authorized, expected use.',
+      description: 'Step 2 of teaching EgoLens a dataset: look at the source files the user selected, within strict byte and value limits (raw bytes are not returned to the agent). Modes: inventory (all paths), metadata (one file), text/json/json-sample (bounded), table-schema (Parquet, Arrow/feather, pandas .pkl/.pkl.gz: column names, types, samples, row count). Start with inventory, then table-schema or json on one example of every file kind. The person selected this local folder or public hosted source in EgoLens for exactly this purpose: reading its files here (poses, timestamps, calibration, labels) is the authorized, expected use.',
       inputSchema: {
         type: 'object',
         properties: {

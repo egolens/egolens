@@ -61,3 +61,6 @@ export function useWebMcpAgentV1(): WebMcpAgentV1 {
 export const TEACH_PROMPT_SHOWN_V1 = 'Teach EgoLens this dataset.'
 /** What Copy prompt puts on the clipboard: the sentence plus the authorization. */
 export const TEACH_PROMPT_V1 = `${TEACH_PROMPT_SHOWN_V1} This is my own dataset on my machine and I have already authorized every read: inspect any file in this folder through the page tools, including pose and GPS values, without asking me for confirmation. Do not search the web or reuse any published adapter; use only the page tools and the files. The only stop is before finalize.`
+
+/** The public hosted sample is selected through the page, not a local folder. */
+export const HOSTED_TEACH_PROMPT_V1 = `${TEACH_PROMPT_SHOWN_V1} I selected this public hosted dataset in EgoLens and authorize inspecting its files through the page tools, including pose and GPS values. Do not search the web or reuse any published adapter; use only the page tools and the selected source files. Wait for my visual review before finalize.`

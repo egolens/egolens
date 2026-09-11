@@ -111,10 +111,22 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
   const configuration = state.sensorConfiguration ?? (state.inventory ? inferSensorConfigurationV1(state.inventory) : { lidar: 0, radar: 0, camera: 0 })
   const [draft, setDraft] = useState<SensorConfigurationV1>(configuration)
   const [nameDraft, setNameDraft] = useState(configuration.datasetName ?? '')
+  const [configurationError, setConfigurationError] = useState<string | null>(null)
+  const applyConfiguration = (next: SensorConfigurationV1): boolean => {
+    if (!inventory) return false
+    try {
+      session.start(inventory, { sensorConfiguration: next })
+      setConfigurationError(null)
+      return true
+    } catch (cause) {
+      setConfigurationError(cause instanceof Error ? cause.message : String(cause))
+      return false
+    }
+  }
   const commitName = () => {
     const trimmed = nameDraft.trim()
     if (!inventory || trimmed === (configuration.datasetName ?? '')) return
-    session.start(inventory, { sensorConfiguration: { ...configuration, ...(trimmed ? { datasetName: trimmed } : { datasetName: undefined }) } })
+    applyConfiguration({ ...configuration, ...(trimmed ? { datasetName: trimmed } : { datasetName: undefined }) })
   }
   const names = (modality: 'camera' | 'lidar' | 'radar') => modality === 'camera' ? orderCameraNamesV1(configuration.names?.camera ?? []) : (configuration.names?.[modality] ?? [])
   return (
@@ -125,7 +137,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
           <h2 style={{ margin: '10px 0 6px', fontSize: 28, fontWeight: 700, letterSpacing: '-0.01em' }}>{recognized ? 'You taught EgoLens this format' : "EgoLens doesn't know this format yet"}</h2>
           {recognized
             ? <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: colors.textSecondary }}>Your sealed reader still matches these files.</p>
-            : <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: colors.textSecondary }}>Teach it once — your agent writes the adapter, you approve the render.<br />Files never leave this browser.</p>}
+            : <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: colors.textSecondary }}>Teach it once — your agent writes the adapter, you approve the render.<br />{inventory?.kind === 'remote' ? 'Hosted files are fetched as needed for inspection and playback.' : 'Files never leave this browser.'}</p>}
         </div>
 
         {recognized && (
@@ -147,7 +159,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
           </div>
         )}
 
-        {!recognized && <AgentAskCard agent={agent} />}
+        {!recognized && <AgentAskCard agent={agent} sourceKind={inventory?.kind} />}
 
         <div style={{ marginTop: 12, padding: '12px 16px', border: `1px solid ${colors.border}`, borderRadius: 12, background: colors.bgSurface }}>
           {!recognized && <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${colors.borderSubtle}` }}>
@@ -181,14 +193,15 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
               inventory={inventory}
               configuration={draft}
               onChange={setDraft}
-              onConfirm={() => { session.start(inventory, { sensorConfiguration: { ...draft, ...(nameDraft.trim() ? { datasetName: nameDraft.trim() } : {}) } }); setEditing(false) }}
+              onConfirm={() => { if (applyConfiguration({ ...draft, ...(nameDraft.trim() ? { datasetName: nameDraft.trim() } : {}) })) setEditing(false) }}
             />
           )}
+          {configurationError && <p role="alert" style={{ color: colors.danger, fontSize: 12, marginBottom: 0 }}>{configurationError}</p>}
         </div>
 
         <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center', gap: 16, fontSize: 12, color: colors.textDim }}>
-          <span>{state.inventory?.entries.length ?? 0} files authorized · stays in this browser</span>
-          {onLeave && <button onClick={() => { session.revoke(); onLeave() }} style={{ background: 'none', border: 0, padding: 0, color: colors.accentBlue, textDecoration: 'underline', cursor: 'pointer', fontSize: 12 }}>Choose another folder</button>}
+          <span>{state.inventory?.entries.length ?? 0} files authorized · {inventory?.kind === 'remote' ? 'hosted source' : 'stays in this browser'}</span>
+          {onLeave && <button onClick={() => { session.revoke(); onLeave() }} style={{ background: 'none', border: 0, padding: 0, color: colors.accentBlue, textDecoration: 'underline', cursor: 'pointer', fontSize: 12 }}>{inventory?.kind === 'remote' ? 'Choose another source' : 'Choose another folder'}</button>}
         </div>
       </div>
     </div>
@@ -452,7 +465,7 @@ function SealedStage({ session, state, onRenderDataset, onLeave, error, setError
         </div>
         {error && <div style={{ gridColumn: '1 / -1', padding: 10, whiteSpace: 'pre-wrap', color: colors.danger, fontSize: 11, border: `1px solid ${alpha(colors.danger, 0.4)}`, borderRadius: 8 }}>{error}</div>}
         <div style={{ gridColumn: '1 / -1', textAlign: 'center', fontSize: 12 }}>
-          <button onClick={() => { session.revoke(); onLeave?.() }} style={{ background: 'none', border: 0, padding: 0, color: colors.accentBlue, textDecoration: 'underline', cursor: 'pointer', fontSize: 12 }}>Teach another folder</button>
+          <button onClick={() => { session.revoke(); onLeave?.() }} style={{ background: 'none', border: 0, padding: 0, color: colors.accentBlue, textDecoration: 'underline', cursor: 'pointer', fontSize: 12 }}>{session.getInventory()?.kind === 'remote' ? 'Teach another source' : 'Teach another folder'}</button>
         </div>
       </div>
     </div>

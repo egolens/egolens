@@ -135,6 +135,8 @@ export class VerifiedSourceCacheV1 {
 export interface RemoteByteSourceOptionsV1 {
   readonly rootUrl: string
   readonly catalog: unknown
+  /** Use verified whole files when a host cannot expose Content-Range to browsers. */
+  readonly preferFullObjects?: boolean
   readonly expectedCatalogHash?: string
   readonly expectedSourceManifestHash?: string
   readonly fetch?: typeof fetch
@@ -360,6 +362,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
   readonly #limits: RemoteByteSourceLimitsV1
   readonly #cache: VerifiedSourceCacheV1
   readonly #ownsCache: boolean
+  readonly #preferFullObjects: boolean
   readonly #credentials: RequestCredentials
   readonly #requests = new Set<AbortController>()
   #responseBytes = 0
@@ -389,6 +392,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
     this.#limits = checkedLimits(options.limits)
     this.#cache = options.cache ?? new VerifiedSourceCacheV1(this.#limits.maxCacheBytes)
     this.#ownsCache = options.cache === undefined
+    this.#preferFullObjects = options.preferFullObjects ?? false
     this.#credentials = credentialsForGrant(this.#root, options.credentialGrant)
   }
 
@@ -420,10 +424,10 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
     const controller = request.controller
     try {
       if (controller.signal.aborted) throw abortError('Remote source request was aborted.')
-      if (start === 0 && end === entry.size) {
+      if ((start === 0 && end === entry.size) || (this.#preferFullObjects && start !== end)) {
         const bytes = await this.#readFull(entry, controller.signal)
         if (controller.signal.aborted) throw abortError('Remote source request was aborted.')
-        return bytes.slice().buffer
+        return bytes.slice(start, end).buffer
       }
       if (start === end) return new ArrayBuffer(0)
       const bytes = entry.chunks

@@ -39,9 +39,12 @@ import ErrorBoundary from './components/ErrorBoundary'
 import MemoryOverlay from './components/MemoryOverlay'
 import SearchableSelect, { type SelectItem } from './components/SearchableSelect'
 import TeachableLensPanel from './components/TeachableLens/TeachableLensPanel'
+import AdapterEntryDialog, { type AdapterEntryRequest } from './components/TeachableLens/AdapterEntryDialog'
+import OtherFormatsChip from './components/TeachableLens/OtherFormatsChip'
+import HostedTeachingPreset from './components/TeachableLens/HostedTeachingPreset'
+import { inferInitialSensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
 import { teachableAuthoringSession } from './teachable/authoring/browserSession'
 import { registerTeachableWebMcpToolsV1 } from './teachable/authoring/webMcp'
-import { inferSensorConfigurationV1 } from './teachable/authoring/sensorConfiguration'
 import type { SourceInventoryV1 } from './teachable/authoring/SourceInventory'
 import type { FinalizedArtifactRecordV1 } from './teachable/authoring/persistence'
 import type { EgoLensAdapterRecipeV1 } from './teachable/recipe/types'
@@ -808,6 +811,16 @@ function App() {
   // human tests toggles, cameras, and playback on the actual rendering.
   const authoringDocked = !isEmbed && !showDropZone && status === 'ready' && authoringState.phase === 'review'
   const [savedRecipes, setSavedRecipes] = useState<readonly FinalizedArtifactRecordV1[]>([])
+  const [adapterEntry, setAdapterEntry] = useState<AdapterEntryRequest | null>(null)
+  const startTeaching = (inventory: SourceInventoryV1, matches: readonly FinalizedArtifactRecordV1[] = []) => {
+    teachableAuthoringSession.start(inventory, {
+      sensorConfiguration: inferInitialSensorConfigurationV1(inventory.snapshot()),
+    })
+    // Sample re-entry preserves recognition. Explicit AI creation omits matches
+    // so it still starts fresh when the person asks to make another adapter.
+    setSavedRecipes(matches)
+    setAdapterEntry(null)
+  }
   // After Finalize the sealed screen takes over the stage until the person
   // chooses "Render this dataset"; the loaded scene stays in the store.
   const [renderedSealHash, setRenderedSealHash] = useState<string | null>(null)
@@ -862,7 +875,7 @@ function App() {
         ) : showDropZone && !isEmbed ? (
           showTeachableLens
             ? <TeachableLensPanel onRenderDataset={renderAuthored} savedRecipes={savedRecipes} onLeave={leaveAuthoring} />
-            : <DropZone onFilesLoaded={loadFromFiles} onSavedRecipes={setSavedRecipes} />
+            : <DropZone onFilesLoaded={loadFromFiles} onAdapterEntry={setAdapterEntry} onTeach={startTeaching} adapterEntryOpen={!!adapterEntry} />
         ) : (
           <>
             {authoringDocked ? (
@@ -878,6 +891,24 @@ function App() {
               </div>
             )}
           </>
+        )}
+        {adapterEntry && !isEmbed && (
+          <AdapterEntryDialog
+            request={adapterEntry}
+            onClose={() => setAdapterEntry(null)}
+            onTeach={(request) => startTeaching(request.inventory)}
+            onRender={async (inventory, recipe) => {
+              const { actions } = useSceneStore.getState()
+              await actions.loadAuthoredScene(inventory, recipe)
+              const result = useSceneStore.getState()
+              if (result.status !== 'ready') {
+                const message = result.error ?? 'The dataset could not be opened with this adapter.'
+                actions.reset()
+                actions.setAvailableSegments([])
+                throw new Error(message)
+              }
+            }}
+          />
         )}
       </main>
 
@@ -946,7 +977,7 @@ function Header() {
       ? (status === 'ready' ? 'sealed' : `${authoring.currentArtifact?.identity.name ?? 'recipe'} · sealed`)
       : authoring.currentArtifact
         ? (status === 'ready' ? `revision #${authoring.revisionCount}` : `${authoring.currentArtifact.identity.name} · revision #${authoring.revisionCount}`)
-        : (() => { const named = authoring.sensorConfiguration?.datasetName?.trim(); const label = named || 'unknown folder'; return authoring.agentEngaged ? `${label} · teaching` : label })()
+        : (() => { const named = authoring.sensorConfiguration?.datasetName?.trim(); const label = named || (teachableAuthoringSession.getInventory()?.kind === 'remote' ? 'hosted source' : 'unknown folder'); return authoring.agentEngaged ? `${label} · teaching` : label })()
   const showEditRecipe = status === 'ready' && authoredScene !== null && (authoring.phase === 'idle' || authoring.phase === 'finalized' || authoring.phase === 'revoked')
   const editRecipe = () => {
     const scene = useSceneStore.getState().actions.authoredScene()
@@ -1416,8 +1447,10 @@ function ThemeToggle({ isMobile }: { isMobile: boolean }) {
   )
 }
 
-function DropZone({ onFilesLoaded, onSavedRecipes }: {
-  onSavedRecipes?: (records: readonly FinalizedArtifactRecordV1[]) => void
+function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: {
+  onAdapterEntry: (request: AdapterEntryRequest) => void
+  onTeach: (inventory: SourceInventoryV1, savedRecipes: readonly FinalizedArtifactRecordV1[]) => void
+  adapterEntryOpen: boolean
   onFilesLoaded: (
     segments: Map<string, Map<string, File>>,
     countedRecipe?: CompiledRecipeV1,
@@ -1557,14 +1590,10 @@ function DropZone({ onFilesLoaded, onSavedRecipes }: {
       // do I drop?" twice against a 2 TB tree. Name what we saw instead.
       if (rejection) trackFolderRejected(rejection)
       if (inventory && inventory.snapshot().entries.length > 0) {
-        // Authoring starts only after the human confirms the sensor layout, so
-        // an agent cannot quietly collapse six cameras into none.
-        // Recipes finalized earlier in this browser for the same layout render without authoring.
+        // Preserve the selected files while the person chooses reuse or teaching.
+        // Merely dropping an unfamiliar folder does not start an agent session.
         const saved = await teachableAuthoringSession.findSavedRecipes(inventory).catch(() => [] as readonly FinalizedArtifactRecordV1[])
-        onSavedRecipes?.(saved)
-        // Teaching starts on the agent's first tool call; the detected layout is
-        // the contract until the person edits it on the P0 screen.
-        teachableAuthoringSession.start(inventory, { sensorConfiguration: inferSensorConfigurationV1(inventory.snapshot()) })
+        onAdapterEntry({ mode: 'choose', inventory, savedRecipes: saved })
         setError(null)
         setScanning(false)
         return
@@ -1594,7 +1623,7 @@ function DropZone({ onFilesLoaded, onSavedRecipes }: {
     }
     setError(null)
     await finishCountedLoad(new Map(valid))
-  }, [onFilesLoaded])
+  }, [onFilesLoaded, onAdapterEntry])
 
   const onDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
@@ -1695,7 +1724,8 @@ function DropZone({ onFilesLoaded, onSavedRecipes }: {
 
       {/* Intro */}
       <div style={{
-        maxWidth: '520px',
+        width: '100%',
+        maxWidth: '680px',
         textAlign: 'center',
         display: 'flex',
         flexDirection: 'column',
@@ -1720,7 +1750,7 @@ function DropZone({ onFilesLoaded, onSavedRecipes }: {
             : <>Visualize point clouds, cameras, and 3D annotations in your browser<br />— straight from the most widely used autonomous driving datasets.<br />No conversion, no preprocessing.</>
           }
         </div>
-        {/* Dataset badges — outlined, info only */}
+        {/* Dataset links and an entry for other formats */}
         <div style={{
           display: 'flex',
           gap: '8px',
@@ -1759,10 +1789,11 @@ function DropZone({ onFilesLoaded, onSavedRecipes }: {
               {label}
             </a>
           ))}
+          <OtherFormatsChip onClick={() => onAdapterEntry({ mode: 'choose' })} disabled={scanning || urlLoading} />
         </div>
 
         {/* Quick start — try with hosted data */}
-        <div style={{ display: 'flex', gap: isMobile ? '8px' : '10px', flexWrap: isMobile ? 'nowrap' : 'wrap', justifyContent: 'center', marginTop: '8px', width: '100%' }}>
+        <div className="landing-presets">
           {PRESETS.map((preset) => {
             // Active when the URL form holds the card URL or any of its split URLs
             const isActive = urlDataset === preset.dataset
@@ -1822,6 +1853,7 @@ function DropZone({ onFilesLoaded, onSavedRecipes }: {
               </button>
             )
           })}
+          <HostedTeachingPreset onTeach={onTeach} disabled={scanning || urlLoading || adapterEntryOpen} />
         </div>
       </div>
 

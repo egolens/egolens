@@ -6,8 +6,8 @@ export type SensorModalityV1 = RecipeSensorV1['modality']
 export const SENSOR_MODALITIES_V1: readonly SensorModalityV1[] = Object.freeze(['lidar', 'radar', 'camera'])
 
 /**
- * The sensor layout the human confirms before authoring starts: how many
- * sensors of each modality the recipe must declare. A recipe that collapses
+ * The expected sensor layout, inferred at entry or edited by the person:
+ * how many sensors of each modality the recipe must declare. A recipe that collapses
  * five cameras into one still validates every capability, so the counts are
  * the only public statement of the expected layout.
  */
@@ -116,6 +116,13 @@ export function inferSensorConfigurationV1(snapshot: SourceInventorySnapshotV1):
     ...(cameraDirectories.size > 0 ? { camera: unique(cameraDirectories) } : {}),
   }
   return { lidar: lidarDirectories.size, radar: radarDirectories.size, camera: cameraDirectories.size, ...(Object.keys(names).length > 0 ? { names } : {}) }
+}
+
+/** Missing or unusable directory hints must not block entry into authoring. */
+export function inferInitialSensorConfigurationV1(snapshot: SourceInventorySnapshotV1): SensorConfigurationV1 | null {
+  const inferred = inferSensorConfigurationV1(snapshot)
+  try { return assertValidSensorConfigurationV1(inferred) }
+  catch { return null }
 }
 
 export function declaredSensorSummaryV1(recipe: Pick<EgoLensAdapterRecipeV1, 'scene'> | null): readonly DeclaredSensorSummaryV1[] {

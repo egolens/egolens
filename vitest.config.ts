@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  esbuild: { jsx: 'automatic' },
   test: {
     // Use threads instead of forks to avoid worker termination timeouts
     pool: 'threads',

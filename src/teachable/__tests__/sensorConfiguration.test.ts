@@ -9,6 +9,7 @@ import {
   assertValidSensorConfigurationV1,
   declaredSensorSummaryV1,
   inferSensorConfigurationV1,
+  inferInitialSensorConfigurationV1,
   sensorConfigurationDiagnosticsV1,
 } from '../authoring/sensorConfiguration'
 import { assertValidRecipeV1 } from '../schema/validateSchema'
@@ -23,6 +24,20 @@ const sensor = (id: string, modality: 'lidar' | 'radar' | 'camera') => ({
 })
 
 describe('sensor configuration', () => {
+  it.each([
+    { paths: ['lidar/front/000001.bin', 'camera/front/000001.jpg'], expected: { lidar: 1, radar: 0, camera: 1, names: { lidar: ['front'], camera: ['front'] } } },
+    { paths: ['lidar/segment.parquet', 'camera_image/segment.parquet'], expected: null },
+    { paths: Array.from({ length: 65 }, (_, index) => `camera/cam_${index}/000001.jpg`), expected: null },
+  ])('enters authoring directly with usable defaults, leaving uncertain layouts editable ($paths.length files)', ({ paths, expected }) => {
+    const session = new TeachableAuthoringSessionV1({ prepare: vi.fn() })
+    const inventory = inventoryOf(paths)
+    session.start(inventory, { sensorConfiguration: inferInitialSensorConfigurationV1(inventory.snapshot()) })
+    expect(session.getState().phase).toBe('inspecting')
+    expect(session.getState().sensorConfiguration).toEqual(expected)
+    expect(session.getInventory()).toBe(inventory)
+    expect(inventory.revoked).toBe(false)
+  })
+
   it('infers one sensor per image directory and per named point stream', () => {
     const nuscenes = inventoryOf([
       'v1.0-mini/sensor.json',

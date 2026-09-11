@@ -1,0 +1,109 @@
+.other-formats-chip { position: relative; display: inline-flex; }
+.other-formats-chip > button {
+  padding: 3px 10px;
+  border: 1px dotted var(--el-text-secondary);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--el-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.other-formats-chip > button:hover { color: var(--el-text-primary); border-color: var(--el-text-primary); }
+.other-formats-chip > button:disabled { opacity: 0.45; cursor: not-allowed; }
+.other-formats-chip > button:focus-visible { outline: 2px solid var(--el-accent); outline-offset: 3px; }
+.other-formats-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 2;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(230px, calc(100vw - 48px));
+  padding-top: 8px;
+  text-align: center;
+}
+.other-formats-tooltip > span {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--el-border);
+  border-radius: 6px;
+  background: var(--el-bg-overlay);
+  color: var(--el-text-primary);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  box-shadow: 0 4px 12px var(--el-shadow-ink);
+}
+.other-formats-chip:not([data-tooltip-dismissed="true"]):focus-within .other-formats-tooltip { display: block; }
+@media (hover: hover) {
+  .other-formats-chip:not([data-tooltip-dismissed="true"]):hover .other-formats-tooltip { display: block; }
+}
+.adapter-entry-options { display: flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 10px; }
+.adapter-entry-options > div { flex: 1; min-width: 190px; }
+.adapter-entry-options button { width: 100%; }
+.adapter-entry-options p { color: var(--el-text-secondary); font-size: 11px; margin: 6px 0 0; line-height: 1.5; }
+.adapter-dialog {
+  box-sizing: border-box;
+  width: min(580px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 24px;
+  border: 1px solid var(--el-border);
+  border-radius: 14px;
+  background: var(--el-bg-base);
+  color: var(--el-text-primary);
+  font: inherit;
+  font-size: 13px;
+  overflow-y: auto;
+}
+.adapter-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.adapter-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.adapter-dialog h2 { font-size: 19px; margin: 0; }
+.adapter-dialog h3 { font-size: 13px; }
+.adapter-dialog p { color: var(--el-text-secondary); line-height: 1.65; }
+.adapter-dialog button:disabled { cursor: not-allowed !important; opacity: 0.45; }
+.adapter-dialog button:focus-visible { outline: 2px solid var(--el-accent); outline-offset: 3px; }
+.adapter-text-button { padding: 8px 0; border: 0; background: transparent; color: var(--el-accent-blue); font: inherit; cursor: pointer; text-align: left; }
+.adapter-input-methods { display: flex; gap: 8px; margin: 16px 0 12px; }
+.adapter-input-methods button[aria-pressed="true"] { border-color: var(--el-accent) !important; }
+.adapter-url-form { display: grid; gap: 10px; }
+.adapter-url-form label { display: grid; gap: 6px; font-size: 12px; }
+.adapter-url-form input { min-width: 0; padding: 10px; border: 1px solid var(--el-border); border-radius: 6px; background: var(--el-bg-surface); color: var(--el-text-primary); font: inherit; }
+.adapter-url-form p { font-size: 11px; margin: 0; }
+.adapter-advanced-options summary { cursor: pointer; color: var(--el-text-secondary); font-size: 12px; }
+.adapter-advanced-options summary:focus-visible { outline: 2px solid var(--el-accent); outline-offset: 3px; }
+.adapter-advanced-options label { margin: 10px 0 6px; }
+.adapter-source-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; margin: 16px 0; background: var(--el-bg-surface); border-radius: 8px; }
+.adapter-source-summary > div { min-width: 0; overflow-wrap: anywhere; }
+.adapter-source-summary button { flex-shrink: 0; }
+.adapter-source-summary p { margin: 4px 0 0; font-size: 11px; }
+.adapter-recipe-summary, .adapter-folder-step { padding: 12px 0; overflow-wrap: anywhere; }
+.adapter-recipe-summary p { margin: 4px 0; font-size: 11px; }
+.adapter-saved { border-top: 1px solid var(--el-border); margin-top: 20px; padding-top: 6px; }
+.adapter-error { color: var(--el-danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.adapter-dialog .adapter-error { color: var(--el-danger); }
+.landing-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 10px; margin-top: 8px; width: 100%; }
+.hosted-teaching-preset { min-width: 0; font-size: 11px; line-height: 1.5; }
+.hosted-teaching-button { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; padding: 10px 12px; border: 1px solid var(--el-border); border-radius: 8px; background: var(--el-bg-overlay); color: var(--el-text-primary); font: inherit; font-size: 13px; font-weight: 600; line-height: normal; cursor: pointer; }
+.hosted-teaching-button > span { color: var(--el-text-dim); font-size: 10px; font-weight: 400; }
+.hosted-teaching-button:hover:not(:disabled) { border-color: var(--el-accent); background: color-mix(in srgb, var(--el-accent) 8%, var(--el-bg-overlay)); }
+.hosted-teaching-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.hosted-teaching-preset p { margin: 8px 0 0; }
+.hosted-teaching-preset a { color: var(--el-accent-blue); text-underline-offset: 2px; }
+.hosted-teaching-local, .hosted-teaching-agent { color: var(--el-text-secondary); }
+.hosted-teaching-credit { color: var(--el-text-dim); font-size: 10px; }
+.hosted-teaching-preset :is(button, a):focus-visible, .hosted-teaching-agent:focus { outline: 2px solid var(--el-accent); outline-offset: 3px; border-radius: 4px; }
+.hosted-teaching-cancel { font-size: 11px; padding: 6px 0 0; }
+@media (max-width: 640px) {
+  .landing-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .landing-presets > button { min-width: 0 !important; }
+  .hosted-teaching-preset { grid-column: 1 / -1; }
+  .hosted-teaching-button { padding: 8px 12px; font-size: 12px; }
+}
+@media (max-width: 480px) {
+  .adapter-dialog { padding: 18px; }
+  .adapter-entry-options { gap: 10px; }
+  .adapter-source-summary { flex-wrap: wrap; }
+}

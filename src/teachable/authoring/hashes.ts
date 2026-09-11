@@ -130,12 +130,22 @@ export async function verifySuppliedHashesV1(
   inventory: SourceInventoryV1,
   signal?: AbortSignal,
 ): Promise<readonly string[]> {
+  const errors = [...await verifyArtifactHashesV1(recipe, signal)]
+  if (recipe.hashes?.formatFingerprint && recipe.hashes.formatFingerprint !== await formatFingerprintV1(recipe, inventory)) errors.push('FORMAT_FINGERPRINT_MISMATCH')
+  if (signal?.aborted) throw new DOMException('Hash verification was aborted.', 'AbortError')
+  return errors
+}
+
+/** Checks portable artifact identity before the recipient selects any data. */
+export async function verifyArtifactHashesV1(
+  recipe: EgoLensAdapterRecipeV1,
+  signal?: AbortSignal,
+): Promise<readonly string[]> {
   const errors: string[] = []
   const supplied = recipe.hashes
   if (!supplied) return errors
   if (supplied.recipeHash && supplied.recipeHash !== await recipeHashV1(recipe)) errors.push('RECIPE_HASH_MISMATCH')
   if (supplied.operatorSetFingerprint && supplied.operatorSetFingerprint !== await operatorSetFingerprintV1(recipe.engine.requiredOperators)) errors.push('OPERATOR_SET_FINGERPRINT_MISMATCH')
-  if (supplied.formatFingerprint && supplied.formatFingerprint !== await formatFingerprintV1(recipe, inventory)) errors.push('FORMAT_FINGERPRINT_MISMATCH')
   if (supplied.artifactHash && supplied.artifactHash !== await artifactHashV1(recipe)) errors.push('ARTIFACT_HASH_MISMATCH')
   if (signal?.aborted) throw new DOMException('Hash verification was aborted.', 'AbortError')
   return errors

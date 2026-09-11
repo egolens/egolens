@@ -1,4 +1,4 @@
-import { recipeHashV1 } from '../authoring/hashes'
+import { recipeHashV1, verifyArtifactHashesV1 } from '../authoring/hashes'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import type { OperatorRegistry } from '../operators/registry'
 import { compileRecipeV1, type CompiledRecipeV1 } from '../recipe/compiler'
@@ -168,8 +168,8 @@ export interface FetchRemoteRecipeOptionsV1 {
 }
 
 /**
- * Fetch a recipe artifact and pass it through the exact local-import schema,
- * semantic compiler, registered dependency boundary, and semantic hash gate.
+ * Fetch a pinned recipe for portable sharing. The expected identity remains
+ * mandatory here; ordinary imports use fetchRemoteRecipeForImportV1 instead.
  */
 export async function fetchRemoteRecipeV1(
   rawUrl: string,
@@ -179,13 +179,34 @@ export async function fetchRemoteRecipeV1(
   if (!SHA256.test(expectedRecipeHash)) {
     throw new RemoteRecipeErrorV1('REMOTE_RECIPE_HASH_MISMATCH', 'Expected recipeHash must be lowercase sha256.')
   }
+  return fetchRecipeArtifactV1(rawUrl, expectedRecipeHash, options)
+}
+
+/** Import the current URL contents, optionally pinning a known recipe version. */
+export async function fetchRemoteRecipeForImportV1(
+  rawUrl: string,
+  options: FetchRemoteRecipeOptionsV1 & { readonly expectedRecipeHash?: string } = {},
+): Promise<VerifiedRemoteRecipeV1> {
+  if (options.expectedRecipeHash !== undefined) {
+    return fetchRemoteRecipeV1(rawUrl, options.expectedRecipeHash, options)
+  }
+  return fetchRecipeArtifactV1(rawUrl, undefined, options)
+}
+
+async function fetchRecipeArtifactV1(
+  rawUrl: string,
+  expectedRecipeHash: string | undefined,
+  options: FetchRemoteRecipeOptionsV1,
+): Promise<VerifiedRemoteRecipeV1> {
   // Validate the current request before consulting cache. A cached artifact
   // must never make an insecure or credential-bearing reference acceptable.
   const initial = recipeUrl(rawUrl)
   const credentials = credentialsFor(initial, options.credentialGrant)
   const cache = options.cache ?? sharedVerifiedRecipeCacheV1
-  const cached = cache.get(expectedRecipeHash)
-  if (cached) {
+  // A URL alone has no known identity. Fetch its current contents even if a
+  // previous version is cached; only an explicit pin can select from cache.
+  const cached = expectedRecipeHash === undefined ? null : cache.get(expectedRecipeHash)
+  if (cached && expectedRecipeHash !== undefined) {
     // Compilation is intentionally repeated against the caller's current
     // registered operator set. A cache created in a wider environment cannot
     // smuggle an unavailable extension/operator into this one.
@@ -193,6 +214,10 @@ export async function fetchRemoteRecipeV1(
       const compiledRecipe = compileRecipeV1(cached, options.operators ?? bundledPhase2OperatorRegistry)
       if (await recipeHashV1(cached) !== expectedRecipeHash) {
         throw new RemoteRecipeErrorV1('REMOTE_RECIPE_HASH_MISMATCH', 'Cached recipe no longer matches its identity.')
+      }
+      const hashErrors = await verifyArtifactHashesV1(cached, options.signal)
+      if (hashErrors.length) {
+        throw new RemoteRecipeErrorV1('REMOTE_RECIPE_HASH_MISMATCH', `Cached recipe failed its integrity check: ${hashErrors.join(', ')}.`)
       }
       return Object.freeze({ recipeHash: expectedRecipeHash, recipe: cached, compiledRecipe })
     } catch (cause) {
@@ -278,8 +303,12 @@ export async function fetchRemoteRecipeV1(
     })
   }
   const actualRecipeHash = await recipeHashV1(recipe)
-  if (actualRecipeHash !== expectedRecipeHash || (recipe.hashes?.recipeHash && recipe.hashes.recipeHash !== actualRecipeHash)) {
+  if (expectedRecipeHash !== undefined && actualRecipeHash !== expectedRecipeHash) {
     throw new RemoteRecipeErrorV1('REMOTE_RECIPE_HASH_MISMATCH', `Expected ${expectedRecipeHash}, received ${actualRecipeHash}.`, { url: current.href })
+  }
+  const hashErrors = await verifyArtifactHashesV1(recipe, options.signal)
+  if (hashErrors.length) {
+    throw new RemoteRecipeErrorV1('REMOTE_RECIPE_HASH_MISMATCH', `Recipe failed its integrity check: ${hashErrors.join(', ')}.`, { url: current.href })
   }
   const verified = Object.freeze({ recipeHash: actualRecipeHash, recipe: freezeRecipe(recipe), compiledRecipe })
   cache.promote(verified)
