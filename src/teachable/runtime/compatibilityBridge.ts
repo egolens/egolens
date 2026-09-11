@@ -112,6 +112,23 @@ function cameraFlex(width: number, height: number, view: string): number {
   return isFront ? 1 : 0.8
 }
 
+function projectSemanticTaxonomy(taxonomy: NormalizedManifestV1['taxonomies'][number]) {
+  const size = Math.max(taxonomy.palette?.length ?? 0, ...taxonomy.classes.map(entry => entry.rendererId + 1))
+  const palette: [number, number, number][] = Array.from({ length: size }, (_, index) => {
+    const existing = taxonomy.palette?.[index]
+    return existing ? [...existing] as [number, number, number] : [0.5, 0.5, 0.5]
+  })
+  const labels = Array.from({ length: size }, (_, index) => String(index))
+  for (const entry of taxonomy.classes) {
+    labels[entry.rendererId] = entry.label
+    if (!taxonomy.palette?.[entry.rendererId]) {
+      const hex = entry.color.replace('#', '')
+      palette[entry.rendererId] = [0, 2, 4].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255) as [number, number, number]
+    }
+  }
+  return { palette, labels }
+}
+
 export function normalizedManifestToDatasetManifest(
   manifest: NormalizedManifestV1,
   projection: DatasetManifestProjectionV1 = EMPTY_PROJECTION,
@@ -121,6 +138,8 @@ export function normalizedManifestToDatasetManifest(
   const classes = manifest.taxonomies.find((taxonomy) => taxonomy.role === 'objects')?.classes ?? []
   const lidarTaxonomy = manifest.taxonomies.find((taxonomy) => taxonomy.role === 'lidar-semantics')
   const cameraTaxonomy = manifest.taxonomies.find((taxonomy) => taxonomy.role === 'camera-semantics')
+  const lidarSemantics = lidarTaxonomy ? projectSemanticTaxonomy(lidarTaxonomy) : null
+  const cameraSemantics = cameraTaxonomy ? projectSemanticTaxonomy(cameraTaxonomy) : null
   const cameraAliases = Object.fromEntries(cameras.flatMap((sensor) =>
     (sensor.image?.aliases ?? []).map((alias) => [alias, sensor.rendererId] as const),
   ))
@@ -168,13 +187,13 @@ export function normalizedManifestToDatasetManifest(
       ...(manifest.capabilities.has('boxes3d') ? ['bbox3d' as const] : []),
       ...(manifest.capabilities.has('keypoints3d') ? ['keypoints3d' as const] : []),
     ],
-    ...(lidarTaxonomy?.palette ? {
-      semanticPalette: lidarTaxonomy.palette.map((color) => [...color] as [number, number, number]),
-      semanticLabels: lidarTaxonomy.classes.map((entry) => entry.label),
+    ...(lidarSemantics ? {
+      semanticPalette: lidarSemantics.palette,
+      semanticLabels: lidarSemantics.labels,
     } : {}),
-    ...(cameraTaxonomy?.palette ? {
-      cameraSemanticPalette: cameraTaxonomy.palette.map((color) => [...color] as [number, number, number]),
-      cameraSemanticLabels: cameraTaxonomy.classes.map((entry) => entry.label),
+    ...(cameraSemantics ? {
+      cameraSemanticPalette: cameraSemantics.palette,
+      cameraSemanticLabels: cameraSemantics.labels,
     } : {}),
     columnMap: { ...projection.columnMap },
   }

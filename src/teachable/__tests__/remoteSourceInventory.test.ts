@@ -11,7 +11,7 @@ import { compileRecipeV1 } from '../recipe/compiler'
 import { bundledPhase2OperatorRegistry } from '../operators/bundledPhase2'
 import { assertValidRecipeV1 } from '../schema/validateSchema'
 import { generateSourceCatalogV1, sourceCatalogHashV1 } from '../source/SourceCatalog'
-import { RemoteByteSourceV1, VerifiedSourceCacheV1 } from '../source/RemoteByteSource'
+import { RemoteByteSourceV1, SourceCacheV1 } from '../source/RemoteByteSource'
 import minimalJson from '../__fixtures__/minimal.egolens-adapter.json'
 import { remoteTransportFixtureV1 } from './remoteTransportFixture'
 
@@ -98,11 +98,11 @@ describe('whole-file transport for hosts without exposed Range metadata', () => 
     inventory.revoke()
   })
 
-  it('never returns slices from corrupt whole-file responses', async () => {
+  it('returns same-length payloads without content hashing', async () => {
     const f = await fixture()
     const inventory = await openRemoteSourceInventoryV1({ ...f.options, preferFullObjects: true })
     f.request.mockResolvedValueOnce(new Response(new Uint8Array(f.validated.catalog.entries[0].size)))
-    await expect(inventory.readAuthorizedBytes('frames.json', { start: 0, end: 1 })).rejects.toMatchObject({ code: 'REMOTE_DIGEST_MISMATCH' })
+    await expect(inventory.readAuthorizedBytes('frames.json', { start: 0, end: 1 })).resolves.toEqual(new Uint8Array(1).buffer)
     inventory.revoke()
   })
 })
@@ -160,10 +160,11 @@ describe('remote SourceInventoryV1 initialization and metadata', () => {
     inventory.revoke()
   })
 
-  it('rejects absent pins, mismatched pins, invalid catalogs, and catalog byte overruns', async () => {
+  it('accepts unpinned catalogs but rejects mismatched pins, invalid catalogs, and byte overruns', async () => {
     const f = await fixture()
-    await expect(sourceInventoryFromRemoteV1({ ...f.options, expectedCatalogHash: '' })).rejects.toMatchObject({ code: 'REMOTE_CATALOG_INVALID' })
-    expect(f.request).not.toHaveBeenCalled()
+    const unpinned = await sourceInventoryFromRemoteV1({ ...f.options, expectedCatalogHash: undefined })
+    expect(unpinned.kind).toBe('remote')
+    unpinned.revoke()
     await expect(sourceInventoryFromRemoteV1({ ...f.options, expectedCatalogHash: `sha256:${'0'.repeat(64)}` })).rejects.toMatchObject({ code: 'REMOTE_CATALOG_INVALID' })
     await expect(sourceInventoryFromRemoteV1({ ...f.options, expectedSourceManifestHash: `sha256:${'0'.repeat(64)}` })).rejects.toMatchObject({ code: 'REMOTE_CATALOG_INVALID' })
     const invalid = { ...f.validated.catalog, entries: [{ ...f.validated.catalog.entries[0], path: '../escape.json' }] }
@@ -218,13 +219,13 @@ describe('remote inventory reads, bounds, and revocation', () => {
     inventory.revoke()
   })
 
-  it('rejects unverified bytes and preserves configured transport limits', async () => {
+  it('caches downloaded bytes and preserves configured transport limits', async () => {
     const f = await fixture()
     const inventory = await sourceInventoryFromRemoteV1(f.options)
     const size = inventory.entry('frames.json')!.size
     f.request.mockResolvedValueOnce(new Response(new Uint8Array(size).buffer))
-    await expect(inventory.readAuthorizedBytes('frames.json')).rejects.toMatchObject({ code: 'REMOTE_DIGEST_MISMATCH' })
-    await expect(inventory.readAuthorizedBytes('frames.json')).resolves.toEqual(await f.local.readAuthorizedBytes('frames.json'))
+    await expect(inventory.readAuthorizedBytes('frames.json')).resolves.toEqual(new Uint8Array(size).buffer)
+    await expect(inventory.readAuthorizedBytes('frames.json')).resolves.toEqual(new Uint8Array(size).buffer)
     inventory.revoke()
 
     const limited = await sourceInventoryFromRemoteV1({ ...f.options, limits: { maxFullObjectBytes: 1 } })
@@ -259,7 +260,7 @@ describe('remote inventory reads, bounds, and revocation', () => {
     const source = inventory.resolveAuthorizedSource()
     const buffer = await source.asyncBuffer('pending.bin')
     await source.read('cached.bin')
-    const clear = vi.spyOn(VerifiedSourceCacheV1.prototype, 'clear')
+    const clear = vi.spyOn(SourceCacheV1.prototype, 'clear')
     const signals: AbortSignal[] = []
     f.request.mockImplementation(async (_input, init) => {
       signals.push(init!.signal!)
@@ -273,8 +274,8 @@ describe('remote inventory reads, bounds, and revocation', () => {
     await Promise.all(rejected)
     expect(signals.every((signal) => signal.aborted)).toBe(true)
     expect(clear).toHaveBeenCalledTimes(1)
-    expect(clear.mock.contexts[0]).toBeInstanceOf(VerifiedSourceCacheV1)
-    expect((clear.mock.contexts[0] as VerifiedSourceCacheV1).sizeBytes).toBe(0)
+    expect(clear.mock.contexts[0]).toBeInstanceOf(SourceCacheV1)
+    expect((clear.mock.contexts[0] as SourceCacheV1).sizeBytes).toBe(0)
     expect(inventory.kind).toBe('remote')
     expect(inventory.snapshot()).toEqual({ sessionId: f.local.sessionId, entries: [], revoked: true, truncated: false })
     expect(() => inventory.paths()).toThrow(/SOURCE_INVENTORY_REVOKED/u)

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -70,51 +70,51 @@
 </head>
 <body>
 
-<h1>Memory Analysis: 실측 vs 예측</h1>
-<p class="sub">실제 <code class="code">performance.memory</code> 측정 결과와 코드 분석 기반 예측 비교 · Segment: 10455472356147194054</p>
+<h1>Memory Analysis: Measured vs. Predicted</h1>
+<p class="sub">Actual <code class="code">performance.memory</code> measurements compared with predictions from code analysis · Segment: 10455472356147194054</p>
 
 <!-- ============================================================ -->
 <!-- Summary Cards -->
 <!-- ============================================================ -->
 <div class="cards">
   <div class="card bad">
-    <div class="label">실측 Steady-State</div>
+    <div class="label">Measured Steady State</div>
     <div class="val">3.29 GB</div>
-    <div class="note">예측 890 MB → <strong style="color:#ef4444">3.7× 오차</strong></div>
+    <div class="note">Predicted 890 MB → <strong style="color:#ef4444">3.7× error</strong></div>
   </div>
   <div class="card bad">
-    <div class="label">LiDAR Cache 실측</div>
+    <div class="label">Measured LiDAR Cache</div>
     <div class="val">2.87 GB</div>
-    <div class="note">예측 500 MB → <strong style="color:#ef4444">5.7× 오차</strong></div>
+    <div class="note">Predicted 500 MB → <strong style="color:#ef4444">5.7× error</strong></div>
   </div>
   <div class="card ok">
-    <div class="label">Camera Cache 실측</div>
+    <div class="label">Measured Camera Cache</div>
     <div class="val">309.8 MB</div>
-    <div class="note">예측 300 MB → <strong style="color:#10b981">1.03×</strong></div>
+    <div class="note">Predicted 300 MB → <strong style="color:#10b981">1.03×</strong></div>
   </div>
   <div class="card warn">
-    <div class="label">Buffer 낭비율</div>
+    <div class="label">Buffer Waste</div>
     <div class="val">73%</div>
-    <div class="note">유효 데이터 802 MB / 할당 2,959 MB</div>
+    <div class="note">802 MB valid / 2,959 MB allocated</div>
   </div>
 </div>
 
 <!-- ============================================================ -->
 <!-- Finding 1: The Big Surprise -->
 <!-- ============================================================ -->
-<h2>🔴 발견 1: subarray().buffer 가 2.16 GB를 낭비하고 있다</h2>
+<h2>🔴 Finding 1: subarray().buffer wastes 2.16 GB</h2>
 
 <div class="insight critical">
-  <strong>핵심 원인:</strong> <code class="code">convertRangeImageToPointCloud()</code>에서
-  <code class="code">new Float32Array(maxPoints × POINT_STRIDE)</code>로 최대 크기를 할당한 후
-  <code class="code">output.subarray(0, pointCount × POINT_STRIDE)</code>로 유효 부분만 참조하지만,
-  <code class="code">cloud.positions.buffer</code>로 transfer할 때 <strong>전체 underlying ArrayBuffer가 전송</strong>된다.
-  빈 픽셀(range=0)이 차지하는 공간이 그대로 메모리에 남는다.
+  <strong>Root cause:</strong> In <code class="code">convertRangeImageToPointCloud()</code>,
+  <code class="code">new Float32Array(maxPoints × POINT_STRIDE)</code> allocates the maximum capacity, then
+  <code class="code">output.subarray(0, pointCount × POINT_STRIDE)</code> references only the valid portion, but
+  when transferring <code class="code">cloud.positions.buffer</code>, <strong>the entire underlying ArrayBuffer is transferred</strong>.
+  Memory allocated for empty pixels (range=0) remains retained.
 </div>
 
 <div class="bar-chart">
   <div class="bar-row">
-    <div class="bar-label">유효 데이터 (168K pts)</div>
+    <div class="bar-label">Valid data (168K pts)</div>
     <div class="bar-track">
       <div class="bar-fill" style="width:27%; background:linear-gradient(135deg,#10b981,#059669)">
         802 MB (27%)
@@ -122,15 +122,15 @@
     </div>
   </div>
   <div class="bar-row">
-    <div class="bar-label">빈 픽셀 (range=0)</div>
+    <div class="bar-label">Empty pixels (range=0)</div>
     <div class="bar-track">
       <div class="bar-fill" style="width:73%; background:linear-gradient(135deg,#ef4444,#dc2626)">
-        2,157 MB 낭비 (73%)
+        2,157 MB wasted (73%)
       </div>
     </div>
   </div>
   <div class="bar-row">
-    <div class="bar-label">전체 할당</div>
+    <div class="bar-label">Total allocation</div>
     <div class="bar-track">
       <div class="bar-fill" style="width:100%; background:linear-gradient(135deg,#333,#222)">
         2,959 MB total (199 frames × 5 sensors × maxPoints buffer)
@@ -140,7 +140,7 @@
 </div>
 
 <table>
-  <tr><th>센서</th><th>Range Image</th><th>maxPoints</th><th>Buffer/frame</th><th>Valid pts (추정)</th><th>Valid/frame</th><th>낭비율</th></tr>
+  <tr><th>Sensor</th><th>Range Image</th><th>maxPoints</th><th>Buffer/frame</th><th>Valid pts (estimated)</th><th>Valid/frame</th><th>Waste</th></tr>
   <tr>
     <td>TOP (1)</td>
     <td>64 × 2650</td>
@@ -183,111 +183,111 @@
     <td class="v yellow">~85%</td>
   </tr>
   <tr style="background:#14141e; font-weight:700">
-    <td colspan="3">합계 (per frame)</td>
+    <td colspan="3">Total (per frame)</td>
     <td class="v red">~14.0 MB</td>
     <td></td>
     <td class="v green">~3.85 MB</td>
     <td class="v yellow">73%</td>
   </tr>
 </table>
-<p style="font-size:11px; color:#555">* 비-TOP 센서의 정확한 shape은 실행 시 확인 필요. 실측 평균 2.65 MB/buffer에서 역산.</p>
+<p style="font-size:11px; color:#555">* Exact non-TOP sensor shapes require runtime verification. Estimated from the measured average of 2.65 MB/buffer.</p>
 
 <div class="insight warn">
-  <strong>수정 방법 (1줄):</strong> <code class="code">rangeImage.ts</code>의 return 직전에 trimmed copy 생성:<br>
+  <strong>One-line fix:</strong> <code class="code">rangeImage.ts</code>: create a trimmed copy just before returning:<br>
   <code class="code">const trimmed = new Float32Array(output.buffer, 0, pointCount * POINT_STRIDE)</code> →
   <code class="code">const trimmed = output.slice(0, pointCount * POINT_STRIDE)</code><br>
-  이렇게 하면 <strong>2.16 GB → 0</strong> 낭비 제거. Steady-state: 3.29 GB → ~1.1 GB 예상.
+  This reduces wasted memory from <strong>2.16 GB → 0</strong>. Expected steady state: 3.29 GB → ~1.1 GB.
 </div>
 
 <!-- ============================================================ -->
 <!-- Finding 2: Worker performance.memory = 0 -->
 <!-- ============================================================ -->
-<h2>⚠️ 발견 2: Worker에서 performance.memory가 동작하지 않음</h2>
+<h2>⚠️ Finding 2: performance.memory does not work in workers</h2>
 
 <div class="insight warn">
-  <strong>모든 Worker 스냅샷이 0 B를 보고.</strong>
-  <code class="code">performance.memory</code>는 Chrome의 main thread 전용 API.
-  Web Worker에서는 <code class="code">undefined</code>를 반환하여 0으로 fallback된다.
-  Worker의 실제 메모리(BROTLI 해제 중 ~100-160 MB/worker)는 측정 불가.
+  <strong>All worker snapshots report 0 B.</strong>
+  <code class="code">performance.memory</code> is a Chrome API available only on the main thread.
+  In a Web Worker, it returns <code class="code">undefined</code>, falling back to 0.
+  Actual worker memory (~100–160 MB/worker during BROTLI decompression) cannot be measured with this API.
 </div>
 
 <table>
-  <tr><th>대안</th><th>방법</th><th>정확도</th></tr>
+  <tr><th>Alternative</th><th>Method</th><th>Accuracy</th></tr>
   <tr>
     <td><strong>crossOriginIsolated + measureUserAgentSpecificMemory()</strong></td>
-    <td>COOP/COEP 헤더 설정 후 비동기 API 사용 (전체 프로세스 메모리)</td>
-    <td class="v green">높음 (Workers 포함)</td>
+    <td>Set COOP/COEP headers and use the asynchronous API (total process memory)</td>
+    <td class="v green">High (includes workers)</td>
   </tr>
   <tr>
     <td><strong>Chrome DevTools Performance Monitor</strong></td>
     <td>DevTools → Performance Monitor → JS Heap Size</td>
-    <td class="v green">높음</td>
+    <td class="v green">High</td>
   </tr>
   <tr>
-    <td><strong>data size 역산</strong></td>
-    <td>Worker가 처리한 데이터 크기(이미 로깅됨)로 메모리 추정</td>
-    <td class="v yellow">중간</td>
+    <td><strong>Estimate from data size</strong></td>
+    <td>Estimate memory from processed data sizes (already logged)</td>
+    <td class="v yellow">Medium</td>
   </tr>
 </table>
 
 <!-- ============================================================ -->
 <!-- Finding 3: Timing analysis -->
 <!-- ============================================================ -->
-<h2>🟢 발견 3: 타이밍 프로파일 정확성</h2>
+<h2>🟢 Finding 3: timing profile accuracy</h2>
 
 <table>
-  <tr><th>Phase</th><th>Heap Used</th><th>Delta</th><th>실측 시간</th><th>분석</th></tr>
+  <tr><th>Phase</th><th>Heap Used</th><th>Delta</th><th>Measured time</th><th>Analysis</th></tr>
   <tr>
     <td>pipeline:start</td>
     <td class="v">3.37 GB *</td>
     <td class="dim">—</td>
     <td>0s</td>
-    <td>이전 세그먼트 잔여 데이터 (GC 전)</td>
+    <td>Previous segment data remaining before GC</td>
   </tr>
   <tr>
     <td>phase1:footers</td>
     <td class="v">3.37 GB</td>
     <td class="v dim">+0</td>
     <td>~240ms</td>
-    <td class="green">예측 정확 — footer만 읽어 메모리 변화 없음</td>
+    <td class="green">Prediction accurate: reading only footers does not change memory usage</td>
   </tr>
   <tr>
     <td>phase2:startup</td>
     <td class="v">170 MB</td>
     <td class="v green">−3.2 GB</td>
     <td>~400ms</td>
-    <td>resetInternal() + GC가 이전 데이터 해제</td>
+    <td>resetInternal() + GC release previous data</td>
   </tr>
   <tr>
     <td>phase3:workers</td>
     <td class="v">158 MB</td>
     <td class="v green">−12 MB</td>
     <td>~100ms</td>
-    <td>Worker 생성은 main heap 영향 미미</td>
+    <td>Worker creation has little impact on the main heap</td>
   </tr>
   <tr>
     <td>cache:camera-rg0</td>
     <td class="v">149 MB</td>
     <td class="v dim">−9 MB</td>
     <td>+377ms</td>
-    <td>Camera JPEG 79.3 MB 수신 — GC로 heap 감소?</td>
+    <td>79.3 MB of camera JPEGs received; did GC reduce the heap?</td>
   </tr>
   <tr>
     <td>cache:lidar-rg1</td>
     <td class="v red">990 MB</td>
     <td class="v red">+841 MB</td>
     <td>+4.4s</td>
-    <td><strong>LiDAR RG 1개 = +761 MB buffer + overhead</strong></td>
+    <td><strong>One LiDAR RG = +761 MB buffer + overhead</strong></td>
   </tr>
   <tr>
     <td>cache:lidar-rg0</td>
     <td class="v red">1.71 GB</td>
     <td class="v red">+720 MB</td>
     <td>+4.7s</td>
-    <td>LiDAR RG 2번째 = 거의 동일한 증가</td>
+    <td>Second LiDAR RG: nearly the same increase</td>
   </tr>
   <tr>
-    <td>phase4 완료</td>
+    <td>phase4 complete</td>
     <td class="v">1.71 GB</td>
     <td></td>
     <td>4.7s</td>
@@ -298,7 +298,7 @@
     <td class="v">1.88 GB</td>
     <td class="v yellow">+170 MB</td>
     <td>+1s</td>
-    <td>나머지 Camera ~160 MB JPEG</td>
+    <td>Remaining camera JPEGs: ~160 MB</td>
   </tr>
   <tr>
     <td>lidar-rg3</td>
@@ -315,97 +315,97 @@
     <td>52 frames × 761 MB buffers</td>
   </tr>
   <tr style="background:#14141e; font-weight:700">
-    <td>최종 Steady</td>
+    <td>Final steady state</td>
     <td class="v red">3.29 GB</td>
     <td></td>
     <td>~15s total</td>
-    <td>199 frames 전부 캐시 완료</td>
+    <td>All 199 frames cached</td>
   </tr>
 </table>
 
 <p style="font-size:11px; color:#555; margin-top:4px">
-  * pipeline:start의 3.37 GB는 이전 세그먼트 잔여. phase2에서 GC 후 170 MB로 정상화.
+  * The 3.37 GB at pipeline:start is leftover data from the previous segment. After GC in phase2, usage returns to 170 MB.
 </p>
 
 <!-- ============================================================ -->
 <!-- Finding 4: Accurate predictions -->
 <!-- ============================================================ -->
-<h2>✅ 예측이 정확했던 부분</h2>
+<h2>✅ Accurate predictions</h2>
 
 <table>
-  <tr><th>항목</th><th>예측</th><th>실측</th><th>오차</th></tr>
+  <tr><th>Item</th><th>Predicted</th><th>Measured</th><th>Error</th></tr>
   <tr>
-    <td>Camera JPEG 전체</td>
+    <td>Total camera JPEGs</td>
     <td class="v">~300 MB</td>
     <td class="v">309.8 MB</td>
     <td class="v green">+3% ✓</td>
   </tr>
   <tr>
-    <td>Phase 1 메모리 영향</td>
+    <td>Phase 1 memory impact</td>
     <td class="v">~0 (footer only)</td>
     <td class="v">+0 MB</td>
-    <td class="v green">정확 ✓</td>
+    <td class="v green">Accurate ✓</td>
   </tr>
   <tr>
     <td>Phase 2 startup data</td>
     <td class="v">~17 MB</td>
-    <td class="v">~170 MB (GC중)</td>
-    <td class="v yellow">heap 전체 측정이라 GC 타이밍에 의존</td>
+    <td class="v">~170 MB (during GC)</td>
+    <td class="v yellow">Whole-heap measurement depends on GC timing</td>
   </tr>
   <tr>
-    <td>Worker 초기화 영향</td>
-    <td class="v">main에 미미</td>
+    <td>Worker initialization impact</td>
+    <td class="v">Minimal on main thread</td>
     <td class="v">−12 MB</td>
-    <td class="v green">정확 ✓ (Worker는 별도 heap)</td>
+    <td class="v green">Accurate ✓ (Workers have separate heaps)</td>
   </tr>
   <tr>
-    <td>파이프라인 병렬성</td>
-    <td class="v">LiDAR∥Camera 동시</td>
-    <td class="v">Camera 먼저 완료 (377ms vs 4.7s)</td>
-    <td class="v green">예측 맞음 ✓</td>
+    <td>Pipeline parallelism</td>
+    <td class="v">LiDAR ∥ Camera concurrently</td>
+    <td class="v">Camera finishes first (377 ms vs. 4.7 s)</td>
+    <td class="v green">Prediction correct ✓</td>
   </tr>
   <tr>
-    <td>Camera RG당 JPEG</td>
+    <td>JPEGs per camera RG</td>
     <td class="v">~80 MB</td>
     <td class="v">79.3 / 80.0 / 79.5 / 71.0 MB</td>
-    <td class="v green">정확 ✓</td>
+    <td class="v green">Accurate ✓</td>
   </tr>
 </table>
 
 <!-- ============================================================ -->
 <!-- Finding 5: What was wrong -->
 <!-- ============================================================ -->
-<h2>❌ 예측이 빗나간 부분</h2>
+<h2>❌ Inaccurate predictions</h2>
 
 <table>
-  <tr><th>항목</th><th>예측</th><th>실측</th><th>오차 배수</th><th>원인</th></tr>
+  <tr><th>Item</th><th>Predicted</th><th>Measured</th><th>Error factor</th><th>Cause</th></tr>
   <tr>
     <td><strong>LiDAR frameCache</strong></td>
     <td class="v">~500 MB</td>
     <td class="v red">2,870 MB</td>
     <td class="v red">5.7×</td>
-    <td>subarray().buffer가 전체 maxPoints 배열 전송</td>
+    <td>subarray().buffer transfers the entire maxPoints array</td>
   </tr>
   <tr>
-    <td><strong>Steady-state 전체</strong></td>
+    <td><strong>Total steady state</strong></td>
     <td class="v">~890 MB</td>
     <td class="v red">3,290 MB</td>
     <td class="v red">3.7×</td>
-    <td>위 LiDAR 오차가 지배적</td>
+    <td>Dominated by the LiDAR error above</td>
   </tr>
   <tr>
-    <td><strong>Per-frame 크기</strong></td>
+    <td><strong>Per-frame size</strong></td>
     <td class="v">~4 MB</td>
     <td class="v red">~14.7 MB</td>
     <td class="v red">3.7×</td>
-    <td>유효 4 MB + 빈 픽셀 10.7 MB</td>
+    <td>4 MB valid data + 10.7 MB empty pixels</td>
   </tr>
 </table>
 
 <!-- ============================================================ -->
 <!-- SVG: Actual Memory Timeline -->
 <!-- ============================================================ -->
-<h2>실측 기반 Memory Timeline</h2>
+<h2>Memory Timeline Based on Measurements</h2>
 
 <svg viewBox="0 0 900 300" style="width:100%; height:300px; background:#111118; border-radius:10px; border:1px solid #222; margin:12px 0">
   <defs>
@@ -473,7 +473,7 @@
   <!-- Annotations -->
   <circle cx="100" cy="194" r="3" fill="#10b981"/>
   <text x="105" y="210" fill="#10b981" font-size="8" font-weight="600">resetInternal()</text>
-  <text x="105" y="220" fill="#888" font-size="7">170 MB (GC 후)</text>
+  <text x="105" y="220" fill="#888" font-size="7">170 MB (after GC)</text>
 
   <circle cx="380" cy="80" r="3" fill="#ef4444"/>
   <text x="340" y="97" fill="#ef4444" font-size="8" font-weight="600">+lidar RG1</text>
@@ -498,25 +498,25 @@
 
   <!-- Legend -->
   <circle cx="60" cy="275" r="3" fill="#ef4444"/>
-  <text x="67" y="278" fill="#999" font-size="9">실측 (현재)</text>
+  <text x="67" y="278" fill="#999" font-size="9">Measured (current)</text>
   <line x1="150" y1="275" x2="170" y2="275" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="175" y="278" fill="#999" font-size="9">수정 후 예상 (slice 적용)</text>
+  <text x="175" y="278" fill="#999" font-size="9">Expected after fix (slice)</text>
 </svg>
 
 <!-- ============================================================ -->
 <!-- Fix Recommendation -->
 <!-- ============================================================ -->
-<h2>🛠 수정 제안: Float32Array.slice() — 2.16 GB 절약</h2>
+<h2>🛠 Proposed fix: Float32Array.slice() saves 2.16 GB</h2>
 
 <div class="insight info">
-  <strong>rangeImage.ts</strong> 의 <code class="code">convertRangeImageToPointCloud()</code> 마지막 부분:<br><br>
-  현재 (subarray — buffer 공유):<br>
+  <strong>rangeImage.ts</strong>: <code class="code">convertRangeImageToPointCloud()</code>, final section:<br><br>
+  Current (subarray, shared buffer):<br>
   <code class="code" style="color:#ef4444">const positions = output.subarray(0, pointCount * POINT_STRIDE)</code><br><br>
-  수정 (slice — 독립 복사본):<br>
+  Fix (slice, independent copy):<br>
   <code class="code" style="color:#10b981">const positions = output.slice(0, pointCount * POINT_STRIDE)</code><br><br>
-  <strong>효과:</strong> 유효 포인트만 포함한 새 Float32Array 생성. 원본 maxPoints 배열은 GC 대상이 됨.<br>
-  Worker 내부에서 잠시 두 배 메모리(원본 + 복사본)가 존재하지만, transfer 후 원본은 즉시 해제.<br>
-  <strong>예상 절감: 3.29 GB → ~1.1 GB</strong> (−2.16 GB, −66%)
+  <strong>Effect:</strong> Creates a new Float32Array containing only valid points. The original maxPoints array becomes eligible for GC.<br>
+  The worker briefly holds both the original and the copy; after transfer, the original can be released.<br>
+  <strong>Expected savings: 3.29 GB → ~1.1 GB</strong> (−2.16 GB, −66%)
 </div>
 
 <div style="margin-top:32px; color:#444; font-size:11px; text-align:center">

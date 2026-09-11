@@ -26,7 +26,7 @@ export interface RemoteSourceInventoryOptionsV1 extends Pick<RemoteByteSourceOpt
   'rootUrl' | 'expectedSourceManifestHash' | 'fetch' | 'limits' | 'credentialGrant' | 'preferFullObjects'
 > {
   readonly catalogUrl: string
-  readonly expectedCatalogHash: string
+  readonly expectedCatalogHash?: string
   /** Cancels initialization only. Revoke the returned inventory to end its session. */
   readonly signal?: AbortSignal
   readonly sessionId?: string
@@ -102,11 +102,8 @@ export class SourceInventoryV1 {
     }
     assertNotAborted()
     // Keep the remote transport/catalog validator out of local initialization.
-    const { fetchSourceCatalogV1, RemoteByteSourceV1, RemoteSourceErrorV1 } = await import('../source/RemoteByteSource')
+    const { fetchSourceCatalogV1, RemoteByteSourceV1 } = await import('../source/RemoteByteSource')
     assertNotAborted()
-    if (!options.expectedCatalogHash) {
-      throw new RemoteSourceErrorV1('REMOTE_CATALOG_INVALID', 'Expected catalog hash is required.')
-    }
     const validated = await fetchSourceCatalogV1(options.catalogUrl, {
       expectedCatalogHash: options.expectedCatalogHash,
       expectedSourceManifestHash: options.expectedSourceManifestHash,

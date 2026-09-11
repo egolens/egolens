@@ -1,3 +1,4 @@
+import { POINT_WORKER_CONCURRENCY, CAMERA_WORKER_CONCURRENCY, FILE_FRAME_BATCH_SIZE } from '../workers/playbackConfig'
 /**
  * Scene store — Zustand-based central state for EgoLens.
  *
@@ -93,7 +94,7 @@ import {
 } from '../teachable/runtime/ManagedNormalizedScene'
 import { bridgeNormalizedFrame } from '../teachable/runtime/compatibilityBridge'
 import { markPerformanceEvent, noteFrameRequest } from '../teachable/runtime/performanceProbe'
-import type { NormalizedCapabilityV1, NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
+import type { NormalizedCapabilityV1, NormalizedFrameV1, NormalizedSceneV1 } from '../teachable/runtime/normalizedScene'
 import {
   resolvePortableShareUrlV1,
   type ResolvedPortableShareV1,
@@ -371,7 +372,7 @@ export interface SceneState {
 // ---------------------------------------------------------------------------
 
 /** Number of parallel workers for row group decompression */
-const WORKER_CONCURRENCY = 3
+const WORKER_CONCURRENCY = POINT_WORKER_CONCURRENCY
 
 function activateAdapter(id: string): void {
   const localRecipe = internal.localCompiledRecipe
@@ -511,6 +512,7 @@ const internal = {
    * user waits. Applied by syncCachedFrames once the frame arrives.
    */
   pendingSeekFrame: null as number | null,
+  recipeSeekRequest: 0,
   // -- Argoverse 2-specific state --
   /** Active AV2 log identity; graph inputs live exclusively in av2SampleFiles. */
   av2LogId: null as string | null,
@@ -605,13 +607,37 @@ function syncCameraCachedFrames(set: (partial: Partial<SceneState>) => void) {
   }
 }
 
+const recipeRendererFrames = new WeakMap<NormalizedFrameV1, FrameData>()
+function bridgeRecipeFrame(scene: ManagedNormalizedSceneV1, frame: NormalizedFrameV1, frameIndex: number): FrameData {
+  if (!scene.ownsFramePayloads) return bridgeNormalizedFrame(frame, scene.manifest, internal.timestamps[frameIndex])
+  let rendered = recipeRendererFrames.get(frame)
+  if (!rendered) {
+    rendered = bridgeNormalizedFrame(frame, scene.manifest, internal.timestamps[frameIndex])
+    recipeRendererFrames.set(frame, rendered)
+  }
+  return rendered
+}
+
+function startRecipeStreaming(scene: ManagedNormalizedSceneV1, set: (partial: Partial<SceneState>) => void): void {
+  scene.onRecipeProgress(() => {
+    if (scene !== internal.normalizedScene || scene.disposed) return
+    const current = useSceneStore.getState()
+    const frame = getCachedRendererFrame(scene, current.currentFrameIndex)
+    set({
+      cachedFrames: [...scene.cachedPointFrames()], cameraCachedFrames: [...scene.cachedCameraFrames()],
+      ...(current.status === 'ready' && frame && frame !== current.currentFrame ? { currentFrame: frame } : {}),
+    })
+  })
+  scene.prefetchRecipeFrames()
+}
+
 async function loadRendererFrame(
   scene: ManagedNormalizedSceneV1,
   frameIndex: number,
 ): Promise<FrameData> {
   const capabilities = rendererFrameCapabilities(scene, frameIndex)
   const frame = await scene.loadFrame(frameIndex, { capabilities })
-  return bridgeNormalizedFrame(frame, scene.manifest, internal.timestamps[frameIndex])
+  return bridgeRecipeFrame(scene, frame, frameIndex)
 }
 
 function rendererFrameCapabilities(
@@ -632,7 +658,7 @@ function getCachedRendererFrame(
   const frame = scene.getCachedFrame(frameIndex, {
     capabilities: rendererFrameCapabilities(scene, frameIndex),
   })
-  return frame ? bridgeNormalizedFrame(frame, scene.manifest, internal.timestamps[frameIndex]) : null
+  return frame ? bridgeRecipeFrame(scene, frame, frameIndex) : null
 }
 
 function batchIndexForFrame(frame: number, batchCount: number): number {
@@ -927,6 +953,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         }
 
         const scene = internal.normalizedScene
+        scene.focusRecipeFrame(descriptor.view.frameIndex)
         const frame = await loadRendererFrame(scene, descriptor.view.frameIndex)
         if (scene !== internal.normalizedScene || scene.disposed) return null
         const availableComponents = [...new Set(resolved.catalog.catalog.entries
@@ -967,6 +994,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           theme: descriptor.presentation.theme,
         })
         markPerformanceEvent('dataset-ready', { dataset: manifest.id, sceneGeneration: scene.sceneGeneration })
+        startRecipeStreaming(scene, set)
         return resolved
       } catch (error) {
         resetInternal()
@@ -1096,6 +1124,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           showLidarOverlay: true,
         })
         markPerformanceEvent('dataset-ready', { dataset: manifest.id, sceneGeneration: scene.sceneGeneration })
+        startRecipeStreaming(scene, set)
       } catch (error) {
         resetInternal()
         failLoad(set, error, 'loadAuthoredScene')
@@ -1106,6 +1135,26 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const scene = internal.normalizedScene
       if (!scene) return
       noteFrameRequest(scene.sceneGeneration, frameIndex)
+
+      if (scene.ownsFramePayloads) {
+        const request = ++internal.recipeSeekRequest
+        const started = performance.now()
+        scene.focusRecipeFrame(frameIndex)
+        try {
+          const frame = getCachedRendererFrame(scene, frameIndex) ?? await loadRendererFrame(scene, frameIndex)
+          if (scene !== internal.normalizedScene || scene.disposed || request !== internal.recipeSeekRequest) return
+          set({ currentFrameIndex: frameIndex, currentFrame: frame, status: 'ready', error: null, errorCode: null,
+            lastFrameLoadMs: performance.now() - started,
+            cachedFrames: [...scene.cachedPointFrames()], cameraCachedFrames: [...scene.cachedCameraFrames()] })
+          scene.prefetchRecipeFrames()
+        } catch (error) {
+          if (scene !== internal.normalizedScene || scene.disposed || request !== internal.recipeSeekRequest) return
+          if (error instanceof DOMException && error.name === 'AbortError') return
+          get().actions.pause()
+          failLoad(set, error, 'loadRecipeFrame')
+        }
+        return
+      }
 
       // Point and camera caches have independent byte budgets. A camera batch
       // can be evicted while the requested point frame remains hot, so every
@@ -1208,7 +1257,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         if (!scene?.hasCameraFrame(fi)) return
         // Skip if camera count hasn't changed (already up-to-date)
         void loadRendererFrame(scene, fi).then((frame) => {
-          if (scene !== internal.normalizedScene) return
+          if (scene !== internal.normalizedScene || get().currentFrameIndex !== fi) return
           if (currentFrame.cameraImages.size === frame.cameraImages.size) return
           set({ currentFrame: frame })
         }).catch(() => {})
@@ -2127,7 +2176,7 @@ async function initCameraWorker(
   const start = async () => {
     const compiledRecipe = activeCompiledRecipe('waymo')
     const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-      2,
+      CAMERA_WORKER_CONCURRENCY,
       () => new Worker(new URL('../workers/waymoCameraWorker.ts', import.meta.url), { type: 'module' }),
     )
     owner.attachCameraPool(pool, 0)
@@ -2445,7 +2494,7 @@ async function loadRelationalGraphScene(
 }
 
 /** Number of frames per worker batch for nuScenes */
-const NUSCENES_BATCH_SIZE = 10
+const NUSCENES_BATCH_SIZE = FILE_FRAME_BATCH_SIZE
 
 /**
  * Extract frame descriptors from nuScenes MetadataBundle and group into batches.
@@ -2592,7 +2641,7 @@ async function initNuScenesCameraWorker(
 
   const start = async () => {
     const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-      2,
+      CAMERA_WORKER_CONCURRENCY,
       () => new Worker(new URL('../workers/nuScenesCameraWorker.ts', import.meta.url), { type: 'module' }),
     )
     owner.attachCameraPool(pool, 0)
@@ -2619,7 +2668,7 @@ async function initNuScenesCameraWorker(
 // ---------------------------------------------------------------------------
 
 /** Number of frames per worker batch for AV2 */
-const AV2_BATCH_SIZE = 10
+const AV2_BATCH_SIZE = FILE_FRAME_BATCH_SIZE
 
 async function loadFeatherLogScene(
   logId: string,
@@ -2815,7 +2864,7 @@ async function initAV2CameraWorker(batches: AV2CameraFrameDescriptor[][]) {
 
   const start = async () => {
     const pool = new WorkerPool<Record<string, unknown>, CameraBatchResult>(
-      2,
+      CAMERA_WORKER_CONCURRENCY,
       () => new Worker(new URL('../workers/av2CameraWorker.ts', import.meta.url), { type: 'module' }),
     )
     owner.attachCameraPool(pool, 0)

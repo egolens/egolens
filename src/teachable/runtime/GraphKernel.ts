@@ -1,3 +1,5 @@
+import { ReadSchedulerV1, linkedReadSignal } from './ReadScheduler'
+import { PayloadCacheV1 } from './PayloadCache'
 import { sourceSelectorMatchesV1 } from '../authoring/sourceSelectors'
 import type { OperatorRegistry } from '../operators/registry'
 import type { CompiledRecipeV1 } from '../recipe/compiler'
@@ -160,16 +162,20 @@ export class ExecutableGraphKernelV1 {
     const signal = linkedSignal(abortController.signal, input.signal)
     const limits = { ...DEFAULT_LIMITS, ...input.limits }
     const resources = new GraphResourceAccountV1(limits)
+    const reads = new ReadSchedulerV1()
+    const decodedPayloads = new PayloadCacheV1<object, true>(Math.min(128 * 1024 * 1024, limits.maxAllocationBytes))
     const context: CoreOperatorExecutionContextV1 = {
       signal,
       source: input.source,
       resources,
+      decodedPayloads,
       throwIfAborted() {
         if (signal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
       },
       async read(path, requestSignal) {
         this.throwIfAborted()
-        const bytes = await input.source.read(path, { signal: linkedSignal(signal, requestSignal) })
+        const readSignal = linkedReadSignal(signal, requestSignal)
+        const bytes = await reads.read(JSON.stringify([path, null]), (signal) => input.source.read(path, { signal }), readSignal)
         resources.sourceBytes(bytes.byteLength)
         this.throwIfAborted()
         return bytes
@@ -177,7 +183,7 @@ export class ExecutableGraphKernelV1 {
       async asyncBuffer(path, requestSignal) {
         this.throwIfAborted()
         const backing = await input.source.asyncBuffer(path)
-        const readSignal = linkedSignal(signal, requestSignal)
+        const readSignal = linkedReadSignal(signal, requestSignal)
         return {
           byteLength: backing.byteLength,
           async slice(start, end) {
@@ -185,7 +191,7 @@ export class ExecutableGraphKernelV1 {
             // Route every lazy slice back through ByteSourceV1 so remote range
             // verification and request-level cancellation cannot be bypassed by
             // a transport's AsyncBuffer implementation.
-            const bytes = await input.source.read(path, { start, end, signal: readSignal })
+            const bytes = await reads.read(JSON.stringify([path, start, end]), (signal) => input.source.read(path, { start, end, signal }), readSignal)
             resources.sourceBytes(bytes.byteLength)
             if (readSignal.aborted) throw new DOMException('Graph execution was aborted.', 'AbortError')
             return bytes
@@ -196,6 +202,8 @@ export class ExecutableGraphKernelV1 {
     const global = new Map<string, Readonly<Record<string, unknown>>>()
     const roots: object[] = []
     const release = () => {
+      reads.dispose()
+      decodedPayloads.clear()
       const seen = new WeakSet<object>()
       for (const value of roots) releaseGraphValue(value, seen)
       roots.length = 0
@@ -241,7 +249,12 @@ export class ExecutableGraphKernelV1 {
       let disposed = false
       return {
         outputs,
-        get resources() { return resources.snapshot() },
+        get resources() {
+          const io = reads.snapshot()
+          return { ...resources.snapshot(), decodedCacheBytes: decodedPayloads.bytes,
+            rawCacheBytes: input.source.snapshotResources?.().rawCacheBytes,
+            activeReads: io.active, queuedReads: io.queued, completedReads: io.completed }
+        },
         abortController,
         dispose() {
           if (disposed) return

@@ -67,3 +67,12 @@ describe('scanSelectedFiles', () => {
     ])
   })
 })
+
+
+it('names the candidate AV2 logs instead of silently opening the first', () => {
+  const files = ['log-a', 'log-b'].flatMap(log => [
+    selectedFile(`train/${log}/calibration/intrinsics.feather`),
+    selectedFile(`train/${log}/sensors/lidar/1.feather`),
+  ])
+  expect(() => scanSelectedFiles(files)).toThrow(/Multiple dataset folders found: log-a\/, log-b\//)
+})

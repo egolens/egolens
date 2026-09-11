@@ -1,3 +1,4 @@
+import type { GraphResourceSnapshotV1 } from './GraphValues'
 export interface WorkerPoolPerformanceSnapshotV1 {
   readonly workers: number
   readonly readyWorkers: number
@@ -12,6 +13,7 @@ export interface WorkerPoolPerformanceSnapshotV1 {
 }
 
 export interface ScenePerformanceSnapshotV1 {
+  readonly recipe?: { readonly active: number; readonly queued: number; readonly loads: number; readonly cancellations: number; readonly target: number; readonly graph?: GraphResourceSnapshotV1 }
   readonly sceneGeneration: number
   readonly disposed: boolean
   readonly cache: {

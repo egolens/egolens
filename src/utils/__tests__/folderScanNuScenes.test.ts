@@ -76,3 +76,12 @@ describe('unsupported folder capture', () => {
     })
   })
 })
+
+
+it('names multiple child data roots before reading the first log', async () => {
+  const root = directory('parent', new Map([
+    ['log-a', directory('log-a', new Map([['vehicle_pose', directory('vehicle_pose', new Map())]]))],
+    ['log-b', directory('log-b', new Map([['vehicle_pose', directory('vehicle_pose', new Map())]]))],
+  ]))
+  await expect(scanDirectoryHandle(root)).rejects.toThrow(/Multiple dataset folders found: log-a\/, log-b\//)
+})

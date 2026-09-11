@@ -17,6 +17,7 @@ import { BrowserGraphPreviewRuntimeV1 } from '../authoring/BrowserGraphPreviewRu
 import { authoringPreviewStoreV1 } from '../authoring/previewStore'
 import { sourceSelectorMatchesV1 } from '../authoring/sourceSelectors'
 import { nuScenesCompiledRecipe, waymoCompiledRecipe } from '../../adapters/recipes/bundled'
+import { recipeHashV1 } from '../authoring/hashes'
 import minimalJson from '../__fixtures__/minimal.egolens-adapter.json'
 
 function recipe(): EgoLensAdapterRecipeV1 {
@@ -290,5 +291,26 @@ describe('Phase 8 diff, capability gap, and Site tools', () => {
     const inspect = tools.get('egolens_teachable_inspect')!
     const fromString = JSON.parse(await inspect.execute(JSON.stringify({ mode: 'inventory' })) as string) as { mode: string }
     expect(fromString.mode).toBe('inventory')
+  })
+})
+
+
+describe('resume teaching from a recognized recipe', () => {
+  it('keeps the loaded recipe as the parent, preserves the source, and starts a fresh review', async () => {
+    const authoring = session({ prepare: async () => prepared(vi.fn()) })
+    const source = inventory()
+    const fixture = recipe()
+    const base = { ...fixture, scene: { ...fixture.scene, sensors: [{ id: 'lidar', rendererId: 1, label: 'LiDAR', modality: 'lidar' as const, frameId: 'ego', color: '#ffffff' }] } }
+    const original = structuredClone(base)
+    authoring.start(source)
+    const result = await authoring.resumeFromArtifact(source, base)
+    expect(result.ok).toBe(true)
+    expect(authoring.getInventory()).toBe(source)
+    expect(authoring.getState()).toMatchObject({
+      phase: 'review', exportReady: false, reviews: [],
+      currentArtifact: { provenance: { parentRecipeHash: await recipeHashV1(base) } },
+    })
+    expect(base).toEqual(original)
+    await expect(authoring.inspect({ mode: 'json', path: 'frames.json' })).resolves.toBeDefined()
   })
 })

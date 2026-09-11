@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AdapterEntryDialog from '../../components/TeachableLens/AdapterEntryDialog'
 import type { AdapterEntryRequest } from '../../components/TeachableLens/AdapterEntryDialog'
 import { SourceInventoryV1 } from '../authoring/SourceInventory'
+import { generateSourceCatalogV1 } from '../source/SourceCatalog'
 import minimalJson from '../__fixtures__/importable.egolens-adapter.json'
 import { sharedVerifiedRecipeCacheV1 } from '../share/RecipeTransport'
 
@@ -44,28 +45,28 @@ const fill = async (type: 'url' | 'text', value: string) => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
-async function mount(request: AdapterEntryRequest, render = vi.fn(async () => {})) {
+async function mount(request: AdapterEntryRequest, render = vi.fn(async () => {}), inline = false, choose = vi.fn()) {
   const close = vi.fn()
   const teach = vi.fn()
-  await act(async () => root.render(<AdapterEntryDialog request={request} onClose={close} onTeach={teach} onRender={render} />))
-  return { render, close, teach }
+  await act(async () => root.render(<AdapterEntryDialog onChoose={choose} inline={inline} request={request} onClose={close} onTeach={teach} onRender={render} />))
+  return { render, close, teach, choose }
 }
 
 describe('adapter recipient dialog', () => {
-  it('renders from a URL alone with version options collapsed and no agent', async () => {
+  it.each([false, true])('renders from a URL without an agent (inline=%s)', async (inline) => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(minimalJson)))
     vi.stubGlobal('fetch', fetcher)
     const selected = inventory()
-    const callbacks = await mount({ mode: 'use', inventory: selected })
-    await click('Recipe URL')
-    expect(container.querySelector('details')?.open).toBe(false)
-    expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.required).toBe(false)
+    const callbacks = await mount({ mode: 'use', inventory: selected, recipeSource: 'url' }, vi.fn(async () => {}), inline)
+    expect(container.querySelector('dialog') !== null).toBe(!inline)
+    if (!inline) expect(container.querySelector('details')?.open).toBe(false)
+    if (!inline) expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.required).toBe(false)
     expect(button('Import URL').disabled).toBe(true)
     await fill('url', 'https://recipes.example/current.json')
     expect(button('Import URL').disabled).toBe(false)
     await click('Import URL')
-    await settle(() => expect(button('Render this dataset').disabled).toBe(false))
-    await click('Render this dataset')
+    await settle(() => expect(button(inline ? 'Load' : 'Render this dataset').disabled).toBe(false))
+    await click(inline ? 'Load' : 'Render this dataset')
     await settle(() => expect(callbacks.close).toHaveBeenCalledOnce())
     expect(callbacks.render).toHaveBeenCalledWith(selected, expect.objectContaining({ identity: minimalJson.identity }))
     expect(callbacks.teach).not.toHaveBeenCalled()
@@ -208,4 +209,50 @@ describe('adapter recipient dialog', () => {
     await attach('Adapter recipe file', [new File([JSON.stringify(minimalJson)], 'recipe.json')])
     await settle(() => expect(button('Render this dataset').disabled).toBe(false))
   })
+})
+
+
+it('loads an imported recipe with a remote folder without requesting a catalog hash', async () => {
+  const catalog = await generateSourceCatalogV1(inventory())
+  const fetcher = vi.fn<typeof fetch>(async () => Response.json(catalog.catalog))
+  vi.stubGlobal('fetch', fetcher)
+  const callbacks = await mount({ mode: 'use' }, vi.fn(async () => {}), true)
+  await attach('Adapter recipe file', [new File([JSON.stringify(minimalJson)], 'recipe.json')])
+  await settle(() => expect(container.textContent).toContain('Recipe checked.'))
+  await click('Remote URL')
+  expect(button('Remote URL').getAttribute('aria-pressed')).toBe('true')
+  expect(button('Load').disabled).toBe(true)
+  await fill('url', 'https://data.example/log')
+  expect(button('Load').disabled).toBe(false)
+  await click('Load')
+  await settle(() => expect(callbacks.render).toHaveBeenCalledOnce())
+  expect(String(fetcher.mock.calls[0]?.[0])).toBe('https://data.example/log/source-catalog.json')
+  expect(container.textContent).toContain('Remote dataset connected')
+  expect(callbacks.render).toHaveBeenCalledWith(expect.objectContaining({ kind: 'remote' }), expect.any(Object))
+})
+
+
+it('prefills remote data without fetching, and allows Load without a recipe', async () => {
+  const catalog = await generateSourceCatalogV1(inventory())
+  const fetcher = vi.fn<typeof fetch>(async () => Response.json(catalog.catalog))
+  vi.stubGlobal('fetch', fetcher)
+  const callbacks = await mount({ mode: 'use', remoteUrl: 'https://data.example/log/' }, vi.fn(async () => {}), true)
+  expect(fetcher).not.toHaveBeenCalled()
+  expect(container.querySelector<HTMLInputElement>('#adapter-data-url')?.value).toBe('https://data.example/log/')
+  expect(container.textContent).toContain('Adapter recipe (optional)')
+  expect(container.textContent).toContain('Data source (required)')
+  expect(button('Load').disabled).toBe(false)
+  await click('Load')
+  await settle(() => expect(callbacks.choose).toHaveBeenCalledWith({ inventory: expect.objectContaining({ kind: 'remote' }), savedRecipes: [] }))
+  expect(callbacks.render).not.toHaveBeenCalled()
+})
+
+it('passes recognized local recipes to the next screen without rendering automatically', async () => {
+  const selected = inventory()
+  const record = { recipeHash: 'saved', artifact: minimalJson } as never
+  const callbacks = await mount({ mode: 'use', inventory: selected, savedRecipes: [record] }, vi.fn(async () => {}), true)
+  expect(callbacks.render).not.toHaveBeenCalled()
+  await click('Load')
+  expect(callbacks.choose).toHaveBeenCalledWith({ inventory: selected, savedRecipes: [record] })
+  expect(selected.snapshot().revoked).toBe(false)
 })

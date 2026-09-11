@@ -20,7 +20,7 @@ export async function validateRecipeSourceV1(recipe: EgoLensAdapterRecipeV1, inv
   if (source.truncated) throw new Error('This folder could not be read completely. Select a smaller dataset folder and try again.')
   const errors = await verifySuppliedHashesV1(recipe, inventory)
   if (errors.includes('FORMAT_FINGERPRINT_MISMATCH')) {
-    throw new Error('This folder layout differs from the one used to export the adapter. Select the matching dataset folder, or choose another recipe.')
+    throw new Error('This folder layout differs from the one used to export the adapter. If you selected a parent folder containing multiple logs, select an individual log folder instead. Otherwise select the matching dataset folder, or choose another recipe.')
   }
   if (errors.length) throw new Error(`The adapter failed its integrity check: ${errors.join(', ')}.`)
 }

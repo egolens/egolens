@@ -37,3 +37,8 @@ convention and keep their names.
 | 019 | [Other formats chip and direct AI setup](spec_019_other_formats_chip.md) | in-progress; implemented locally, sensor-confirmation step superseded by spec 020; deployment pending |
 | 020 | [Direct authoring entry with editable sensor defaults](spec_020_direct_authoring_entry.md) | in-progress; implemented and verified locally; deployment pending |
 | 021 | [Hosted teaching sample and local ZIP alternative](spec_021_hosted_teaching_sample.md) | in-progress; implemented and verified locally; sample connected on R2, application deployment pending |
+| 022 | [Recipe playback scheduling and worker execution](spec_022_recipe_playback_scheduling.md) | in-progress; Phases 1 and 2 validated locally; Worker parity in spec 024; deployment pending |
+| 023 | [Continuous recipe buffering within byte budgets](spec_023_continuous_recipe_buffering.md) | superseded for browser worker playback by spec 024; fallback validated |
+| 024 | [Recipe and built-in playback parity](spec_024_recipe_worker_parity.md) | in-progress; implemented and validated locally; deployment pending |
+| 025 | [Remove payload hash verification](spec_025_remove_payload_hash_verification.md) | implemented; validated locally |
+| 026 | [Resume recognized recipe](spec_026_resume_recognized_recipe.md) | implemented; validated locally |

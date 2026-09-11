@@ -1,6 +1,7 @@
+import AgentSetupCard from './AgentSetupCard'
 import { useEffect, useState } from 'react'
 import { colors, fonts, radius, alpha } from '../../theme'
-import { HOSTED_TEACH_PROMPT_V1, TEACH_PROMPT_SHOWN_V1, TEACH_PROMPT_V1, useWebMcpAgentV1, type WebMcpAgentV1 } from '../../teachable/authoring/agentDetection'
+import { detectWebMcpAgentV1, HOSTED_TEACH_PROMPT_V1, TEACH_PROMPT_SHOWN_V1, TEACH_PROMPT_V1, useWebMcpAgentV1, type WebMcpAgentV1 } from '../../teachable/authoring/agentDetection'
 import type { AgentActivityV1 } from '../../teachable/authoring/AuthoringSession'
 import type { HumanReviewCapabilityV1, HumanReviewIssueV1 } from '../../teachable/authoring/review'
 
@@ -119,33 +120,22 @@ export function ActivityFeed({ activity, validating, agent, waitingForReview, ma
 /** Card offering the one-line prompt, or the no-host call to action. */
 export function AgentAskCard({ agent, onPromptCopied, sourceKind = 'local' }: { agent: WebMcpAgentV1; onPromptCopied?: () => void; sourceKind?: 'local' | 'remote' }) {
   const [copied, setCopied] = useState(false)
+  const [setupStatus, setSetupStatus] = useState('')
   const names = agentNames(agent)
   const copy = () => {
     void navigator.clipboard?.writeText(sourceKind === 'remote' ? HOSTED_TEACH_PROMPT_V1 : TEACH_PROMPT_V1).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) })
     onPromptCopied?.()
   }
   if (!agent.available) {
-    const tile = (href: string, title: string, sub: string, monoSub = false, mark = false) => (
-      <a href={href} target="_blank" rel="noreferrer" style={{ display: 'block', padding: 12, border: `1px solid ${colors.border}`, borderRadius: 10, background: colors.bgBase, textDecoration: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>{mark && <AgentMark agent={{ available: true, kind: 'codex', chatLocation: 'sidebar-left' }} />}<span style={{ fontSize: 12, fontWeight: 700, color: colors.textPrimary }}>{title}</span></div>
-        <div style={{ marginTop: 5, fontSize: monoSub ? 10 : 11, lineHeight: 1.5, color: colors.textDim, fontFamily: monoSub ? mono : undefined }}>{sub}</div>
-      </a>
-    )
-    return (
-      <div data-testid="agent-cta" style={{ marginTop: 28, padding: 20, border: `1px solid ${colors.border}`, borderRadius: 14, background: colors.bgSurface }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: 999, background: colors.textDim }} /><span style={{ fontSize: 13, fontWeight: 700 }}>No WebMCP host detected</span></div>
-        <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: colors.textSecondary }}>This browser does not expose WebMCP tools. To create an adapter with an agent, open egolens.org in the Codex in-app browser, then {sourceKind === 'remote' ? 'select the hosted sample there' : 'select your folder there'}. Existing adapter recipes work without an agent.</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginTop: 12 }}>
-          {tile('https://openai.com/codex/', 'Codex app', 'Recommended: in-app browser, chat sidebar on the left', false, true)}
-        </div>
-        <details style={{ marginTop: 12, fontSize: 11, lineHeight: 1.6, color: colors.textSecondary }}>
-          <summary style={{ cursor: 'pointer' }}>Using Chrome with an agent</summary>
-          <p>Chrome needs WebMCP enabled and an agent that can call the page tools. Enabling a flag alone does not connect an agent.</p>
-          {tile('https://developer.chrome.com/docs/ai/webmcp', 'Chrome WebMCP setup', 'See API setup and agent tooling in the Chrome documentation')}
-        </details>
-        <div style={{ marginTop: 12, fontSize: 11, color: colors.textDim }}>Once connected, ask: <span style={{ fontFamily: mono, color: colors.textSecondary }}>“{TEACH_PROMPT_SHOWN_V1}”</span></div>
-      </div>
-    )
+    return <div data-testid="agent-cta">
+      <AgentSetupCard title="Set up your browser to teach this format" status={setupStatus}
+        onCheckAgain={() => {
+          const detected = detectWebMcpAgentV1()
+          window.dispatchEvent(new Event('egolens:check-webmcp'))
+          setSetupStatus(detected.available ? '' : 'WebMCP is still unavailable. Check your browser setup, then try again.')
+        }} />
+      <p style={{ fontSize: 12, color: colors.textSecondary }}>Existing adapter recipes work without an AI agent.</p>
+    </div>
   }
   return (
     <div data-testid="agent-prompt-hint" style={{ marginTop: 28, padding: 20, border: `1px solid ${colors.accentBlue}`, borderRadius: 14, background: alpha(colors.accentBlue, 0.06), display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>

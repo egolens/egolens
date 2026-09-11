@@ -1614,7 +1614,7 @@ export default function LidarViewer({ chrome = 'full' }: { chrome?: ViewerChrome
             }
             // Remove noise (0) and ego (31) from legend — they're uninteresting
             presentClasses.delete(0)
-            presentClasses.delete(31)
+            if (getManifest().id === 'nuscenes') presentClasses.delete(31)
             // Filter to only known classes (seg extraction may inject out-of-range values — Phase B fix)
             const numClasses = (getManifest().semanticLabels ?? LIDARSEG_LABELS).length
             for (const cls of presentClasses) {

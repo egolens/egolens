@@ -1,3 +1,6 @@
+import AdapterRecipeIntro from './components/TeachableLens/AdapterRecipeIntro'
+import { PANDASET_TEACHING_SAMPLES, type PandaSetSampleId } from './utils/teachingSample'
+import DatasetLoadButton from './components/DatasetLoadButton'
 import { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from 'react'
 import {
   useSceneStore,
@@ -83,6 +86,8 @@ function useSegmentDiscovery() {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     const params = new URLSearchParams(window.location.search)
+    // Keep the root landing page identical to production; local fixtures are opt-in.
+    if (params.get('devAutoLoad') !== '1' || params.has('data')) return
     if (params.has('share') || params.get('shareVersion') === '1') return
     // A benchmark URL must remain quiescent until CDP has captured the real
     // pre-scene baseline. Dev auto-discovery used to bypass benchmarkHold and
@@ -978,7 +983,7 @@ function Header() {
       : authoring.currentArtifact
         ? (status === 'ready' ? `revision #${authoring.revisionCount}` : `${authoring.currentArtifact.identity.name} · revision #${authoring.revisionCount}`)
         : (() => { const named = authoring.sensorConfiguration?.datasetName?.trim(); const label = named || (teachableAuthoringSession.getInventory()?.kind === 'remote' ? 'hosted source' : 'unknown folder'); return authoring.agentEngaged ? `${label} · teaching` : label })()
-  const showEditRecipe = status === 'ready' && authoredScene !== null && (authoring.phase === 'idle' || authoring.phase === 'finalized' || authoring.phase === 'revoked')
+  const showEditRecipe = status === 'ready' && authoredScene !== null && (authoring.phase === 'idle' || authoring.phase === 'finalized' || authoring.phase === 'revoked' || (authoring.phase === 'inspecting' && !authoring.currentArtifact))
   const editRecipe = () => {
     const scene = useSceneStore.getState().actions.authoredScene()
     if (!scene) return
@@ -1245,7 +1250,7 @@ function Header() {
           </div>
         )}
         {showEditRecipe && (
-          <button data-testid="edit-recipe" onClick={editRecipe} style={{ padding: '5px 11px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: 'transparent', color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✎ Edit recipe</button>
+          <button data-testid="edit-recipe" title="Continue teaching using the loaded recipe as the base revision" onClick={editRecipe} style={{ padding: '5px 11px', borderRadius: radius.sm, border: `1px solid ${colors.accent}`, background: 'transparent', color: colors.textPrimary, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✎ Edit recipe</button>
         )}
         <ThemeToggle isMobile={isMobile} />
         <button
@@ -1464,7 +1469,23 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
   const isMobile = useIsMobile()
 
   // URL loading state
+  const [showAdapterIntro, setShowAdapterIntro] = useState(false)
+  const [presetSampleId, setPresetSampleId] = useState<PandaSetSampleId>('001')
+  const [adapterSourceUrl, setAdapterSourceUrl] = useState<string | null>(null)
+  const [adapterPreset, setAdapterPreset] = useState(0)
+  const dataFormRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!adapterPreset) return
+    dataFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    dataFormRef.current?.querySelector<HTMLInputElement>('#adapter-data-url')?.focus({ preventScroll: true })
+  }, [adapterPreset])
   const [urlDataset, setUrlDataset] = useState<string>('argoverse2')
+  const selectPandaSetPreset = (sampleId: PandaSetSampleId = '001') => {
+    setPresetSampleId(sampleId)
+    setShowAdapterIntro(false)
+    setUrlDataset('adapter')
+    setAdapterPreset(value => value + 1)
+  }
   const [urlInput, setUrlInput] = useState('')
   const [urlSegment, setUrlSegment] = useState('')
   const [urlLoading, setUrlLoading] = useState(false)
@@ -1745,10 +1766,9 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
           color: colors.textSecondary,
           lineHeight: 1.7,
         }}>
-          {isMobile
-            ? 'Visualize point clouds, cameras, and 3D annotations — straight from Waymo, nuScenes, and Argoverse 2.'
-            : <>Visualize point clouds, cameras, and 3D annotations in your browser<br />— straight from the most widely used autonomous driving datasets.<br />No conversion, no preprocessing.</>
-          }
+          Visualize point clouds, cameras, and 3D annotations in your browser.<br />
+          Open supported datasets directly, or teach EgoLens a new format with adapter recipes.<br />
+          No conversion, no preprocessing.
         </div>
         {/* Dataset links and an entry for other formats */}
         <div style={{
@@ -1789,7 +1809,8 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
               {label}
             </a>
           ))}
-          <OtherFormatsChip onClick={() => onAdapterEntry({ mode: 'choose' })} disabled={scanning || urlLoading} />
+          <OtherFormatsChip onClick={() => setShowAdapterIntro(true)} disabled={scanning || urlLoading} />
+          {showAdapterIntro && <AdapterRecipeIntro onClose={() => setShowAdapterIntro(false)} onTry={() => selectPandaSetPreset('001')} />}
         </div>
 
         {/* Quick start — try with hosted data */}
@@ -1853,7 +1874,7 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
               </button>
             )
           })}
-          <HostedTeachingPreset onTeach={onTeach} disabled={scanning || urlLoading || adapterEntryOpen} />
+          <HostedTeachingPreset activeSampleId={urlDataset === 'adapter' ? (Object.keys(PANDASET_TEACHING_SAMPLES) as PandaSetSampleId[]).find(id => PANDASET_TEACHING_SAMPLES[id].rootUrl === `${adapterSourceUrl?.trim().replace(/\/+$/, '')}/`) : undefined} onSelect={selectPandaSetPreset} disabled={scanning || urlLoading || adapterEntryOpen} />
         </div>
       </div>
 
@@ -1878,7 +1899,7 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
       </div>
 
       {/* URL input section */}
-      <div style={{
+      <div ref={dataFormRef} style={{
         width: '100%',
         maxWidth: '520px',
         display: 'flex',
@@ -1910,9 +1931,20 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
             <option value="argoverse2">Argoverse 2</option>
             <option value="nuscenes">nuScenes</option>
             <option value="waymo">Waymo</option>
+            <option value="adapter">Use an adapter</option>
           </select>
         </div>
 
+        {urlDataset === 'adapter' ? (
+          <AdapterEntryDialog key={adapterPreset} onSourceUrlChange={setAdapterSourceUrl} inline request={{ mode: 'use', remoteUrl: adapterPreset ? PANDASET_TEACHING_SAMPLES[presetSampleId].rootUrl : undefined }} onClose={() => {}}
+            onChoose={({ inventory, savedRecipes }) => {
+              onTeach(inventory, savedRecipes)
+            }}
+            onTeach={(request) => onTeach(request.inventory, request.savedRecipes)}
+            onRender={async (inventory, recipe) => {
+              await useSceneStore.getState().actions.loadAuthoredScene(inventory, recipe)
+            }} />
+        ) : <>
         {/* URL input + Load button */}
         <div style={{ display: 'flex', gap: '8px' }}>
           <input
@@ -1951,26 +1983,7 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
               if (!urlError) e.currentTarget.style.borderColor = colors.border
             }}
           />
-          <button
-            onClick={handleUrlLoad}
-            disabled={!urlInput.trim() || urlLoading}
-            style={{
-              padding: '8px 20px',
-              fontSize: '12px',
-              fontFamily: fonts.sans,
-              fontWeight: 600,
-              backgroundColor: !urlInput.trim() || urlLoading ? colors.bgOverlay : colors.accent,
-              color: !urlInput.trim() || urlLoading ? colors.textDim : colors.textOnAccent,
-              border: 'none',
-              borderRadius: radius.sm,
-              cursor: !urlInput.trim() || urlLoading ? 'not-allowed' : 'pointer',
-              transition: 'all 0.15s',
-              whiteSpace: 'nowrap',
-              minWidth: '72px',
-            }}
-          >
-            {urlLoading ? '…' : 'Load'}
-          </button>
+          <DatasetLoadButton onClick={handleUrlLoad} disabled={!urlInput.trim()} loading={urlLoading} />
         </div>
 
         {/* Hint: what URL to provide */}
@@ -2045,6 +2058,7 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
         }}>
           URL only: auto-discovers all segments. URL + ID: loads a specific segment directly.
         </div>
+        </>}
 
       </div>
 
@@ -2154,6 +2168,9 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
               color: colors.textSecondary,
             }}>
               Waymo, nuScenes, or Argoverse 2 — auto-detected
+            </div>
+            <div style={{ fontSize: '12px', fontFamily: fonts.sans, color: colors.textSecondary, textAlign: 'center' }}>
+              Other formats? Drop your folder to use or create an adapter.
             </div>
 
             {error && (

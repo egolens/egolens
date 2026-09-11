@@ -150,6 +150,13 @@ export function describeFolderProblem(rejection: FolderRejection | undefined): s
  * Scan a FileSystemDirectoryHandle for Waymo segments.
  * Works with both `showDirectoryPicker()` and drag & drop `DataTransferItem.getAsFileSystemHandle()`.
  */
+
+function requireSingleDataRoot(paths: readonly string[]): void {
+  if (paths.length > 1) {
+    throw new Error(`Multiple dataset folders found: ${paths.slice(0, 5).map(path => `${path}/`).join(', ')}${paths.length > 5 ? ', …' : ''}. Drop or select one of these folders to choose which log to open.`)
+  }
+}
+
 export async function scanDirectoryHandle(
   dirHandle: FileSystemDirectoryHandle,
 ): Promise<ScanResult> {
@@ -174,19 +181,18 @@ export async function scanDirectoryHandle(
   if (hasComponents) {
     componentDirs = childDirs
   } else {
-    // Try one level deeper: look for a child that has component subdirs
-    componentDirs = new Map()
-    for (const [, childDir] of childDirs) {
+    // Inspect all immediate children before choosing a root.
+    const candidates: { name: string; root: FileSystemDirectoryHandle; dirs: Map<string, FileSystemDirectoryHandle> }[] = []
+    for (const [childName, childDir] of childDirs) {
+      const dirs = new Map<string, FileSystemDirectoryHandle>()
       for await (const [name, handle] of childDir) {
-        if (handle.kind === 'directory' && getAllKnownComponents().has(name)) {
-          componentDirs.set(name, handle as FileSystemDirectoryHandle)
-        }
+        if (handle.kind === 'directory' && getAllKnownComponents().has(name)) dirs.set(name, handle as FileSystemDirectoryHandle)
       }
-      if (componentDirs.size > 0) {
-        resolvedDirHandle = childDir  // The actual log/data directory is one level down
-        break
-      }
+      if (dirs.size > 0) candidates.push({ name: childName, root: childDir, dirs })
     }
+    requireSingleDataRoot(candidates.map(candidate => candidate.name))
+    componentDirs = candidates[0]?.dirs ?? new Map()
+    if (candidates[0]) resolvedDirHandle = candidates[0].root
   }
 
   if (componentDirs.size === 0) {
@@ -562,10 +568,12 @@ export function scanSelectedFiles(files: FileList | readonly File[]): ScanResult
     const index = segments.indexOf('sensors')
     return index < 0 ? [] : [segments.slice(0, index).join('/')]
   }))].sort()
-  const av2Prefix = av2Prefixes.find((prefix) => {
+  const av2Roots = av2Prefixes.filter((prefix) => {
     const start = prefix ? `${prefix}/calibration/` : 'calibration/'
     return entries.some((entry) => entry.path.startsWith(start))
   })
+  requireSingleDataRoot(av2Roots)
+  const av2Prefix = av2Roots[0]
   if (av2Prefix !== undefined) {
     const start = av2Prefix ? `${av2Prefix}/` : ''
     const allFiles = new Map<string, File>()
@@ -645,18 +653,20 @@ async function scanFileSystemEntry(
       .filter((d) => getAllKnownComponents().has(d.name))
       .map((d) => ({ component: d.name, entry: d as FileSystemDirectoryEntry }))
   } else {
-    // Try one level deeper
+    // Try one level deeper, without silently choosing the first log.
+    const candidateNames: string[] = []
     for (const dir of topDirs) {
       const children = await readDir(dir as FileSystemDirectoryEntry)
       const compDirs = children.filter((c) => c.isDirectory && getAllKnownComponents().has(c.name))
       if (compDirs.length > 0) {
+        candidateNames.push(dir.name)
         componentEntries = compDirs.map((d) => ({
           component: d.name,
           entry: d as FileSystemDirectoryEntry,
         }))
-        break
       }
     }
+    requireSingleDataRoot(candidateNames)
   }
 
   // Read parquet files from each component dir

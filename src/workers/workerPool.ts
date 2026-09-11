@@ -39,6 +39,9 @@ interface PoolWorker {
   worker: Worker
   busy: boolean
   ready: boolean
+  batchIndex?: number
+  requestId?: number
+  yieldRequested?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +189,21 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
     })
   }
 
+  /** Promote work already in the queue without creating a duplicate request. */
+  prioritizeBatch(batchIndex: number): void {
+    const promoted = this.waitQueue.filter(request => request.batchIndex === batchIndex)
+    this.waitQueue = [...promoted, ...this.waitQueue.filter(request => request.batchIndex !== batchIndex)]
+  }
+
+  /** Opt-in for cooperative workers; existing dataset workers are unchanged. */
+  interruptForBatch(batchIndex: number): void {
+    if (this.workers.some(worker => worker.busy && worker.batchIndex === batchIndex) || this.workers.some(worker => worker.yieldRequested)) return
+    const worker = this.workers.find(worker => worker.busy)
+    if (!worker) return
+    worker.yieldRequested = true
+    worker.worker.postMessage({ type: 'yieldBatch', requestId: worker.requestId })
+  }
+
   /** Terminate all workers. */
   terminate(): void {
     if (this.terminated) return
@@ -245,6 +263,9 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
     reject: (err: Error) => void,
   ): void {
     pw.busy = true
+    pw.batchIndex = batchIndex
+    pw.requestId = requestId
+    pw.yieldRequested = false
     this.inFlightCount++
     this.pendingRequests.set(requestId, { resolve, reject })
     pw.worker.postMessage({
@@ -278,7 +299,7 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
       return
     }
 
-    if (msg.type === 'batchReady' || msg.type === 'error') {
+    if (msg.type === 'batchReady' || msg.type === 'error' || msg.type === 'batchYielded') {
       const rid = 'requestId' in msg ? msg.requestId : -1
       const pending = this.pendingRequests.get(rid ?? -1)
       if (!pending) {
@@ -286,7 +307,10 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
         return
       }
       this.pendingRequests.delete(rid!)
-      if (msg.type === 'error') {
+      if (msg.type === 'batchYielded') {
+        this.cancelledCount += 1
+        pending.reject(new DOMException('Recipe batch yielded to a foreground request.', 'AbortError'))
+      } else if (msg.type === 'error') {
         this.failedCount += 1
         pending.reject(new Error(msg.message ?? 'Worker error'))
       } else {
@@ -296,6 +320,9 @@ export class WorkerPool<TInitPayload extends Record<string, unknown> = Record<st
 
       // Worker is now idle — decrement in-flight counter and dispatch next
       pw.busy = false
+      pw.batchIndex = undefined
+      pw.requestId = undefined
+      pw.yieldRequested = false
       this.inFlightCount--
       this.drainQueue()
     }

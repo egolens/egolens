@@ -217,3 +217,25 @@ Desktop and 375 px layouts were inspected in a temporary QA tab. The QA tab
 was closed and a fresh landing preview was left for the user. Validation: 1,160 Vitest tests across 104 files;
 seven staging-script tests; production build; lint with zero errors and the
 64 existing warnings. Application deployment is still a separate phase.
+
+## Sequence 002 (September 11, 2026)
+
+The sample selector now offers 001 and 002. Selection changes the preset root URL
+and ZIP link; pressing the preset still only fills the form. Existing sealed
+recipes are matched when the user presses Load.
+
+002 source: `/Users/heejaekim/Workspace/_datasets/autonomy/pandaset/002`.
+Staging: `/Users/heejaekim/Workspace/egolens-hosted-samples/pandaset-002-full-20260911`.
+The full log contains 80 frames and 745 files (836,340,552 bytes). The staging
+script verified all copied bytes. The 744 pre-existing remote source objects
+matched local paths and sizes; this was not a remote full-content checksum audit.
+Only README.txt and source-catalog.json were added to the existing remote prefix.
+
+Root: https://data.egolens.org/pandaset/002/
+Catalog hash: `sha256:953cfbf7d3a88fd202234b1553da6ff82576dbb238230b746279e3fb7c148406`.
+ZIP: `egolens-sample-pandaset-002-full.zip`, 415,772,433 bytes, in the existing
+`webmcp-sample` GitHub release. The archive preserves the full local source tree,
+including LICENSE.txt and README.txt. No recipe was added to the sample.
+
+This verifies sample availability and selector routing, not that an arbitrary
+001-trained recipe renders 002 correctly. That remains the user's cross-log test.

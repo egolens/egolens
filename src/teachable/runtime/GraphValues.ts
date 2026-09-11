@@ -1,3 +1,4 @@
+import type { PayloadCacheV1 } from './PayloadCache'
 import type { FeatherColumnsParamsV1, DecodedFeatherColumnsV1 } from '../operators/featherColumns'
 import type { ParquetColumnsParamsV1 } from '../operators/parquetColumns'
 import type { PickleRecordsParamsV1 } from '../operators/pickleFrames'
@@ -33,6 +34,11 @@ export interface GraphExecutionLimitsV1 {
 }
 
 export interface GraphResourceSnapshotV1 {
+  readonly decodedCacheBytes?: number
+  readonly rawCacheBytes?: number
+  readonly activeReads?: number
+  readonly queuedReads?: number
+  readonly completedReads?: number
   readonly nodesExecuted: number
   readonly sourceBytesRead: number
   readonly allocationBytes: number
@@ -90,6 +96,7 @@ export interface CoreOperatorExecutionContextV1 {
   readonly signal: AbortSignal
   readonly source: ByteSourceV1
   readonly resources: GraphResourceAccountV1
+  readonly decodedPayloads?: PayloadCacheV1<object, true>
   throwIfAborted(): void
   read(path: string, signal?: AbortSignal): Promise<ArrayBuffer>
   asyncBuffer(path: string, signal?: AbortSignal): Promise<AsyncBuffer>

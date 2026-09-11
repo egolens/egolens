@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -92,7 +92,7 @@
 <body>
 
 <h1>Memory Optimization Report: <code style="color:#4ecdc4">subarray→slice</code> Fix</h1>
-<p class="sub">LiDAR 버퍼 전송 시 73.8% 메모리 절감 · rangeImage.ts line 207 · Measured on segment 10455472356147194054 (199 frames)</p>
+<p class="sub">73.8% memory savings on LiDAR buffer transfers · rangeImage.ts line 207 · Measured on segment 10455472356147194054 (199 frames)</p>
 
 <!-- ============================================================ -->
 <!-- Summary Cards -->
@@ -101,41 +101,41 @@
   <div class="card bad">
     <div class="label">Before (subarray)</div>
     <div class="val">2,959 MB</div>
-    <div class="note">LiDAR 캐시 총 전송량</div>
+    <div class="note">Total LiDAR cache transfer</div>
   </div>
   <div class="card good">
     <div class="label">After (slice)</div>
     <div class="val">775 MB</div>
-    <div class="note">유효 데이터만 전송</div>
+    <div class="note">Transfer valid data only</div>
   </div>
   <div class="card good">
-    <div class="label">절감량</div>
+    <div class="label">Savings</div>
     <div class="val">−73.8%</div>
     <div class="note">2,184 MB saved</div>
   </div>
   <div class="card neutral">
-    <div class="label">추가 레이턴시</div>
+    <div class="label">Added latency</div>
     <div class="val">&lt;0.1ms</div>
-    <div class="note">프레임당 ~1.5 MB memcpy</div>
+    <div class="note">~1.5 MB memcpy per frame</div>
   </div>
 </div>
 
 <!-- ============================================================ -->
 <!-- Root Cause Diagram -->
 <!-- ============================================================ -->
-<h2>Root Cause: subarray()의 버퍼 공유 문제</h2>
+<h2>Root Cause: subarray() Shares Its Buffer</h2>
 
 <div class="insight info">
-  <strong>핵심:</strong> <code>Float32Array.subarray()</code>는 원본 ArrayBuffer의 <em>뷰</em>를 생성합니다.
-  <code>postMessage(msg, [positions.buffer])</code>로 Transferable 전송 시, 뷰가 가리키는 <strong>전체 원본 버퍼</strong>가 전송됩니다.
+  <strong>Key point:</strong> <code>Float32Array.subarray()</code> creates a <em>view</em> of the original ArrayBuffer.
+  <code>postMessage(msg, [positions.buffer])</code> transfers the <strong>entire original buffer</strong> referenced by the view.
 </div>
 
 <svg width="100%" height="160" viewBox="0 0 900 160" style="margin: 16px 0;">
   <!-- Full buffer -->
   <rect x="50" y="20" width="800" height="40" rx="6" fill="#1a1a24" stroke="#333" stroke-width="1"/>
   <rect x="50" y="20" width="220" height="40" rx="6" fill="rgba(239,68,68,0.2)" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="160" y="44" fill="#ef4444" font-size="12" font-weight="600" text-anchor="middle">유효 데이터 (~0.9 MB)</text>
-  <text x="500" y="44" fill="#555" font-size="12" text-anchor="middle">빈 영역 — range=0 필터링된 픽셀 (~3.0 MB)</text>
+  <text x="160" y="44" fill="#ef4444" font-size="12" font-weight="600" text-anchor="middle">Valid data (~0.9 MB)</text>
+  <text x="500" y="44" fill="#555" font-size="12" text-anchor="middle">Unused: filtered range=0 pixels (~3.0 MB)</text>
   <text x="450" y="12" fill="#888" font-size="10" text-anchor="middle">new Float32Array(maxPoints × 6) — Full Allocation (~3.9 MB for TOP)</text>
 
   <!-- Arrow down -->
@@ -145,12 +145,12 @@
   <!-- Subarray view -->
   <rect x="50" y="90" width="800" height="40" rx="6" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4"/>
   <rect x="50" y="90" width="220" height="40" rx="6" fill="rgba(239,68,68,0.12)"/>
-  <text x="160" y="114" fill="#ef4444" font-size="11" font-weight="600" text-anchor="middle">.positions (뷰)</text>
-  <text x="500" y="114" fill="#555" font-size="11" text-anchor="middle">.buffer → 전체 3.9 MB가 Transferable로 전송됨!</text>
+  <text x="160" y="114" fill="#ef4444" font-size="11" font-weight="600" text-anchor="middle">.positions (view)</text>
+  <text x="500" y="114" fill="#555" font-size="11" text-anchor="middle">.buffer → all 3.9 MB transferred!</text>
 
   <!-- Fix arrow -->
   <line x1="160" y1="134" x2="160" y2="155" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
-  <text x="220" y="152" fill="#10b981" font-size="10" font-weight="600">slice(0, pointCount×6) → 독립 복사본 0.9 MB만 전송</text>
+  <text x="220" y="152" fill="#10b981" font-size="10" font-weight="600">slice(0, pointCount×6) → transfer a separate 0.9 MB copy</text>
 
   <defs>
     <marker id="arrowGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -180,7 +180,7 @@
 <!-- ============================================================ -->
 <!-- Per-RG Comparison -->
 <!-- ============================================================ -->
-<h2>Row Group별 전송량 비교</h2>
+<h2>Transfer Volume by Row Group</h2>
 
 <table>
   <thead>
@@ -190,8 +190,8 @@
       <th>Buffers</th>
       <th style="text-align:right">Before</th>
       <th style="text-align:right">After</th>
-      <th style="text-align:right">절감</th>
-      <th style="text-align:right">절감률</th>
+      <th style="text-align:right">Saved</th>
+      <th style="text-align:right">Savings (%)</th>
     </tr>
   </thead>
   <tbody>
@@ -232,12 +232,12 @@
     </tr>
   </tbody>
 </table>
-<p style="font-size:11px; color:#555;">* 199 frames × 5 sensors = 995 buffers. RG3은 46 frames (227 buffers).</p>
+<p style="font-size:11px; color:#555;">* 199 frames × 5 sensors = 995 buffers. RG3 contains 46 frames (227 buffers).</p>
 
 <!-- ============================================================ -->
 <!-- Visual Bar Comparison -->
 <!-- ============================================================ -->
-<h2>시각적 비교: Row Group별 전송량</h2>
+<h2>Visual Comparison: Transfer Volume by Row Group</h2>
 
 <div style="margin: 16px 0;">
   <div class="bar-row">
@@ -304,7 +304,7 @@
 <!-- ============================================================ -->
 <!-- Heap Timeline -->
 <!-- ============================================================ -->
-<h2>파이프라인 힙 메모리 타임라인</h2>
+<h2>Pipeline Heap Memory Timeline</h2>
 
 <svg width="100%" height="320" viewBox="0 0 900 320" style="margin: 16px 0;">
   <!-- Grid -->
@@ -382,7 +382,7 @@
 <!-- ============================================================ -->
 <!-- Per-Sensor Breakdown -->
 <!-- ============================================================ -->
-<h2>센서별 버퍼 낭비 분석</h2>
+<h2>Buffer Waste by Sensor</h2>
 
 <table>
   <thead>
@@ -392,7 +392,7 @@
       <th style="text-align:right">Allocated</th>
       <th style="text-align:right">Avg Valid Points</th>
       <th style="text-align:right">Valid Size</th>
-      <th style="text-align:right">낭비율</th>
+      <th style="text-align:right">Waste</th>
     </tr>
   </thead>
   <tbody>
@@ -448,21 +448,21 @@
 </table>
 
 <div class="insight good">
-  <strong>왜 Non-TOP 센서의 낭비가 더 큰가:</strong> FRONT/SIDE/REAR 센서는 range image 해상도 대비 유효 리턴이 적습니다 (좁은 FOV, 먼 거리). TOP 센서는 360° 회전으로 대부분의 픽셀이 유효합니다.
+  <strong>Why non-TOP sensors waste more:</strong> FRONT/SIDE/REAR sensors have fewer valid returns relative to their range-image resolution (narrow FOV, long distances). With 360° rotation, most TOP sensor pixels are valid.
 </div>
 
 <!-- ============================================================ -->
 <!-- Timing Impact -->
 <!-- ============================================================ -->
-<h2>레이턴시 영향 분석</h2>
+<h2>Latency Impact Analysis</h2>
 
 <table>
   <thead>
     <tr>
       <th>Worker</th>
-      <th style="text-align:right">Before 처리시간</th>
-      <th style="text-align:right">After 처리시간</th>
-      <th style="text-align:right">차이</th>
+      <th style="text-align:right">Before processing time</th>
+      <th style="text-align:right">After processing time</th>
+      <th style="text-align:right">Difference</th>
     </tr>
   </thead>
   <tbody>
@@ -482,14 +482,14 @@
 </table>
 
 <div class="insight info">
-  <strong>분석:</strong> range image → cartesian 변환에 삼각함수(sin/cos) + 행렬 곱셈이 프레임당 ~170K 픽셀에 수행됩니다.
-  이 연산이 4초 이상 걸리는 반면, <code>slice()</code>의 1.5 MB memcpy는 ~0.05ms로 전체의 0.001% 미만입니다.
+  <strong>Analysis:</strong> Range-image-to-Cartesian conversion applies trigonometry (sin/cos) and matrix multiplication to ~170K pixels per frame.
+  These operations take over 4 seconds, while <code>slice()</code> copies 1.5 MB in ~0.05 ms, less than 0.001% of the total.
 </div>
 
 <!-- ============================================================ -->
 <!-- Camera (unchanged) -->
 <!-- ============================================================ -->
-<h2>카메라 캐시 (변경 없음 — 검증)</h2>
+<h2>Camera Cache (Unchanged, Verified)</h2>
 
 <table>
   <thead>
@@ -532,13 +532,13 @@
 <!-- ============================================================ -->
 <!-- Conclusion -->
 <!-- ============================================================ -->
-<h2>결론</h2>
+<h2>Conclusion</h2>
 
 <div class="insight good" style="font-size: 14px;">
-  <strong>1줄 수정, 2.2 GB 절약, 성능 영향 제로.</strong><br>
-  <code>subarray()</code> → <code>slice()</code> 변경으로 LiDAR 캐시 메모리가 73.8% 감소했습니다.
-  Worker의 Transferable ArrayBuffer 전송 시 전체 원본 버퍼가 아닌 유효 데이터만 복사되어 전송됩니다.
-  프레임당 ~1.5 MB memcpy 오버헤드는 4초 이상의 변환 연산 대비 무시할 수준(0.001%)입니다.
+  <strong>One-line fix, 2.2 GB saved, no performance impact.</strong><br>
+  <code>subarray()</code> → <code>slice()</code> reduces LiDAR cache memory by 73.8%.
+  Worker transfers copy and send only valid data rather than the entire original ArrayBuffer.
+  The ~1.5 MB memcpy overhead per frame is negligible (0.001%) compared with conversion taking over 4 seconds.
 </div>
 
 <p style="font-size: 11px; color: #444; margin-top: 32px; text-align: center;">

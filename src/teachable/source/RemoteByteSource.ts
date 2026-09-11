@@ -7,14 +7,12 @@ import {
   type SourceCatalogV1,
   type ValidatedSourceCatalogV1,
 } from './SourceCatalog'
-import { sha256DigestV1 } from './sha256'
 
 export type RemoteSourceErrorCodeV1 =
   | 'REMOTE_AUTHORIZATION_FAILED'
   | 'REMOTE_BYTE_BUDGET_EXCEEDED'
   | 'REMOTE_CATALOG_INVALID'
   | 'REMOTE_CORS'
-  | 'REMOTE_DIGEST_MISMATCH'
   | 'REMOTE_LENGTH_MISMATCH'
   | 'REMOTE_OBJECT_LIMIT_EXCEEDED'
   | 'REMOTE_RANGE_REQUIRED'
@@ -76,8 +74,8 @@ interface CacheEntryV1 {
   readonly size: number
 }
 
-/** Bounded LRU cache containing verified bytes only. */
-export class VerifiedSourceCacheV1 {
+/** Bounded LRU cache of downloaded bytes. */
+export class SourceCacheV1 {
   readonly #entries = new Map<string, CacheEntryV1>()
   readonly #maxBytes: number
   #bytes = 0
@@ -100,8 +98,6 @@ export class VerifiedSourceCacheV1 {
   }
 
   set(key: string, value: Uint8Array): void {
-    const digest = key.slice(key.lastIndexOf('\u0000') + 1)
-    if (sha256DigestV1(value) !== digest) return
     if (value.byteLength > this.#maxBytes) return
     const previous = this.#entries.get(key)
     if (previous) {
@@ -135,14 +131,14 @@ export class VerifiedSourceCacheV1 {
 export interface RemoteByteSourceOptionsV1 {
   readonly rootUrl: string
   readonly catalog: unknown
-  /** Use verified whole files when a host cannot expose Content-Range to browsers. */
+  /** Use whole files when a host cannot expose Content-Range to browsers. */
   readonly preferFullObjects?: boolean
   readonly expectedCatalogHash?: string
   readonly expectedSourceManifestHash?: string
   readonly fetch?: typeof fetch
   readonly limits?: Partial<RemoteByteSourceLimitsV1>
   readonly credentialGrant?: { readonly origin: string }
-  readonly cache?: VerifiedSourceCacheV1
+  readonly cache?: SourceCacheV1
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
@@ -241,8 +237,8 @@ function checkedRange(length: number, options?: ByteSourceReadOptionsV1): readon
   return [start, end]
 }
 
-function cacheKey(sourceManifestHash: string, path: string, digest: string): string {
-  return `${sourceManifestHash}\u0000${path}\u0000${digest}`
+function cacheKey(sourceManifestHash: string, path: string, range: string): string {
+  return `${sourceManifestHash}\u0000${path}\u0000${range}`
 }
 
 function parseContentLength(response: Response): number | null {
@@ -360,7 +356,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
   readonly #entries = new Map<string, SourceCatalogEntryV1>()
   readonly #fetch: typeof fetch
   readonly #limits: RemoteByteSourceLimitsV1
-  readonly #cache: VerifiedSourceCacheV1
+  readonly #cache: SourceCacheV1
   readonly #ownsCache: boolean
   readonly #preferFullObjects: boolean
   readonly #credentials: RequestCredentials
@@ -390,11 +386,13 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
     // `TypeError: Illegal invocation` before any request is sent.
     this.#fetch = (options.fetch ?? globalThis.fetch).bind(globalThis)
     this.#limits = checkedLimits(options.limits)
-    this.#cache = options.cache ?? new VerifiedSourceCacheV1(this.#limits.maxCacheBytes)
+    this.#cache = options.cache ?? new SourceCacheV1(this.#limits.maxCacheBytes)
     this.#ownsCache = options.cache === undefined
     this.#preferFullObjects = options.preferFullObjects ?? false
     this.#credentials = credentialsForGrant(this.#root, options.credentialGrant)
   }
+
+  snapshotResources() { return { rawCacheBytes: this.#cache.sizeBytes, responseBytes: this.#responseBytes } }
 
   get responseBytes(): number {
     return this.#responseBytes
@@ -431,7 +429,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
       }
       if (start === end) return new ArrayBuffer(0)
       const bytes = entry.chunks
-        ? await this.#readVerifiedChunks(entry, start, end, controller.signal)
+        ? await this.#readChunks(entry, start, end, controller.signal)
         : await this.#readFull(entry, controller.signal)
       if (controller.signal.aborted) throw abortError('Remote source request was aborted.')
       const offset = entry.chunks ? 0 : start
@@ -455,8 +453,8 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
   }
 
   async #readFull(entry: SourceCatalogEntryV1, signal: AbortSignal): Promise<Uint8Array> {
-    const key = cacheKey(this.sourceManifestHash, entry.path, entry.sha256)
-    const cached = this.#verifiedCached(key, entry.sha256, entry.size)
+    const key = cacheKey(`${this.rootUrl}\u0000${this.sourceManifestHash}`, entry.path, 'full')
+    const cached = this.#cached(key, entry.size)
     if (cached) return cached
     if (entry.size > this.#limits.maxFullObjectBytes) {
       throw new RemoteSourceErrorV1('REMOTE_OBJECT_LIMIT_EXCEEDED', 'Full object exceeds the configured limit.', { path: entry.path })
@@ -469,12 +467,11 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
       })
     }
     const bytes = await this.#responseBody(response, entry.size, this.#limits.maxFullObjectBytes, entry.path, signal)
-    this.#verifyDigest(bytes, entry.sha256, entry.path)
     this.#cache.set(key, bytes)
     return bytes
   }
 
-  async #readVerifiedChunks(
+  async #readChunks(
     entry: SourceCatalogEntryV1,
     start: number,
     end: number,
@@ -482,8 +479,8 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
   ): Promise<Uint8Array> {
     const chunks = entry.chunks
     if (!chunks) throw new Error('REMOTE_INTERNAL_CHUNKS_MISSING')
-    const complete = this.#verifiedCached(
-      cacheKey(this.sourceManifestHash, entry.path, entry.sha256), entry.sha256, entry.size,
+    const complete = this.#cached(
+      cacheKey(`${this.rootUrl}\u0000${this.sourceManifestHash}`, entry.path, 'full'), entry.size,
     )
     if (complete) return complete.subarray(start, end)
     const firstChunk = Math.floor(start / chunks.size)
@@ -491,11 +488,10 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
     const pieces: Uint8Array[] = []
     let allCached = true
     for (let index = firstChunk; index <= lastChunk; index += 1) {
-      const digest = chunks.digests[index]
       const chunkLength = Math.min(chunks.size, entry.size - index * chunks.size)
-      const cached = digest
-        ? this.#verifiedCached(cacheKey(this.sourceManifestHash, entry.path, digest), digest, chunkLength)
-        : null
+      const cached = this.#cached(
+        cacheKey(`${this.rootUrl}\u0000${this.sourceManifestHash}`, entry.path, `${index * chunks.size}:${chunkLength}`), chunkLength,
+      )
       if (!cached) {
         allCached = false
         break
@@ -508,7 +504,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
       const rangeEnd = Math.min(entry.size, (lastChunk + 1) * chunks.size)
       const rangeLength = rangeEnd - rangeStart
       if (rangeLength > this.#limits.maxRangeResponseBytes) {
-        throw new RemoteSourceErrorV1('REMOTE_OBJECT_LIMIT_EXCEEDED', 'Expanded verified range exceeds the configured limit.', { path: entry.path })
+        throw new RemoteSourceErrorV1('REMOTE_OBJECT_LIMIT_EXCEEDED', 'Expanded range exceeds the configured limit.', { path: entry.path })
       }
       const response = await this.#request(entry, { start: rangeStart, end: rangeEnd }, signal)
       if (response.status === 200) {
@@ -519,8 +515,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
           })
         }
         const full = await this.#responseBody(response, entry.size, this.#limits.maxFullObjectBytes, entry.path, signal)
-        this.#verifyDigest(full, entry.sha256, entry.path)
-        this.#cache.set(cacheKey(this.sourceManifestHash, entry.path, entry.sha256), full)
+        this.#cache.set(cacheKey(`${this.rootUrl}\u0000${this.sourceManifestHash}`, entry.path, 'full'), full)
         return full.subarray(start, end)
       }
       if (response.status !== 206) {
@@ -542,10 +537,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
         const relativeStart = chunkStart - rangeStart
         const chunkLength = Math.min(chunks.size, entry.size - chunkStart)
         const piece = received.subarray(relativeStart, relativeStart + chunkLength)
-        const digest = chunks.digests[index]
-        if (!digest) throw new RemoteSourceErrorV1('REMOTE_CATALOG_INVALID', 'Chunk digest is missing.', { path: entry.path })
-        this.#verifyDigest(piece, digest, entry.path)
-        this.#cache.set(cacheKey(this.sourceManifestHash, entry.path, digest), piece)
+        this.#cache.set(cacheKey(`${this.rootUrl}\u0000${this.sourceManifestHash}`, entry.path, `${chunkStart}:${chunkLength}`), piece)
         pieces.push(piece)
       }
     }
@@ -734,16 +726,10 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
     return joined
   }
 
-  #verifyDigest(bytes: Uint8Array, expected: string, path: string): void {
-    if (sha256DigestV1(bytes) !== expected) {
-      throw new RemoteSourceErrorV1('REMOTE_DIGEST_MISMATCH', 'Received bytes do not match the catalog digest.', { path })
-    }
-  }
-
-  #verifiedCached(key: string, expectedDigest: string, expectedLength: number): Uint8Array | null {
+  #cached(key: string, expectedLength: number): Uint8Array | null {
     const bytes = this.#cache.get(key)
     if (!bytes) return null
-    if (bytes.byteLength !== expectedLength || !key.endsWith(`\u0000${expectedDigest}`)) {
+    if (bytes.byteLength !== expectedLength) {
       this.#cache.delete(key)
       return null
     }
@@ -782,7 +768,7 @@ export class RemoteByteSourceV1 implements ByteSourceV1 {
 export async function fetchSourceCatalogV1(
   rawUrl: string,
   options: {
-    readonly expectedCatalogHash: string
+    readonly expectedCatalogHash?: string
     readonly expectedSourceManifestHash?: string
     readonly fetch?: typeof fetch
     readonly signal?: AbortSignal

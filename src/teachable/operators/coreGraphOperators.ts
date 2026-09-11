@@ -1,3 +1,5 @@
+import { linkedReadSignal, mapConcurrentV1 } from '../runtime/ReadScheduler'
+import type { CoreOperatorExecutionContextV1 } from '../runtime/GraphValues'
 import { invertRowMajor4x4, multiplyRowMajor4x4 } from '../../utils/matrix'
 import { quaternionToMatrix4x4 } from '../../utils/quaternion'
 import type { ParquetRow } from '../../utils/merge'
@@ -161,26 +163,48 @@ function rowsBytes(rows: readonly ParquetRow[]): number {
   )
 }
 
-function linkedSignal(lifecycle: AbortSignal, request?: AbortSignal): AbortSignal {
-  if (!request) return lifecycle
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any([lifecycle, request])
-  const controller = new AbortController()
-  const abort = () => controller.abort()
-  lifecycle.addEventListener('abort', abort, { once: true })
-  request.addEventListener('abort', abort, { once: true })
-  if (lifecycle.aborted || request.aborted) controller.abort()
-  return controller.signal
+const linkedSignal = linkedReadSignal
+
+function retainDecodedV1<T>(
+  collection: { context: CoreOperatorExecutionContextV1; retainedReleases: Map<string, () => void> },
+  cache: Map<string, Promise<T>>, key: string, token: Promise<T>, retentionKey: string, bytes: number,
+): void {
+  collection.context.throwIfAborted()
+  const owner = collection.context.decodedPayloads
+  if (!owner) { collection.retainedReleases.set(retentionKey, collection.context.resources.allocate(bytes)); return }
+  let release = () => {}
+  const remove = () => owner.delete(token)
+  const accepted = owner.set(token, true, bytes, () => {
+    if (cache.get(key) === token) cache.delete(key)
+    if (collection.retainedReleases.get(retentionKey) === remove) collection.retainedReleases.delete(retentionKey)
+    release()
+  })
+  if (!accepted) { if (cache.get(key) === token) cache.delete(key); return }
+  try { release = collection.context.resources.allocate(bytes) }
+  catch (error) { owner.delete(token); throw error }
+  collection.retainedReleases.set(retentionKey, remove)
+}
+
+async function* metadataFilesV1(files: readonly { path: string }[], context: CoreOperatorExecutionContextV1) {
+  for (let offset = 0; offset < files.length; offset += 6) {
+    const batch = await mapConcurrentV1(files.slice(offset, offset + 6), async file => ({ file, bytes: await context.read(file.path) }))
+    for (const entry of batch) {
+      if (context.signal?.aborted) throw new DOMException('Metadata read was aborted.', 'AbortError')
+      yield entry
+    }
+  }
 }
 
 async function loadTable(collection: GraphTableCollectionV1, path: string, requestSignal?: AbortSignal) {
   let pending = collection.cache.get(path)
+  if (pending) collection.context.decodedPayloads?.get(pending)
   if (!pending) {
     pending = (async () => {
       const signal = linkedSignal(collection.context.signal, requestSignal)
       if (signal.aborted) throw new DOMException('Operator execution was aborted.', 'AbortError')
       const bytes = await collection.context.read(path, signal)
       const decoded = decodeFeatherColumnsV1(bytes, collection.params, signal)
-      collection.retainedReleases.set(path, collection.context.resources.allocate(bytes.byteLength))
+      retainDecodedV1(collection, collection.cache, path, pending!, path, bytes.byteLength)
       return decoded
     })()
     collection.cache.set(path, pending)
@@ -195,6 +219,7 @@ export async function loadGraphBinaryV1(
   requestSignal?: AbortSignal,
 ): Promise<GraphDecodedBinaryV1> {
   let pending = collection.cache.get(path)
+  if (pending) collection.context.decodedPayloads?.get(pending)
   if (!pending) {
     pending = (async () => {
       const signal = linkedSignal(collection.context.signal, requestSignal)
@@ -210,7 +235,7 @@ export async function loadGraphBinaryV1(
               ? await decodePickleRecordsV1(bytes, collection.decoder.params, signal)
               : await decodeNpzUint16V1(bytes, collection.decoder.params, signal)
       const retainedBytes = decoded instanceof Uint16Array ? decoded.byteLength : decoded.values.byteLength
-      collection.retainedReleases.set(path, collection.context.resources.allocate(retainedBytes))
+      retainDecodedV1(collection, collection.cache, path, pending!, path, retainedBytes)
       return decoded
     })()
     collection.cache.set(path, pending)
@@ -238,10 +263,11 @@ export async function loadGraphParquetFileV1(
   path: string,
   requestSignal?: AbortSignal,
 ) {
+  if (requestSignal?.aborted) throw new DOMException('Operator execution was aborted.', 'AbortError')
   let pending = collection.fileCache.get(path)
   if (!pending) {
     pending = (async () => {
-      const source = await collection.context.asyncBuffer(path, requestSignal)
+      const source = await collection.context.asyncBuffer(path)
       return await openParquetFile(path, source, { cache: false })
     })()
     collection.fileCache.set(path, pending)
@@ -257,11 +283,12 @@ export async function loadGraphParquetRowsV1(
   const rows: ParquetRow[] = []
   for (const file of collection.files) {
     let pending = collection.cache.get(file.path)
+    if (pending) collection.context.decodedPayloads?.get(pending)
     if (!pending) {
       pending = (async () => {
         const parquet = await loadGraphParquetFileV1(collection, file.path, requestSignal)
         const decoded = await readParquetColumnsV1(parquet, collection.params, { signal: requestSignal })
-        collection.retainedReleases.set(`full:${file.path}`, collection.context.resources.allocate(rowsBytes(decoded)))
+        retainDecodedV1(collection, collection.cache, file.path, pending!, `full:${file.path}`, rowsBytes(decoded))
         return decoded
       })()
       collection.cache.set(file.path, pending)
@@ -283,6 +310,7 @@ async function loadGraphParquetColumnV1(
   for (const file of collection.files) {
     const cacheKey = `${file.path}\u0000${columnName}`
     let pending = collection.projectionCache.get(cacheKey)
+    if (pending) collection.context.decodedPayloads?.get(pending)
     if (!pending) {
       pending = (async () => {
         const parquet = await loadGraphParquetFileV1(collection, file.path, requestSignal)
@@ -291,7 +319,7 @@ async function loadGraphParquetColumnV1(
           columns: [column],
           maxOutputBytes: Math.min(collection.params.maxOutputBytes, Math.max(8, collection.params.maxRows * 8)),
         }, { signal: requestSignal })
-        collection.retainedReleases.set(`projection:${cacheKey}`, collection.context.resources.allocate(rowsBytes(decoded)))
+        retainDecodedV1(collection, collection.projectionCache, cacheKey, pending!, `projection:${cacheKey}`, rowsBytes(decoded))
         return decoded
       })()
       collection.projectionCache.set(cacheKey, pending)
@@ -314,6 +342,7 @@ export async function loadGraphParquetFrameRowsV1(
   for (const file of collection.files) {
     const frameCacheKey = `${file.path}\u0000${timestampField}\u0000${timestamp}`
     let frameRows = collection.frameRowsCache.get(frameCacheKey)
+    if (frameRows) collection.context.decodedPayloads?.get(frameRows)
     if (frameRows) {
       rows.push(...await frameRows)
       if (signal.aborted) throw new DOMException('Operator execution was aborted.', 'AbortError')
@@ -322,6 +351,7 @@ export async function loadGraphParquetFrameRowsV1(
     const parquet = await loadGraphParquetFileV1(collection, file.path, requestSignal)
     const cacheKey = `${file.path}\u0000${timestampField}`
     let index = collection.frameIndexCache.get(cacheKey)
+    if (index) collection.context.decodedPayloads?.get(index)
     if (!index) {
       index = (async () => {
         const timestampColumn = collection.params.columns.find((entry) => entry.name === timestampField)
@@ -346,7 +376,7 @@ export async function loadGraphParquetFrameRowsV1(
           else byTimestamp.set(value, { rowStart: rowIndex, rowEnd: rowIndex + 1 })
           previousTimestamp = value
         })
-        collection.retainedReleases.set(`index:${cacheKey}`, collection.context.resources.allocate(timestampRows.length * 24))
+        retainDecodedV1(collection, collection.frameIndexCache, cacheKey, index!, `index:${cacheKey}`, timestampRows.length * 24)
         return byTimestamp
       })()
       collection.frameIndexCache.set(cacheKey, index)
@@ -356,7 +386,7 @@ export async function loadGraphParquetFrameRowsV1(
     if (range) {
       frameRows = (async () => {
         const decoded = await readParquetColumnsV1(parquet, collection.params, { ...range, signal: requestSignal })
-        collection.retainedReleases.set(`frame:${frameCacheKey}`, collection.context.resources.allocate(rowsBytes(decoded)))
+        retainDecodedV1(collection, collection.frameRowsCache, frameCacheKey, frameRows!, `frame:${frameCacheKey}`, rowsBytes(decoded))
         return decoded
       })()
       collection.frameRowsCache.set(frameCacheKey, frameRows)
@@ -477,8 +507,7 @@ const pickleRows: CoreOperatorImplementationV1 = async (inputs, params, context)
   const rows: Readonly<Record<string, unknown>>[] = []
   const fileCount = (inputs.files as readonly unknown[]).length
   const budget = typeof params.maxTotalRows === 'number' ? Math.min(params.maxTotalRows, MATERIALIZED_ROWS_BUDGET_V1) : MATERIALIZED_ROWS_BUDGET_V1
-  for (const file of inputs.files as readonly { path: string }[]) {
-    const bytes = await context.read(file.path)
+  for await (const { file, bytes } of metadataFilesV1(inputs.files as readonly { path: string }[], context)) {
     let frame
     try {
       frame = await decodePickleDataFrameV1(bytes, params as unknown as PickleLimitsV1)
@@ -526,8 +555,7 @@ const jsonRecords: CoreOperatorImplementationV1 = async (inputs, params, context
   // PandaSet lidar/poses.json or meta/timestamps.json.
   const indexField = typeof params.indexField === 'string' ? params.indexField : null
   const rows: Readonly<Record<string, unknown>>[] = []
-  for (const file of inputs.files as readonly { path: string }[]) {
-    const bytes = await context.read(file.path)
+  for await (const { file, bytes } of metadataFilesV1(inputs.files as readonly { path: string }[], context)) {
     let fileRows: Record<string, unknown>[]
     try {
       if (layout === 'array') {
@@ -659,8 +687,7 @@ async function readTextRows(
 ): Promise<Readonly<Record<string, unknown>>> {
   if (!Array.isArray(inputs.files)) throw new Error('GRAPH_READER_FILES_INVALID')
   const rows: Readonly<Record<string, unknown>>[] = []
-  for (const file of inputs.files as readonly { path: string }[]) {
-    const bytes = await context.read(file.path)
+  for await (const { file, bytes } of metadataFilesV1(inputs.files as readonly { path: string }[], context)) {
     let fileRows: Record<string, unknown>[]
     try {
       fileRows = decode(new TextDecoder().decode(bytes), file.path)

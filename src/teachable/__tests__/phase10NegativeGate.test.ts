@@ -87,13 +87,13 @@ describe('Phase 10 required negative gates', () => {
     await expect(source.read('frames/data.bin')).rejects.toMatchObject({ code: 'REMOTE_REDIRECT_FORBIDDEN' })
   })
 
-  it('source-tampering', async () => {
+  it('accepts payload changes without digest validation', async () => {
     const bytes = new Uint8Array([1])
     const source = new RemoteByteSourceV1({
       rootUrl: 'https://data.example.test/root/', catalog: catalog(bytes),
       fetch: vi.fn<typeof fetch>(async () => response(new Uint8Array([2]))),
     })
-    await expect(source.read('frames/data.bin')).rejects.toMatchObject({ code: 'REMOTE_DIGEST_MISMATCH' })
+    await expect(source.read('frames/data.bin')).resolves.toEqual(new Uint8Array([2]).buffer)
   })
 
   it('oversized-response', async () => {

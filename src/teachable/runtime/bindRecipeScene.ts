@@ -53,7 +53,10 @@ export async function bindRecipeSceneV1(
     signal: input.signal,
   })
   try {
-    return assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    const binding = assembleGraphSceneV1({ compiledRecipe: input.compiledRecipe, graph, sceneId: input.sceneId })
+    return { ...binding, scene: { ...binding.scene, recipeWorkerPlan: {
+      compiledRecipe: input.compiledRecipe, graph, source: input.source, inventory, sceneId: input.sceneId,
+    } } }
   } catch (error) {
     graph.dispose()
     throw error
@@ -85,6 +88,8 @@ export async function bindRemoteRecipeSceneV1(
     const inner = binding.scene
     let disposed = false
     const scene: NormalizedSceneV1 = {
+      recipeWorkerPlan: inner.recipeWorkerPlan,
+      snapshotResources: () => inner.snapshotResources?.() ?? { nodesExecuted: 0, sourceBytesRead: 0, allocationBytes: 0, peakAllocationBytes: 0 },
       manifest: inner.manifest,
       index: inner.index,
       relations: inner.relations,

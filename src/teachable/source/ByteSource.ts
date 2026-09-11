@@ -17,6 +17,7 @@ export interface ByteSourceReadOptionsV1 {
  * branch on File versus URL or recover a host filesystem path.
  */
 export interface ByteSourceV1 {
+  snapshotResources?(): { readonly rawCacheBytes: number; readonly responseBytes: number }
   has(path: string): boolean
   byteLength(path: string): number | null
   read(path: string, options?: ByteSourceReadOptionsV1): Promise<ArrayBuffer>

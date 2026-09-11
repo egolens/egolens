@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bridgeNormalizedFrame } from '../runtime/compatibilityBridge'
+import { bridgeNormalizedFrame, normalizedManifestToDatasetManifest } from '../runtime/compatibilityBridge'
 import type { NormalizedFrameV1, NormalizedManifestV1 } from '../runtime/normalizedScene'
 
 const manifest = {
@@ -9,6 +9,41 @@ const manifest = {
   ],
   taxonomies: [{ role: 'objects', classes: [{ id: 'car', rendererId: 1 }] }],
 } as unknown as NormalizedManifestV1
+
+describe('semantic taxonomy projection', () => {
+  const semanticManifest: NormalizedManifestV1 = {
+    id: 'custom', name: 'Custom', nominalFrameRate: 10,
+    sensors: [], pointAttributes: [], capabilities: new Set(['lidarSegmentation']),
+    pointLayout: { interleavedAttributes: ['x', 'y', 'z'], colorModes: ['segment'] },
+    taxonomies: [{
+      id: 'semantics', role: 'lidar-semantics',
+      classes: [
+        { id: 'pedestrian-object', rendererId: 31, label: 'Pedestrian with Object', color: '#8040ff' },
+        { id: 'road', rendererId: 13, label: 'Road', color: '#00ffff' },
+      ],
+    }],
+  }
+
+  it('uses recipe colors and renderer IDs when no explicit palette is provided', () => {
+    const projected = normalizedManifestToDatasetManifest(semanticManifest)
+    expect(projected.semanticLabels?.[31]).toBe('Pedestrian with Object')
+    expect(projected.semanticLabels?.[13]).toBe('Road')
+    expect(projected.semanticPalette?.[31]).toEqual([128 / 255, 64 / 255, 1])
+    expect(projected.semanticPalette?.[13]).toEqual([0, 1, 1])
+    expect(projected.semanticPalette?.[12]).toEqual([0.5, 0.5, 0.5])
+  })
+
+  it('preserves explicit palettes for existing datasets and camera semantics', () => {
+    const palette = Array.from({ length: 32 }, () => [0.1, 0.2, 0.3] as const)
+    const projected = normalizedManifestToDatasetManifest({
+      ...semanticManifest,
+      taxonomies: [{ ...semanticManifest.taxonomies[0], role: 'camera-semantics', palette }],
+    })
+    expect(projected.cameraSemanticPalette?.[31]).toEqual([0.1, 0.2, 0.3])
+    expect(projected.cameraSemanticLabels?.[31]).toBe('Pedestrian with Object')
+    expect(projected.semanticPalette).toBeUndefined()
+  })
+})
 
 function frameWithRadar(values: Float32Array): NormalizedFrameV1 {
   return {

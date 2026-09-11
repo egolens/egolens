@@ -42,6 +42,8 @@ export function detectWebMcpAgentV1(win: Window & typeof globalThis = window): W
 export function useWebMcpAgentV1(): WebMcpAgentV1 {
   const [agent, setAgent] = useState<WebMcpAgentV1>(() => (typeof window === 'undefined' ? { available: false, kind: 'unknown', chatLocation: null } : detectWebMcpAgentV1()))
   useEffect(() => {
+    const recheck = () => setAgent(detectWebMcpAgentV1())
+    window.addEventListener('egolens:check-webmcp', recheck)
     let attempts = 0
     const timer = window.setInterval(() => {
       attempts += 1
@@ -49,7 +51,10 @@ export function useWebMcpAgentV1(): WebMcpAgentV1 {
       setAgent((current) => (current.available === next.available && current.kind === next.kind ? current : next))
       if (next.available || attempts >= 10) window.clearInterval(timer)
     }, 1000)
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('egolens:check-webmcp', recheck)
+    }
   }, [])
   return agent
 }

@@ -16,7 +16,7 @@ export default function OtherFormatsChip({ onClick, disabled = false }: { onClic
         <span aria-hidden="true">＋ </span>Other formats
       </button>
       <span id={tooltipId} role="tooltip" className="other-formats-tooltip">
-        <span>Use an adapter recipe, or create one with AI.</span>
+        <span>Learn how adapter recipes open more dataset formats.</span>
       </span>
     </span>
   )

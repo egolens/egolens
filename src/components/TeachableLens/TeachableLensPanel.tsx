@@ -142,7 +142,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
 
         {recognized && (
           <div data-testid="saved-recipes" style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {[...savedRecipes].sort((a, b) => b.finalizedAt.localeCompare(a.finalizedAt)).map((record) => (
+            {[...savedRecipes].sort((a, b) => Date.parse(b.finalizedAt) - Date.parse(a.finalizedAt)).slice(0, 1).map((record) => (
               <div key={record.recipeHash} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', borderRadius: 14, border: `1px solid ${colors.accent}`, background: alpha(colors.accent, 0.06) }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>{record.artifact.identity.name}</div>

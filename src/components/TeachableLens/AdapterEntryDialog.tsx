@@ -1,6 +1,9 @@
+import { PANDASET_TEACHING_SAMPLES } from '../../utils/teachingSample'
+import DatasetLoadButton from '../DatasetLoadButton'
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { colors, radius } from '../../theme'
+import { openRemoteSourceInventoryV1 } from '../../teachable/authoring/RemoteSourceInventory'
 import { scanSelectedFiles } from '../../utils/folderScan'
 import { readRecipeArtifactFileV1 } from '../../teachable/authoring/portability'
 import { validateRecipeImportV1, validateRecipeSourceV1 } from '../../teachable/authoring/recipeImport'
@@ -15,6 +18,8 @@ import './adapterEntry.css'
 export type AdapterEntryMode = 'choose' | 'use'
 export interface AdapterEntryRequest {
   mode: AdapterEntryMode
+  remoteUrl?: string
+  recipeSource?: 'file' | 'url'
   inventory?: SourceInventoryV1
   savedRecipes?: readonly FinalizedArtifactRecordV1[]
 }
@@ -31,8 +36,11 @@ const buttonStyle: CSSProperties = {
 }
 const primaryStyle: CSSProperties = { ...buttonStyle, background: colors.accent, color: colors.textOnAccent, borderColor: colors.accent }
 
-export default function AdapterEntryDialog({ request, onClose, onTeach, onRender }: {
+export default function AdapterEntryDialog({ request, onClose, onTeach, onRender, onChoose, onSourceUrlChange, inline = false }: {
   request: AdapterEntryRequest
+  inline?: boolean
+  onSourceUrlChange?: (url: string | null) => void
+  onChoose?: (request: AdapterTeachingRequest) => void
   onClose: () => void
   onTeach: (request: AdapterTeachingRequest) => void
   onRender: (inventory: SourceInventoryV1, recipe: EgoLensAdapterRecipeV1) => Promise<void>
@@ -43,23 +51,32 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
   const folderPurpose = useRef<'use' | 'teach'>('use')
   const activeRequest = useRef<AbortController | null>(null)
   const inventoryRef = useRef(request.inventory ?? null)
+  const handingOff = useRef(false)
   const [mode, setMode] = useState(request.mode)
   const [inventory, setInventory] = useState(request.inventory ?? null)
   const [saved, setSaved] = useState(request.savedRecipes ?? [])
   const [recipe, setRecipe] = useState<EgoLensAdapterRecipeV1 | null>(null)
-  const [sourceTab, setSourceTab] = useState<'file' | 'url'>('file')
+  const [sourceTab, setSourceTab] = useState<'file' | 'url'>(request.recipeSource ?? 'file')
+  const [dataTab, setDataTab] = useState<'local' | 'remote'>(request.remoteUrl || request.inventory?.kind === 'remote' ? 'remote' : 'local')
+  const [dataUrl, setDataUrl] = useState(request.remoteUrl ?? '')
+  const [recipeAttempted, setRecipeAttempted] = useState(false)
   const [url, setUrl] = useState('')
   const [hash, setHash] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const agent = useAgent()
   const openingDataset = busy === 'Opening dataset…'
+  useEffect(() => { onSourceUrlChange?.(dataTab === 'remote' ? dataUrl : null) }, [dataTab, dataUrl, onSourceUrlChange])
 
   useEffect(() => {
+    if (inline) return () => {
+      activeRequest.current?.abort()
+      if (!handingOff.current) inventoryRef.current?.revoke()
+    }
     const element = dialog.current!
     element.showModal()
     return () => { activeRequest.current?.abort(); element.close() }
-  }, [])
+  }, [inline])
 
   const close = () => {
     if (openingDataset) return
@@ -103,15 +120,60 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
       if (signal.aborted) { selected.revoke(); return }
       inventoryRef.current?.revoke()
       inventoryRef.current = selected
+      handingOff.current = false
       setInventory(selected)
       setSaved(matches)
       if (purpose === 'teach') handOffTeaching(selected, matches)
     })
   }
 
+  const clearSource = () => {
+    inventoryRef.current?.revoke()
+    inventoryRef.current = null
+    setInventory(null)
+    setSaved([])
+    setError(null)
+  }
+  const connectRemote = (load = false) => void run('Connecting to dataset…', async (signal) => {
+    const root = new URL(dataUrl.trim())
+    if (root.search || root.hash) throw new Error('Use a dataset folder URL without a query or fragment.')
+    if (!root.pathname.endsWith('/')) root.pathname += '/'
+    const hostedSample = Object.values(PANDASET_TEACHING_SAMPLES).find(sample => sample.rootUrl === root.href)
+    const selected = await openRemoteSourceInventoryV1({
+      rootUrl: root.href, catalogUrl: new URL('source-catalog.json', root).href,
+      preferFullObjects: true, signal,
+      ...(hostedSample ? { limits: { maxTotalResponseBytes: hostedSample.maxTotalResponseBytes } } : {}),
+    })
+    try {
+      const matches = await teachableAuthoringSession.findSavedRecipes(selected).catch(() => [])
+      if (signal.aborted) { selected.revoke(); return }
+      inventoryRef.current?.revoke()
+      inventoryRef.current = selected
+      handingOff.current = false
+      setInventory(selected)
+      setSaved(matches)
+      if (load && !recipe && onChoose) {
+        handingOff.current = true
+        inventoryRef.current = null
+        setInventory(null)
+        setSaved([])
+        onChoose({ inventory: selected, savedRecipes: matches })
+      } else if (load && recipe) {
+        const validated = await validateRecipeImportV1(recipe)
+        await validateRecipeSourceV1(validated, selected)
+        if (signal.aborted) return
+        handingOff.current = true
+        await onRender(selected, validated)
+        inventoryRef.current = null
+        onClose()
+      }
+    } catch (cause) { selected.revoke(); throw cause }
+  })
+
   const importFile = (file: File | undefined) => {
     if (!file) return
     // A failed replacement must not leave the old recipe eligible for Render.
+    setRecipeAttempted(true)
     setRecipe(null)
     void run('Checking adapter…', async (signal) => {
       const imported = await validateRecipeImportV1(await readRecipeArtifactFileV1(file))
@@ -120,6 +182,7 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
   }
 
   const importUrl = () => {
+    setRecipeAttempted(true)
     setRecipe(null)
     void run('Fetching adapter…', async (signal) => {
       const fetched = await fetchRemoteRecipeForImportV1(url.trim(), { signal, expectedRecipeHash: hash.trim() || undefined })
@@ -134,12 +197,26 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
       const validated = await validateRecipeImportV1(selectedRecipe)
       await validateRecipeSourceV1(validated, inventory)
       if (signal.aborted) return
+      handingOff.current = true
       await onRender(inventory, validated)
       // The scene now owns this inventory. Do not revoke it when closing.
       inventoryRef.current = null
       onClose()
     })
   }
+
+  const loadLocal = () => {
+    if (!inventory) return
+    if (recipe) { render(recipe); return }
+    if (onChoose) {
+      handingOff.current = true
+      inventoryRef.current = null
+      setInventory(null)
+      setSaved([])
+      onChoose({ inventory, savedRecipes: saved })
+    }
+  }
+  const invalidRecipe = !recipe && (recipeAttempted || (sourceTab === 'url' && !!url.trim()))
 
   const startTeaching = () => {
     if (!agent.available) return
@@ -152,26 +229,21 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
   }
 
   const title = mode === 'use' ? 'Use an adapter recipe' : 'Open your dataset with an adapter'
-  return (
-    <dialog ref={dialog} className="adapter-dialog" aria-labelledby="adapter-dialog-title" onCancel={(event) => {
-      // File-picker cancellation bubbles too; it must not dismiss this dialog.
-      if (event.target !== event.currentTarget) { folderPurpose.current = 'use'; return }
-      event.preventDefault()
-      close()
-    }} onKeyDown={(event) => event.stopPropagation()}>
-      <div className="adapter-dialog-heading">
+  const content = (
+    <>
+      {!inline && <div className="adapter-dialog-heading">
         <h2 id="adapter-dialog-title">{title}</h2>
         <button type="button" aria-label="Close adapter setup" disabled={openingDataset} onClick={close} style={buttonStyle}>✕</button>
-      </div>
-      {mode !== 'choose' && <button type="button" disabled={!!busy} onClick={() => changeMode('choose')} className="adapter-text-button">← Other format options</button>}
+      </div>}
+      {!inline && mode !== 'choose' && <button type="button" disabled={!!busy} onClick={() => changeMode('choose')} className="adapter-text-button">← Other format options</button>}
 
       <input ref={folderInput} aria-label="Dataset folder" type="file" hidden multiple {...{ webkitdirectory: '', directory: '' }} onChange={(event) => { selectFolder(event.target.files); event.target.value = '' }} />
       <input ref={fileInput} aria-label="Adapter recipe file" type="file" hidden accept=".json,.egolens-adapter.json,application/json" onChange={(event) => { importFile(event.target.files?.[0]); event.target.value = '' }} />
 
       {inventory && (
         <div className="adapter-source-summary">
-          <div><strong>Dataset folder selected</strong><p>{inventory.snapshot().entries.length.toLocaleString()} {inventory.snapshot().entries.length === 1 ? 'file' : 'files'}. Kept while you choose an adapter.</p></div>
-          <button type="button" disabled={!!busy} onClick={() => chooseFolder()} style={buttonStyle}>Change folder</button>
+          <div><strong>{inventory.kind === 'remote' ? 'Remote dataset connected' : 'Dataset folder selected'}</strong><p>{inventory.snapshot().entries.length.toLocaleString()} {inventory.snapshot().entries.length === 1 ? 'file' : 'files'}. Kept while you choose an adapter.</p></div>
+          <button type="button" disabled={!!busy} onClick={() => inventory.kind === 'remote' ? clearSource() : chooseFolder()} style={buttonStyle}>{inventory.kind === 'remote' ? 'Change URL' : 'Change folder'}</button>
         </div>
       )}
 
@@ -190,8 +262,9 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
       </>}
 
       {mode === 'use' && <>
-        <p>An adapter describes how to read your data. Select a recipe and its matching dataset folder. No AI agent is needed.</p>
-        <div className="adapter-input-methods" role="group" aria-label="Recipe source">
+        {!inline && <p>An adapter describes how to read your data. Select a recipe and its matching dataset folder. No AI agent is needed.</p>}
+        {inline && <div>Adapter recipe <span style={{ color: colors.textDim }}>(optional)</span></div>}
+        <div className="adapter-input-methods adapter-segmented" role="group" aria-label="Recipe source">
           <button type="button" disabled={!!busy} aria-pressed={sourceTab === 'file'} onClick={() => { setSourceTab('file'); setError(null) }} style={buttonStyle}>Recipe file</button>
           <button type="button" disabled={!!busy} aria-pressed={sourceTab === 'url'} onClick={() => { setSourceTab('url'); setError(null) }} style={buttonStyle}>Recipe URL</button>
         </div>
@@ -200,13 +273,14 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
           : <form onSubmit={(event) => { event.preventDefault(); importUrl() }} className="adapter-url-form">
               <label>Recipe URL<input type="url" required disabled={!!busy} value={url} onChange={(event) => { setUrl(event.target.value); setRecipe(null) }} placeholder="https://example.org/adapter.json" /></label>
               <p>The URL provides the recipe; you select the data folder separately.</p>
-              <details className="adapter-advanced-options">
+              {!inline && <details className="adapter-advanced-options">
                 <summary>Advanced options{hash.trim() ? ' (version check enabled)' : ''}</summary>
                 <label>Expected recipe hash (optional)<input type="text" disabled={!!busy} value={hash} onChange={(event) => { setHash(event.target.value); setRecipe(null) }} placeholder="sha256:…" spellCheck={false} /></label>
                 <p>Only import the recipe version that matches this hash. Leave blank to use the recipe currently at this URL.</p>
-              </details>
+              </details>}
               <button type="submit" disabled={!!busy || !url.trim()} style={buttonStyle}>Import URL</button>
             </form>}
+        {inline && (recipe || recipeAttempted || url) && <button type="button" disabled={!!busy} className="adapter-text-button" onClick={() => { setRecipe(null); setRecipeAttempted(false); setUrl(''); setHash(''); setError(null) }}>Clear recipe</button>}
         {recipe && <div className="adapter-recipe-summary" role="status">
           <strong>{recipe.identity.name}</strong>
           <p>{(['lidar', 'camera', 'radar'] as const).flatMap((modality) => {
@@ -215,14 +289,34 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
           }).join(' · ') || 'No sensors declared'}</p>
           <p>Recipe checked. Ready to open with matching data.</p>
         </div>}
-        {!inventory && <div className="adapter-folder-step">
-          <p>The recipe does not include your dataset files.</p>
+        {inline && <div>Data source <span style={{ color: colors.textDim }}>(required)</span></div>}
+        <div className="adapter-input-methods adapter-segmented" role="group" aria-label="Dataset location">
+          <button type="button" disabled={!!busy} aria-pressed={dataTab === 'local'} onClick={() => { if (dataTab !== 'local') { clearSource(); setDataTab('local') } }} style={buttonStyle}>Local folder</button>
+          <button type="button" disabled={!!busy} aria-pressed={dataTab === 'remote'} onClick={() => { if (dataTab !== 'remote') { clearSource(); setDataTab('remote') } }} style={buttonStyle}>Remote URL</button>
+        </div>
+        {inline ? (dataTab === 'local' ? <div className="adapter-load-row">
+          <button type="button" disabled={!!busy} onClick={() => chooseFolder()} style={buttonStyle}>{inventory ? 'Change folder' : 'Select Folder'}</button>
+          <DatasetLoadButton disabled={!!busy || invalidRecipe || !inventory} loading={openingDataset} onClick={loadLocal} />
+        </div> : <form className="adapter-url-form" onSubmit={(event) => { event.preventDefault(); if (!invalidRecipe && !busy && dataUrl.trim()) connectRemote(true) }}>
+          <label htmlFor="adapter-data-url">Dataset folder URL</label>
+          <div className="adapter-load-row">
+            <input id="adapter-data-url" type="url" required disabled={!!busy} value={dataUrl} onChange={(event) => { clearSource(); setDataUrl(event.target.value) }} placeholder="https://your-server.com/dataset/log/" />
+            <DatasetLoadButton disabled={!!busy || invalidRecipe || !dataUrl.trim()} loading={!!busy} onClick={() => connectRemote(true)} />
+          </div>
+          <p>This folder must contain source-catalog.json and allow browser access (CORS).</p>
+        </form>) : <>
+        {!inventory && (dataTab === 'local' ? <div className="adapter-folder-step">
           <button type="button" disabled={!!busy} onClick={() => chooseFolder()} style={buttonStyle}>Select Folder</button>
-        </div>}
+        </div> : <form className="adapter-url-form" onSubmit={(event) => { event.preventDefault(); connectRemote() }}>
+          <label>Dataset folder URL<input type="url" required disabled={!!busy} value={dataUrl} onChange={(event) => { setDataUrl(event.target.value); setError(null) }} placeholder="https://your-server.com/dataset/log/" /></label>
+          <p>This folder must contain source-catalog.json and allow browser access (CORS).</p>
+          <button type="submit" disabled={!!busy || !dataUrl.trim()} style={buttonStyle}>Connect</button>
+        </form>)}
         <button type="button" disabled={!!busy || !recipe || !inventory} onClick={() => recipe && render(recipe)} style={primaryStyle}>Render this dataset</button>
+        </>}
       </>}
 
-      {saved.length > 0 && <section className="adapter-saved" aria-label="Saved compatible adapters">
+      {!inline && saved.length > 0 && <section className="adapter-saved" aria-label="Saved compatible adapters">
         <h3>Saved in this browser</h3>
         {saved.map((record) => <div key={record.recipeHash} className="adapter-source-summary">
           <div><strong>{record.artifact.identity.name}</strong><p>Matches the selected folder layout.</p></div>
@@ -232,6 +326,17 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
 
       {busy && <p role="status" aria-live="polite">{busy}</p>}
       {error && <p className="adapter-error" role="alert">{error}</p>}
+    </>
+  )
+  if (inline) return <div className="adapter-inline" onKeyDown={(event) => event.stopPropagation()}>{content}</div>
+  return (
+    <dialog ref={dialog} className="adapter-dialog" aria-labelledby="adapter-dialog-title" onCancel={(event) => {
+      // File-picker cancellation bubbles too; it must not dismiss this dialog.
+      if (event.target !== event.currentTarget) { folderPurpose.current = 'use'; return }
+      event.preventDefault()
+      close()
+    }} onKeyDown={(event) => event.stopPropagation()}>
+      {content}
     </dialog>
   )
 }

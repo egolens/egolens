@@ -3,7 +3,7 @@ import { sourceCatalogHashV1, sourceManifestHashV1, type SourceCatalogV1 } from 
 import {
   fetchSourceCatalogV1,
   RemoteByteSourceV1,
-  VerifiedSourceCacheV1,
+  SourceCacheV1,
 } from '../source/RemoteByteSource'
 import { sha256DigestV1 } from '../source/sha256'
 
@@ -57,7 +57,7 @@ function makeSource(
   return new RemoteByteSourceV1({ catalog: catalogFor('frames/data.bin', bytes, chunkSize), ...options })
 }
 
-describe('RemoteByteSourceV1 verified transport', () => {
+describe('RemoteByteSourceV1 transport', () => {
   it('invokes Web IDL fetch with the global receiver', async () => {
     const bytes = new Uint8Array([1, 2, 3])
     const receivers: unknown[] = []
@@ -93,7 +93,7 @@ describe('RemoteByteSourceV1 verified transport', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  it('uses bounded full-object verification when chunk digests are absent', async () => {
+  it('uses bounded full-object reads when chunk digests are absent', async () => {
     const bytes = new TextEncoder().encode('complete object verification')
     const request = rangeFetch(bytes)
     const source = makeSource(bytes, { rootUrl: 'https://data.example.test/source/', fetch: request }, null)
@@ -104,7 +104,7 @@ describe('RemoteByteSourceV1 verified transport', () => {
     expect(source.responseBytes).toBe(bytes.byteLength)
   })
 
-  it('accepts a server ignoring Range only for a bounded, fully verified object', async () => {
+  it('accepts a server ignoring Range only for a bounded, complete object', async () => {
     const bytes = new Uint8Array(70_000).fill(4)
     const accepted = makeSource(bytes, {
       rootUrl: 'https://data.example.test/root/', fetch: rangeFetch(bytes, { ignoreRange: true }),
@@ -119,12 +119,12 @@ describe('RemoteByteSourceV1 verified transport', () => {
     await expect(rejected.read('frames/data.bin', { start: 1, end: 3 })).rejects.toMatchObject({ code: 'REMOTE_RANGE_REQUIRED' })
   })
 
-  it('fails closed on tampering, invalid range headers, and length mismatch', async () => {
+  it('accepts changed payloads but rejects invalid range headers and lengths', async () => {
     const bytes = new Uint8Array(70_000).fill(8)
     const tampered = makeSource(bytes, {
       rootUrl: 'https://data.example.test/root/', fetch: rangeFetch(bytes, { tamper: true }),
     })
-    await expect(tampered.read('frames/data.bin', { start: 1, end: 3 })).rejects.toMatchObject({ code: 'REMOTE_DIGEST_MISMATCH' })
+    await expect(tampered.read('frames/data.bin', { start: 0, end: 1 })).resolves.toEqual(new Uint8Array([8 ^ 0xff]).buffer)
 
     const noHeader = makeSource(bytes, {
       rootUrl: 'https://data.example.test/root/', fetch: rangeFetch(bytes, { contentRange: null }),
@@ -140,14 +140,14 @@ describe('RemoteByteSourceV1 verified transport', () => {
     await expect(source.read('frames/data.bin')).rejects.toMatchObject({ code: 'REMOTE_LENGTH_MISMATCH' })
   })
 
-  it('does not promote failed bytes into a shared verified cache', async () => {
+  it('isolates shared cache entries by remote root and reuses the same root', async () => {
     const bytes = new Uint8Array(70_000).fill(9)
     const catalog = catalogFor('frames/data.bin', bytes)
-    const cache = new VerifiedSourceCacheV1(200_000)
+    const cache = new SourceCacheV1(200_000)
     const badFetch = rangeFetch(bytes, { tamper: true })
     const bad = new RemoteByteSourceV1({ rootUrl: 'https://one.example.test/root/', catalog, fetch: badFetch, cache })
-    await expect(bad.read('frames/data.bin', { start: 1, end: 3 })).rejects.toMatchObject({ code: 'REMOTE_DIGEST_MISMATCH' })
-    expect(cache.sizeBytes).toBe(0)
+    await expect(bad.read('frames/data.bin', { start: 0, end: 1 })).resolves.toEqual(new Uint8Array([9 ^ 0xff]).buffer)
+    expect(cache.sizeBytes).toBe(65_536)
 
     const goodFetch = rangeFetch(bytes)
     const good = new RemoteByteSourceV1({ rootUrl: 'https://two.example.test/elsewhere/', catalog, fetch: goodFetch, cache })
@@ -155,19 +155,17 @@ describe('RemoteByteSourceV1 verified transport', () => {
     expect(goodFetch).toHaveBeenCalledTimes(1)
 
     const neverFetch = vi.fn<typeof fetch>()
-    const reused = new RemoteByteSourceV1({ rootUrl: 'https://three.example.test/new/', catalog, fetch: neverFetch, cache })
+    const reused = new RemoteByteSourceV1({ rootUrl: 'https://two.example.test/elsewhere/', catalog, fetch: neverFetch, cache })
     await expect(reused.read('frames/data.bin', { start: 5, end: 8 })).resolves.toEqual(bytes.slice(5, 8).buffer)
     expect(neverFetch).not.toHaveBeenCalled()
   })
 
-  it('revalidates externally shared cache entries before trusting them', async () => {
+  it('rejects cached entries with inconsistent lengths', async () => {
     const bytes = new Uint8Array(70_000).fill(6)
     const catalog = catalogFor('frames/data.bin', bytes)
     const sourceHash = sourceManifestHashV1(catalog.entries)
-    const chunkDigest = catalog.entries[0]?.chunks?.digests[0]
-    expect(chunkDigest).toBeDefined()
-    const cache = new VerifiedSourceCacheV1(200_000)
-    cache.set(`${sourceHash}\u0000frames/data.bin\u0000${chunkDigest}`, new Uint8Array(65_536).fill(99))
+    const cache = new SourceCacheV1(200_000)
+    cache.set(`https://data.example.test/root/\u0000${sourceHash}\u0000frames/data.bin\u00000:65536`, new Uint8Array(1).fill(99))
     const request = rangeFetch(bytes)
     const source = new RemoteByteSourceV1({
       rootUrl: 'https://data.example.test/root/', catalog, fetch: request, cache,

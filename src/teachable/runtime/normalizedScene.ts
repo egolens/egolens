@@ -1,3 +1,4 @@
+import type { GraphResourceSnapshotV1 } from './GraphValues'
 export type NormalizedCapabilityV1 =
   | 'timeline'
   | 'egoPoses'
@@ -204,6 +205,8 @@ export interface FrameCapabilityRequest {
 
 /** Dataset-neutral scene boundary consumed by every recipe runtime path. */
 export interface NormalizedSceneV1 {
+  readonly recipeWorkerPlan?: import('./recipeWorkerPlan').RecipeWorkerPlanV1
+  snapshotResources?(): GraphResourceSnapshotV1
   readonly manifest: NormalizedManifestV1
   readonly index: NormalizedSceneIndexV1
   readonly relations: NormalizedRelationsV1

@@ -7,7 +7,7 @@ import { AdapterCompileError, AdapterValidationError, type AdapterDiagnostic } f
 import type { EgoLensAdapterRecipeV1, JsonObject } from '../recipe/types'
 import type { NormalizedCapabilityV1 } from '../runtime/normalizedScene'
 import { assertValidRecipeV1 } from '../schema/validateSchema'
-import { formatFingerprintV1, withComputedArtifactHashesV1, verifySuppliedHashesV1 } from './hashes'
+import { formatFingerprintV1, recipeHashV1, withComputedArtifactHashesV1, verifySuppliedHashesV1 } from './hashes'
 import { inspectSourceInventoryV1, INSPECTION_LIMITS_V1, type SourceInspectionRequestV1, type SourceInspectionResultV1 } from './inspection'
 import { TeachableArtifactCacheV1, type FinalizedArtifactRecordV1 } from './persistence'
 import { readRecipeArtifactFileV1, serializeRecipeArtifactV1 } from './portability'
@@ -211,7 +211,7 @@ export class TeachableAuthoringSessionV1 {
     this.start(inventory, { sensorConfiguration: configuration })
     const { hashes: _hashes, ...rest } = recipe
     const { parentRecipeHash: _parent, ...provenance } = rest.provenance ?? { author: 'imported', createdAt: new Date().toISOString() }
-    return await this.applyRevision({ ...rest, provenance: { ...provenance, author: provenance.author === 'imported' || provenance.author === 'registry' ? 'human' : provenance.author } })
+    return await this.applyRevision({ ...rest, provenance: { ...provenance, parentRecipeHash: await recipeHashV1(recipe), author: provenance.author === 'imported' || provenance.author === 'registry' ? 'human' : provenance.author } })
   }
 
   /** The live user-authorized inventory, for rendering the current recipe in the viewer. */

@@ -1,3 +1,5 @@
+import { RecipePlaybackV1 } from './RecipePlayback'
+import { RecipeWorkerPlaybackV1 } from './RecipeWorkerPlayback'
 import type { CameraBatchResult, LidarBatchResult, SensorCloudResult } from '../../workers/types'
 import type {
   FrameCapabilityRequest,
@@ -157,6 +159,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
   readonly #cameraCacheByteLimit: number
   readonly #metadataFrameLimit: number
   readonly #delegateOwnsFramePayloads: boolean
+  readonly #recipePlayback: RecipePlaybackV1 | RecipeWorkerPlaybackV1 | null
   readonly #abortController = new AbortController()
   readonly #metadataFrames = new Map<number, Promise<NormalizedFrameV1>>()
   readonly #resolvedMetadataFrames = new Map<number, NormalizedFrameV1>()
@@ -205,6 +208,11 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
     this.#cameraCacheByteLimit = positiveByteLimit(options.cameraCacheByteLimit, DEFAULT_CAMERA_CACHE_BYTES)
     this.#metadataFrameLimit = positiveByteLimit(options.metadataFrameLimit, DEFAULT_METADATA_FRAME_LIMIT)
     this.#delegateOwnsFramePayloads = options.delegateOwnsFramePayloads === true
+    this.#recipePlayback = this.#delegateOwnsFramePayloads
+      ? delegate.recipeWorkerPlan && typeof Worker !== 'undefined'
+        ? new RecipeWorkerPlaybackV1(delegate, this.#pointCacheByteLimit, this.#cameraCacheByteLimit)
+        : new RecipePlaybackV1(delegate, this.#pointCacheByteLimit, this.#cameraCacheByteLimit)
+      : null
     const workerTimestamps = options.workerTimestamps ?? delegate.index.timestampsMicros
     workerTimestamps.forEach((timestamp, index) => this.#workerTimestampToFrame.set(timestamp, index))
     this.#unregisterPerformance = registerPerformanceRuntime(this)
@@ -217,6 +225,12 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
   get sceneGeneration(): number {
     return this.#sceneGeneration
   }
+
+  get ownsFramePayloads(): boolean { return this.#recipePlayback !== null }
+
+  focusRecipeFrame(index: number): void { this.#recipePlayback?.focus(index) }
+  prefetchRecipeFrames(): void { this.#recipePlayback?.prefetch() }
+  onRecipeProgress(listener: () => void): () => void { return this.#recipePlayback?.subscribe(listener) ?? (() => {}) }
 
   get pointBatchCount(): number {
     return this.#pointBatchCount
@@ -245,22 +259,22 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
   }
 
   hasPointFrame(index: number): boolean {
-    if (this.#delegateOwnsFramePayloads) return Number.isSafeInteger(index) && index >= 0 && index < this.index.timestampsMicros.length
+    if (this.#recipePlayback) return this.#recipePlayback.points.has(index)
     return this.#pointFrameToBatch.has(index)
   }
 
   hasCameraFrame(index: number): boolean {
-    if (this.#delegateOwnsFramePayloads) return Number.isSafeInteger(index) && index >= 0 && index < this.index.timestampsMicros.length
+    if (this.#recipePlayback) return this.#recipePlayback.cameras.has(index)
     return this.#cameraFrameToBatch.has(index)
   }
 
   cachedPointFrames(): readonly number[] {
-    if (this.#delegateOwnsFramePayloads) return [...this.#resolvedMetadataFrames.keys()].sort((left, right) => left - right)
+    if (this.#recipePlayback) return this.#recipePlayback.points.keys().sort((a, b) => a - b)
     return [...this.#pointFrameToBatch.keys()].sort((left, right) => left - right)
   }
 
   cachedCameraFrames(): readonly number[] {
-    if (this.#delegateOwnsFramePayloads) return [...this.#resolvedMetadataFrames.keys()].sort((left, right) => left - right)
+    if (this.#recipePlayback) return this.#recipePlayback.cameras.keys().sort((a, b) => a - b)
     return [...this.#cameraFrameToBatch.keys()].sort((left, right) => left - right)
   }
 
@@ -326,6 +340,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
 
   async loadFrame(index: number, request: FrameCapabilityRequest): Promise<NormalizedFrameV1> {
     this.#assertLive()
+    if (this.#recipePlayback) return this.#recipePlayback.loadFrame(index, request)
     if (!Number.isSafeInteger(index) || index < 0 || index >= this.index.timestampsMicros.length) {
       throw new RangeError(`Frame index ${index} is out of range.`)
     }
@@ -343,6 +358,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
   /** Synchronous renderer hot path after a worker batch has been normalized. */
   getCachedFrame(index: number, request: FrameCapabilityRequest): NormalizedFrameV1 | null {
     this.#assertLive()
+    if (this.#recipePlayback) return this.#recipePlayback.getCachedFrame(index, request)
     const base = this.#resolvedMetadataFrames.get(index)
     if (!base) return null
     const requested = new Set([...request.capabilities].filter((capability) => this.manifest.capabilities.has(capability)))
@@ -359,6 +375,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
     this.#disposed = true
     this.#sceneGeneration = nextSceneGeneration++
     this.#abortController.abort()
+    this.#recipePlayback?.dispose()
     this.#operations.cancellations += this.#pointInflight.size + this.#cameraInflight.size
     this.#pointPool?.terminate()
     this.#cameraPool?.terminate()
@@ -387,19 +404,21 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
 
   snapshotPerformance(): ScenePerformanceSnapshotV1 {
     return {
+      ...(this.#recipePlayback ? { recipe: { ...this.#recipePlayback.snapshot(), graph: this.#recipePlayback instanceof RecipeWorkerPlaybackV1
+        ? this.#recipePlayback.graphSnapshot() : this.#delegate.snapshotResources?.() } } : {}),
       sceneGeneration: this.sceneGeneration,
       disposed: this.#disposed,
       cache: {
-        pointBytes: this.#pointBytes,
-        pointPeakBytes: this.#pointPeakBytes,
+        pointBytes: this.#recipePlayback?.points.bytes ?? this.#pointBytes,
+        pointPeakBytes: this.#recipePlayback?.points.peakBytes ?? this.#pointPeakBytes,
         pointByteLimit: this.#pointCacheByteLimit,
-        cameraBytes: this.#cameraBytes,
-        cameraPeakBytes: this.#cameraPeakBytes,
+        cameraBytes: this.#recipePlayback?.cameras.bytes ?? this.#cameraBytes,
+        cameraPeakBytes: this.#recipePlayback?.cameras.peakBytes ?? this.#cameraPeakBytes,
         cameraByteLimit: this.#cameraCacheByteLimit,
         metadataFrames: this.#resolvedMetadataFrames.size,
         metadataFrameLimit: this.#metadataFrameLimit,
-        pointFrames: this.#pointFrameToBatch.size,
-        cameraFrames: this.#cameraFrameToBatch.size,
+        pointFrames: this.#recipePlayback?.points.keys().length ?? this.#pointFrameToBatch.size,
+        cameraFrames: this.#recipePlayback?.cameras.keys().length ?? this.#cameraFrameToBatch.size,
         pointBatches: this.#pointBatches.size,
         cameraBatches: this.#cameraBatches.size,
       },
@@ -407,7 +426,7 @@ export class ManagedNormalizedSceneV1 implements NormalizedSceneV1 {
         ...this.#operations,
         recentRowGroupKeys: [...this.#operations.recentRowGroupKeys],
       },
-      workers: {
+      workers: this.#recipePlayback instanceof RecipeWorkerPlaybackV1 ? this.#recipePlayback.workerDiagnostics() : {
         point: this.#pointPool?.diagnostics?.()
           ?? (this.#pointPool ? emptyWorkerSnapshot() : this.#disposedPointWorkers),
         camera: this.#cameraPool?.diagnostics?.()

@@ -1,3 +1,4 @@
+import { mapConcurrentV1 } from './ReadScheduler'
 import type { MetadataBundle, TrajectoryPoint } from '../../types/dataset'
 import { invertRowMajor4x4, multiplyRowMajor4x4 } from '../../utils/matrix'
 import { convertAllSensors, type LidarCalibration, type RangeImage } from '../../utils/rangeImage'
@@ -181,23 +182,21 @@ async function loadBinaryPointCloud(
   signal?: AbortSignal,
   egoFromSensor: Float64Array | null = binding.egoFromSensor,
 ): Promise<{ readonly cloud: NormalizedPointCloudV1; readonly segmentation: NormalizedFrameV1['lidarSegmentation'] }> {
-  const raw = await loadGraphBinaryV1(plan.records, binding.path, signal)
-  if (raw instanceof Uint16Array) throw new Error('GRAPH_POINT_RECORDS_INVALID')
-  const decoded = transformInterleavedXyzV1(raw, egoFromSensor ? [...egoFromSensor] : null)
-  let semanticLabels: Uint8Array | undefined
-  let panopticLabels: Uint16Array | undefined
   const semanticPath = segmentation?.semanticPathByRecordKey.get(binding.recordKey)
   const panopticPath = segmentation?.panopticPathByRecordKey.get(binding.recordKey)
-  if (semanticPath && segmentation?.semantic) {
-    const labels = await loadGraphBinaryV1(segmentation.semantic, semanticPath, signal)
-    if (labels instanceof Uint16Array) semanticLabels = Uint8Array.from(labels)
-    else semanticLabels = Uint8Array.from(labels.values)
-  }
-  if (panopticPath && segmentation?.panoptic) {
-    const labels = await loadGraphBinaryV1(segmentation.panoptic, panopticPath, signal)
-    if (!(labels instanceof Uint16Array)) throw new Error('GRAPH_PANOPTIC_RECORDS_INVALID')
-    panopticLabels = labels
-    if (!semanticLabels) semanticLabels = Uint8Array.from(labels, (label) => Math.floor(label / segmentation.panopticDivisor))
+  const [raw, semantic, panoptic] = await Promise.all([
+    loadGraphBinaryV1(plan.records, binding.path, signal),
+    semanticPath && segmentation?.semantic ? loadGraphBinaryV1(segmentation.semantic, semanticPath, signal) : undefined,
+    panopticPath && segmentation?.panoptic ? loadGraphBinaryV1(segmentation.panoptic, panopticPath, signal) : undefined,
+  ])
+  if (raw instanceof Uint16Array) throw new Error('GRAPH_POINT_RECORDS_INVALID')
+  const decoded = transformInterleavedXyzV1(raw, egoFromSensor ? [...egoFromSensor] : null)
+  let semanticLabels = semantic ? Uint8Array.from(semantic instanceof Uint16Array ? semantic : semantic.values) : undefined
+  let panopticLabels: Uint16Array | undefined
+  if (panoptic) {
+    if (!(panoptic instanceof Uint16Array)) throw new Error('GRAPH_PANOPTIC_RECORDS_INVALID')
+    panopticLabels = panoptic
+    if (!semanticLabels) semanticLabels = Uint8Array.from(panoptic, (label) => Math.floor(label / segmentation!.panopticDivisor))
   }
   if (semanticLabels && semanticLabels.length !== decoded.pointCount) {
     throw new Error(`POINT_LABEL_COUNT_MISMATCH: ${semanticLabels.length} labels for ${decoded.pointCount} points.`)
@@ -429,6 +428,7 @@ export function assembleGraphSceneV1(input: {
 
   let disposed = false
   const scene: NormalizedSceneV1 = {
+    snapshotResources: () => input.graph.resources,
     manifest: { ...input.compiledRecipe.normalizedManifest, capabilities },
     index: {
       timestampsMicros,
@@ -465,9 +465,9 @@ export function assembleGraphSceneV1(input: {
         }
       }
       if ((requested.has('pointClouds') || requested.has('lidarSegmentation')) && binaryPointPlan) {
-        for (const binding of bindingsForFrame(binaryPointPlan, timelineFrame)) {
+        const loadedSensors = await mapConcurrentV1(bindingsForFrame(binaryPointPlan, timelineFrame), async binding => {
           const sensor = pointSensorForBinding(binding, 'lidar')
-          if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) return null
           const worldFramePoints = binding.frameId === 'world'
           if (worldFramePoints && !worldFromEgoByTimestamp.has(timelineFrame.timestamp)) {
             throw new Error(`GRAPH_WORLD_FRAME_POSE_MISSING: point cloud for ${sensor.id} is declared in the world frame but no ego pose exists at timestamp ${timelineFrame.timestamp}`)
@@ -479,10 +479,15 @@ export function assembleGraphSceneV1(input: {
             request.signal,
             worldFramePoints ? egoFromWorldAt(timelineFrame.timestamp) : (sensorTransformById.get(sensor.id) ?? binding.egoFromSensor),
           )
-          ;(frame.pointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId: sensor.id, ...(worldFramePoints ? { frameId: 'ego' } : {}) })
+          return { loaded, sensorId: sensor.id, worldFramePoints }
+        })
+        for (const result of loadedSensors) {
+          if (!result) continue
+          const { loaded, sensorId, worldFramePoints } = result
+          ;(frame.pointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId, ...(worldFramePoints ? { frameId: 'ego' } : {}) })
           if (requested.has('lidarSegmentation')) {
             ;(frame.lidarSegmentation as NormalizedFrameV1['lidarSegmentation'][number][]).push(
-              ...loaded.segmentation.map((labels) => ({ ...labels, sensorId: sensor.id })),
+              ...loaded.segmentation.map(labels => ({ ...labels, sensorId })),
             )
           }
         }
@@ -532,9 +537,9 @@ export function assembleGraphSceneV1(input: {
         }
       }
       if (requested.has('radarPointClouds') && radarPlan) {
-        for (const binding of bindingsForFrame(radarPlan, timelineFrame)) {
+        const clouds = await mapConcurrentV1(bindingsForFrame(radarPlan, timelineFrame), async binding => {
           const sensor = pointSensorForBinding(binding, 'radar')
-          if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) continue
+          if (!sensor || (request.sensorIds && !request.sensorIds.has(sensor.id))) return null
           const loaded = await loadBinaryPointCloud(
             binding,
             radarPlan,
@@ -542,44 +547,31 @@ export function assembleGraphSceneV1(input: {
             request.signal,
             sensorTransformById.get(sensor.id) ?? binding.egoFromSensor,
           )
-          ;(frame.radarPointClouds as NormalizedPointCloudV1[]).push({ ...loaded.cloud, sensorId: sensor.id })
-        }
+          return { ...loaded.cloud, sensorId: sensor.id }
+        })
+        ;(frame.radarPointClouds as NormalizedPointCloudV1[]).push(...clouds.filter(cloud => cloud !== null))
       }
       if (requested.has('cameraImages') && cameraPlan) {
-        if (cameraPlan.bindings) {
-          for (const binding of cameraPlan.bindings.filter((entry) => entry.frameKey === timelineFrame.key)) {
-            if (request.sensorIds && !request.sensorIds.has(binding.sensorId)) continue
-            const calibration = cameraCalibrations.get(binding.sensorId)
-            const sensor = sensorForId(input.compiledRecipe, binding.sensorId, 'camera')
-            if (!calibration || sensor?.modality !== 'camera' || !sensor.image) continue
-            const encodedBytes = await cameraPlan.encoded.context.read(binding.path, request.signal)
-            ;(frame.cameraImages as NormalizedFrameV1['cameraImages'][number][]).push({
-              sensorId: binding.sensorId, timestampMicros: timestampsMicros[index], encodedBytes,
-              mimeType: cameraPlan.encoded.mimeType,
-              width: sensor.image.width,
-              height: sensor.image.height,
-              calibrationId: binding.sensorId,
-            })
-          }
-        } else {
-          for (const [sensorId, entry] of cameraPaths) {
-            if (request.sensorIds && !request.sensorIds.has(sensorId)) continue
+        const bindings = cameraPlan.bindings
+          ? cameraPlan.bindings.filter(entry => entry.frameKey === timelineFrame.key).map(entry => ({ sensorId: entry.sensorId, path: entry.path, timestampMicros: timestampsMicros[index] }))
+          : [...cameraPaths].flatMap(([sensorId, entry]) => {
             const matched = alignNearestTimestampV1(entry.timestamps, timelineFrame.timestamp, cameraPlan.maxDelta)
-            if (matched === null) continue
-            const path = entry.byTimestamp.get(matched)!
-            const calibration = cameraCalibrations.get(sensorId)!
-            const sensor = sensorForId(input.compiledRecipe, sensorId, 'camera')
-            if (sensor?.modality !== 'camera' || !sensor.image) continue
-            const encodedBytes = await cameraPlan.encoded.context.read(path, request.signal)
-            ;(frame.cameraImages as NormalizedFrameV1['cameraImages'][number][]).push({
-              sensorId, timestampMicros: micros(matched, timeline.unit), encodedBytes,
-              mimeType: cameraPlan.encoded.mimeType,
-              width: sensor.image.width,
-              height: sensor.image.height,
-              calibrationId: calibration.sensorId,
-            })
+            return matched === null ? [] : [{ sensorId, path: entry.byTimestamp.get(matched)!, timestampMicros: micros(matched, timeline.unit) }]
+          })
+        const images = await mapConcurrentV1(bindings, async binding => {
+          if (request.sensorIds && !request.sensorIds.has(binding.sensorId)) return null
+          const calibration = cameraCalibrations.get(binding.sensorId)
+          const sensor = sensorForId(input.compiledRecipe, binding.sensorId, 'camera')
+          if (!calibration || sensor?.modality !== 'camera' || !sensor.image) return null
+          const encodedBytes = await cameraPlan.encoded.context.read(binding.path, request.signal)
+          return {
+            sensorId: binding.sensorId, timestampMicros: binding.timestampMicros, encodedBytes,
+            mimeType: cameraPlan.encoded.mimeType, width: sensor.image.width,
+            height: sensor.image.height,
+            calibrationId: cameraPlan.bindings ? binding.sensorId : calibration.sensorId,
           }
-        }
+        })
+        ;(frame.cameraImages as NormalizedFrameV1['cameraImages'][number][]).push(...images.filter(image => image !== null))
       }
       if (requested.has('cameraImages') && parquetCameraPlan) {
         const rows = await loadGraphParquetFrameRowsV1(

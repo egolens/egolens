@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -228,7 +228,7 @@
 <body>
 
 <h1>Waymo Perception Studio — Data Pipeline & Memory Map</h1>
-<p class="subtitle">세그먼트 1개 (199 frames) 로딩 시 메모리 사용량 분석 · 9 Parquet 파일 · 3 LiDAR Workers + 2 Camera Workers</p>
+<p class="subtitle">Memory usage when loading one segment (199 frames) · 9 Parquet files · 3 LiDAR Workers + 2 Camera Workers</p>
 
 <div class="summary-cards">
   <div class="summary-card">
@@ -253,7 +253,7 @@
   <div class="legend-item"><div class="legend-dot" style="background:#2d5aa0"></div> Fetch / File I/O</div>
   <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div> BROTLI Decompress</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Parse (Parquet→Objects)</div>
-  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> Spherical→Cartesian 변환</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> Spherical→Cartesian conversion</div>
   <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div> Cache / Transfer</div>
   <div class="legend-item"><div class="legend-dot" style="background:#06b6d4"></div> Worker Init</div>
   <div class="legend-item"><div class="legend-dot" style="background:#f472b6"></div> Three.js / GPU Upload</div>
@@ -269,8 +269,8 @@
     <span class="phase-time">~50ms</span>
   </div>
   <div class="note">
-    <strong>9개 파일</strong> footer만 읽음 (Range Request). 데이터 본체 미로딩.
-    메모리 영향 최소 — 메타데이터만 (~50KB 총합).
+    <strong>9 files:</strong> only footers are read (range requests); payloads are not loaded.
+    Minimal memory impact: metadata only (~50 KB total).
   </div>
   <div class="swim-lanes">
     <div class="swim-lane">
@@ -308,8 +308,8 @@
     <span class="phase-time">~200-400ms</span>
   </div>
   <div class="note">
-    <strong>순차적으로</strong> 7개 소형 파일을 readAllRows(). 각각 BROTLI 해제 → Parquet 파싱 → JS 객체.
-    lidar_box가 가장 큰 ~1.9MB compressed → 해제 시 ~8MB.
+    <strong>Sequential loading:</strong> readAllRows() loads 7 small files. Each goes through BROTLI decompression → Parquet parsing → JS objects.
+    lidar_box is the largest: ~1.9 MB compressed → ~8 MB decompressed.
   </div>
   <div class="swim-lanes">
     <div class="swim-lane">
@@ -395,7 +395,7 @@
     </div>
   </div>
   <div class="note" style="margin-top:12px">
-    <strong>Phase 2 종료 시 Main Thread 누적 메모리: ~17 MB</strong><br>
+    <strong>Main-thread memory at the end of Phase 2: ~17 MB</strong><br>
     (vehicle_pose 600KB + lidar_box 12MB + camera_box 4MB + assoc 200KB + calibrations 25KB + stats 5KB)
   </div>
 </div>
@@ -406,16 +406,16 @@
 <div class="phase active">
   <div class="phase-header">
     <span class="phase-num">Phase 3</span>
-    <span class="phase-title">Worker Pool 초기화 (LiDAR ∥ Camera)</span>
+    <span class="phase-title">Worker Pool Initialization (LiDAR ∥ Camera)</span>
     <span class="phase-time">~100-300ms</span>
   </div>
   <div class="note">
-    <strong>병렬</strong>: 3 LiDAR Workers + 2 Camera Workers가 동시에 초기화됨.
-    각 Worker가 독립적으로 Parquet 파일을 open (footer 재파싱).
-    Worker 자체 메모리 오버헤드 + JS 엔진 복제.
+    <strong>Parallel</strong>: 3 LiDAR workers and 2 camera workers initialize concurrently.
+    Each worker independently opens the Parquet file and reparses its footer.
+    Per-worker memory overhead plus duplicated JS engine state.
   </div>
   <div class="parallel-bracket">
-    <span class="parallel-label">Promise.all — 병렬 실행</span>
+    <span class="parallel-label">Promise.all — Parallel execution</span>
     <div class="swim-lanes" style="padding-top:8px">
       <div class="swim-lane">
         <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W1</span></div>
@@ -465,7 +465,7 @@
     </div>
   </div>
   <div class="note" style="margin-top:12px">
-    <strong>Phase 3 종료 시 전체 메모리: ~38 MB</strong><br>
+    <strong>Total memory at the end of Phase 3: ~38 MB</strong><br>
     Main: 17 MB + 3× LiDAR Worker: 15 MB + 2× Camera Worker: 6 MB
   </div>
 </div>
@@ -480,9 +480,9 @@
     <span class="phase-time">~800-1500ms</span>
   </div>
   <div class="note">
-    <strong>⚡ Peak Memory 도달 구간</strong>. LiDAR RG0+RG1과 Camera RG0+RG1이 동시에 처리됨.
-    각 LiDAR RG는 ~51 frames × 5 sensors = ~255 range images.
-    BROTLI 해제 시 compressed ~42MB → decompressed ~100MB per RG (일시적).
+    <strong>⚡ Peak Memory Interval</strong>. LiDAR RG0+RG1 and camera RG0+RG1 are processed concurrently.
+    Each LiDAR RG contains ~51 frames × 5 sensors = ~255 range images.
+    BROTLI decompression: ~42 MB compressed → ~100 MB decompressed per RG (temporary).
   </div>
 
   <div class="parallel-bracket">
@@ -595,9 +595,9 @@
   </div>
 
   <div class="note" style="margin-top:12px; border-left-color:#ef4444">
-    <strong style="color:#ef4444">🔴 Peak Memory 발생 시점:</strong> LiDAR W1 + W2 동시 BROTLI 해제 + Camera W1 + W2 동시 해제 시<br>
-    <strong>Workers 일시 메모리:</strong> 2× LiDAR (~200 MB) + 2× Camera (~170 MB) = <strong>~370 MB transient</strong><br>
-    <strong>Main thread 기존:</strong> 38 MB + 수신 중 cached data ~100 MB<br>
+    <strong style="color:#ef4444">🔴 Peak Memory Occurs When:</strong> LiDAR W1 + W2 and camera W1 + W2 decompress BROTLI concurrently<br>
+    <strong>Transient worker memory:</strong> 2× LiDAR (~200 MB) + 2× Camera (~170 MB) = <strong>~370 MB transient</strong><br>
+    <strong>Existing main-thread memory:</strong> 38 MB + incoming cached data ~100 MB<br>
     <strong>→ Peak Total: ~1.38 GB</strong> (17 MB startup + 320 MB LiDAR workers + 330 MB Camera workers + 210 MB partial cache + 25 MB worker base)
   </div>
 </div>
@@ -636,8 +636,8 @@
     </div>
   </div>
   <div class="note">
-    <strong>status = 'ready'</strong>, autoplay 시작. 화면에 첫 프레임 표시.
-    GPU VRAM ~17 MB 추가 (point cloud + 5 camera textures).
+    <strong>status = 'ready'</strong>, autoplay starts and the first frame is displayed.
+    Adds ~17 MB GPU VRAM (point cloud + 5 camera textures).
   </div>
 </div>
 
@@ -647,17 +647,17 @@
 <div class="phase active">
   <div class="phase-header">
     <span class="phase-num">Phase 6</span>
-    <span class="phase-title">Background Prefetch (RG2, RG3 — 나머지 ~100 frames)</span>
+    <span class="phase-title">Background Prefetch (RG2, RG3 — remaining ~100 frames)</span>
     <span class="phase-time">~2-4s (background, non-blocking)</span>
   </div>
   <div class="note">
-    LiDAR: RG2, RG3를 WorkerPool(3) 큐에 dispatch (RG0,RG1 이미 완료).
-    Camera: RG2, RG3를 CameraPool(2) 큐에 dispatch.
-    Worker들이 idle 상태가 되면 순차적으로 처리. <strong>Main thread는 프리 — 60fps 렌더링 유지.</strong>
+    LiDAR: dispatch RG2 and RG3 to WorkerPool(3); RG0 and RG1 are already complete.
+    Camera: dispatch RG2 and RG3 to CameraPool(2).
+    Workers process queued tasks as they become idle. <strong>The main thread stays free, maintaining 60 fps rendering.</strong>
   </div>
 
   <div class="parallel-bracket">
-    <span class="parallel-label">Background — 렌더링과 병행</span>
+    <span class="parallel-label">Background — alongside rendering</span>
     <div class="swim-lanes" style="padding-top:8px">
       <div class="swim-lane">
         <div class="lane-label"><span class="thread-tag thread-worker">LiDAR W1</span> RG2</div>
@@ -703,7 +703,7 @@
         <div class="lane-label"><span class="thread-tag thread-main">Main Thread</span></div>
         <div class="lane-bar-container">
           <div class="lane-bar c-gpu" style="left:0; width:95%; background: linear-gradient(90deg, #f472b6 0%, #f472b6 50%, #10b981 50%, #10b981 100%)">
-            🎬 렌더링 중 (60fps) + 수신된 RG data를 frameCache/cameraImageCache에 적재
+            🎬 Rendering at 60 fps while received RG data populates frameCache/cameraImageCache
           </div>
         </div>
       </div>
@@ -715,7 +715,7 @@
 <!-- Memory Timeline Chart (SVG) -->
 <!-- ============================================================ -->
 <div class="memory-chart">
-  <div class="chart-title">Memory Timeline — 전체 스레드 합산 (Main + 3 LiDAR Workers + 2 Camera Workers)</div>
+  <div class="chart-title">Memory Timeline — All threads combined (Main + 3 LiDAR Workers + 2 Camera Workers)</div>
   <svg class="chart-svg" viewBox="0 0 1000 380" preserveAspectRatio="xMidYMid meet">
     <!-- Grid -->
     <defs>
@@ -853,7 +853,7 @@
 <!-- Detailed Memory Breakdown Table -->
 <!-- ============================================================ -->
 <div class="memory-chart" style="margin-top:24px">
-  <div class="chart-title">Steady-State Memory Breakdown (모든 199 frames 캐시 완료 후)</div>
+  <div class="chart-title">Steady-State Memory Breakdown (after all 199 frames are cached)</div>
   <table class="mem-table">
     <tr>
       <th>Data Store</th>
@@ -868,9 +868,9 @@
       <td><span class="thread-tag thread-main">Main</span></td>
       <td>199 frames × 5 sensors</td>
       <td>~168K pts × 24B (POINT_STRIDE=6 × 4B) = <strong>~4 MB/frame</strong><br>
-        <em style="color:#888;font-size:11px">주의: subarray().buffer 전체 전송 — 할당 버퍼 &gt; 유효 데이터</em></td>
+        <em style="color:#888;font-size:11px">Note: subarray().buffer transfers the full allocation, larger than valid data</em></td>
       <td class="mem-val">~500 MB</td>
-      <td>Float32Array transferred from workers (zero-copy via Transferable). 실제 할당 = maxPoints × STRIDE (빈 픽셀 포함)</td>
+      <td>Float32Array transferred from workers (zero-copy via Transferable). Actual allocation = maxPoints × STRIDE (including empty pixels)</td>
     </tr>
     <tr>
       <td><strong>cameraImageCache</strong><br>(JPEG blobs)</td>
@@ -878,7 +878,7 @@
       <td>199 frames × 5 cameras</td>
       <td>~300 KB/image (JPEG compressed)</td>
       <td class="mem-val">~300 MB</td>
-      <td>Raw JPEG ArrayBuffers — 330MB parquet에서 ~10% Parquet overhead 제외</td>
+      <td>Raw JPEG ArrayBuffers — 330 MB Parquet minus ~10% Parquet overhead</td>
     </tr>
     <tr>
       <td><strong>lidarBoxByFrame</strong><br>(3D bounding boxes)</td>
@@ -948,7 +948,7 @@
 <!-- Peak Memory Detail -->
 <!-- ============================================================ -->
 <div class="memory-chart" style="margin-top:24px">
-  <div class="chart-title">Peak Memory Detail (Phase 4 — 2× LiDAR + 2× Camera RG 동시 처리 시)</div>
+  <div class="chart-title">Peak Memory Detail (Phase 4 — 2× LiDAR + 2× Camera RG processed concurrently)</div>
   <table class="mem-table">
     <tr>
       <th>Location</th>
@@ -1013,7 +1013,7 @@
     <tr style="background:#14141e; font-weight:700">
       <td colspan="2" style="text-align:right; color:#ef4444">PEAK TOTAL →</td>
       <td class="mem-val mem-peak" style="font-size:16px">~1.38 GB</td>
-      <td style="color:#888">4개 Worker 동시 BROTLI 해제 시</td>
+      <td style="color:#888">4 workers decompressing BROTLI concurrently</td>
     </tr>
   </table>
 </div>
@@ -1022,27 +1022,27 @@
 <!-- Key Insights -->
 <!-- ============================================================ -->
 <div class="memory-chart" style="margin-top:24px">
-  <div class="chart-title">핵심 인사이트</div>
+  <div class="chart-title">Key Insights</div>
   <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:12px">
     <div class="note" style="border-left-color:#ef4444">
-      <strong style="color:#ef4444">Peak의 ~35%는 일시적(transient)</strong><br>
-      BROTLI 해제 버퍼가 Workers에서 동시에 생성. GC 후 대부분 해제됨.
-      Peak ~1.38GB → Steady ~890MB로 ~490MB 차이.
+      <strong style="color:#ef4444">~35% of peak memory is transient</strong><br>
+      Workers create BROTLI decompression buffers concurrently. Most are released after GC.
+      Peak ~1.38 GB → steady ~890 MB: a ~490 MB difference.
     </div>
     <div class="note" style="border-left-color:#8b5cf6">
-      <strong style="color:#8b5cf6">LiDAR point cloud가 최대 retained 소비자</strong><br>
+      <strong style="color:#8b5cf6">LiDAR point clouds dominate retained memory</strong><br>
       199 frames × 5 sensors × Float32Array(maxPoints×24B) = ~500MB (56%).
-      Camera JPEG: 199×5×~300KB = ~300MB (34%). subarray buffer 전체 전송 주의.
+      Camera JPEG: 199×5×~300KB = ~300MB (34%). Note the full subarray buffer transfer.
     </div>
     <div class="note" style="border-left-color:#f59e0b">
-      <strong style="color:#f59e0b">BROTLI 해제 비율 ~2.5×</strong><br>
-      LiDAR: 170MB compressed → ~420MB decompressed (전체 RG).
-      단일 RG (~42MB) → ~100MB. 해제 후 range image 파싱 추가.
+      <strong style="color:#f59e0b">BROTLI decompression ratio: ~2.5×</strong><br>
+      LiDAR: 170MB compressed → ~420MB decompressed (all RGs).
+      One RG (~42 MB) → ~100 MB, followed by range-image parsing.
     </div>
     <div class="note" style="border-left-color:#10b981">
-      <strong style="color:#10b981">Transferable로 zero-copy</strong><br>
-      Worker→Main 전송 시 Float32Array.buffer를 transfer하여
-      복사 없이 소유권 이전. Workers 측 메모리 즉시 해제.
+      <strong style="color:#10b981">Zero-copy via Transferable</strong><br>
+      Transferring Float32Array.buffer from worker to main thread
+      moves ownership without copying and immediately releases worker-side ownership.
     </div>
   </div>
 </div>
