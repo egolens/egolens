@@ -1,3 +1,4 @@
+import { trackTeaching } from '../../utils/teachableTelemetry'
 import AgentSetupCard from './AgentSetupCard'
 import { useEffect, useState } from 'react'
 import { colors, fonts, radius, alpha } from '../../theme'
@@ -131,6 +132,7 @@ export function AgentAskCard({ agent, onPromptCopied, sourceKind = 'local' }: { 
       <AgentSetupCard title="Set up your browser to teach this format" status={setupStatus}
         onCheckAgain={() => {
           const detected = detectWebMcpAgentV1()
+          trackTeaching('setup_check', { available: Number(detected.available), agent: detected.kind })
           window.dispatchEvent(new Event('egolens:check-webmcp'))
           setSetupStatus(detected.available ? '' : 'WebMCP is still unavailable. Check your browser setup, then try again.')
         }} />

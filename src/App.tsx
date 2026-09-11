@@ -1,3 +1,4 @@
+import { trackTeaching } from './utils/teachableTelemetry'
 import AdapterRecipeIntro from './components/TeachableLens/AdapterRecipeIntro'
 import { PANDASET_TEACHING_SAMPLES, type PandaSetSampleId } from './utils/teachingSample'
 import DatasetLoadButton from './components/DatasetLoadButton'
@@ -985,6 +986,7 @@ function Header() {
         : (() => { const named = authoring.sensorConfiguration?.datasetName?.trim(); const label = named || (teachableAuthoringSession.getInventory()?.kind === 'remote' ? 'hosted source' : 'unknown folder'); return authoring.agentEngaged ? `${label} · teaching` : label })()
   const showEditRecipe = status === 'ready' && authoredScene !== null && (authoring.phase === 'idle' || authoring.phase === 'finalized' || authoring.phase === 'revoked' || (authoring.phase === 'inspecting' && !authoring.currentArtifact))
   const editRecipe = () => {
+    trackTeaching('edit_recipe')
     const scene = useSceneStore.getState().actions.authoredScene()
     if (!scene) return
     const { actions } = useSceneStore.getState(); actions.pause(); actions.reset(); actions.setAvailableSegments([])
@@ -1766,9 +1768,13 @@ function DropZone({ onFilesLoaded, onAdapterEntry, onTeach, adapterEntryOpen }: 
           color: colors.textSecondary,
           lineHeight: 1.7,
         }}>
-          Visualize point clouds, cameras, and 3D annotations in your browser.<br />
-          Open supported datasets directly, or teach EgoLens a new format with adapter recipes.<br />
-          No conversion, no preprocessing.
+          {isMobile ? <>
+            Explore point clouds, cameras, and 3D annotations.<br />
+            Teach EgoLens new formats with adapter recipes.
+          </> : <>
+            Visualize point clouds, cameras, and 3D annotations in your browser.<br />
+            Open supported datasets directly, or teach EgoLens a new format with adapter recipes.
+          </>}
         </div>
         {/* Dataset links and an entry for other formats */}
         <div style={{

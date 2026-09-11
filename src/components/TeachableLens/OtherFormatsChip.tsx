@@ -1,3 +1,4 @@
+import { trackTeaching } from '../../utils/teachableTelemetry'
 import { useId, useState } from 'react'
 import './adapterEntry.css'
 
@@ -7,7 +8,7 @@ export default function OtherFormatsChip({ onClick, disabled = false }: { onClic
   return (
     <span className="other-formats-chip" data-tooltip-dismissed={dismissed} onMouseEnter={() => setDismissed(false)} onFocus={() => setDismissed(false)}>
       <button type="button" disabled={disabled} aria-haspopup="dialog" aria-describedby={tooltipId}
-        onClick={() => { setDismissed(true); onClick() }}
+        onClick={() => { setDismissed(true); trackTeaching('intro_open'); onClick() }}
         onKeyDown={(event) => {
           // Viewer shortcuts blur focused buttons; preserve native activation here.
           event.stopPropagation()

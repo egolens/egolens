@@ -69,8 +69,8 @@ const CHROME_DARK = {
 const CHROME_LIGHT: Record<keyof typeof CHROME_DARK, string> = {
   // Accents are darkened until they carry text on white: the dark-theme teal
   // is 1.6:1 there, which is not a colour, it is a rumour.
-  accent: '#008C5E',
-  textOnAccent: '#000000',
+  accent: '#007A52',
+  textOnAccent: '#FFFFFF',
   accentBlue: '#00808F',
   danger: '#E03131',
   warning: '#8A5A00',

@@ -1,0 +1,10 @@
+{
+  "name": "egolens-teachable-telemetry",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "vars": { "ALLOWED_ORIGINS": "https://egolens.org,https://www.egolens.org", "INGEST_ENABLED": "true" },
+  "r2_buckets": [{ "binding": "RECORDS", "bucket_name": "egolens-teachable-telemetry" }],
+  "ratelimits": [{ "name": "INGEST_LIMIT", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }]
+}

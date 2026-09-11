@@ -70,6 +70,7 @@
 .adapter-dialog p { color: var(--el-text-secondary); line-height: 1.65; }
 .adapter-dialog button:disabled { cursor: not-allowed !important; opacity: 0.45; }
 .adapter-dialog button:focus-visible { outline: 2px solid var(--el-accent); outline-offset: 3px; }
+.adapter-intro-title:focus { outline: none; }
 .adapter-text-button { padding: 8px 0; border: 0; background: transparent; color: var(--el-accent-blue); font: inherit; cursor: pointer; text-align: left; }
 .adapter-input-methods { display: flex; gap: 8px; margin: 16px 0 12px; }
 .adapter-input-methods button[aria-pressed="true"] { border-color: var(--el-accent) !important; }
@@ -141,11 +142,16 @@
 .adapter-intro-environment code { overflow-wrap: anywhere; }
 .adapter-intro-environment a { color: var(--el-accent); }
 .adapter-intro-cta { margin-top: 16px; padding: 10px 14px; border: 0; border-radius: 6px; background: var(--el-accent); color: var(--el-text-on-accent, #000); font: inherit; font-weight: 600; cursor: pointer; }
+.adapter-intro-cta:hover { filter: brightness(0.95); }
+.adapter-intro-cta:focus-visible { outline: 2px solid var(--el-accent); outline-offset: 3px; }
 
 .hosted-sample-selector > button { font: inherit; font-size: 11px; border-radius: 4px; cursor: pointer; }
 
 
 .hosted-sample-card { position: relative; width: calc(100% + 10px); margin-left: -5px; box-sizing: border-box; border: 1px solid var(--el-border); border-radius: 8px; background: var(--el-bg-overlay); }
+@media (max-width: 640px) {
+  .hosted-sample-card { width: 100%; margin-left: 0; }
+}
 .hosted-teaching-button { position: relative; display: block; width: 100%; padding: 9px 8px 3px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--el-text-primary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .hosted-sample-meta { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px; padding: 0 6px 7px; color: var(--el-text-dim); font-size: 10px; }
 .hosted-sample-selector { margin: 0; padding: 1px; gap: 1px; }

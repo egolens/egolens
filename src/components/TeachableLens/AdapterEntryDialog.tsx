@@ -1,3 +1,4 @@
+import { beginTeachingCase, trackTeaching } from '../../utils/teachableTelemetry'
 import { PANDASET_TEACHING_SAMPLES } from '../../utils/teachingSample'
 import DatasetLoadButton from '../DatasetLoadButton'
 import { useEffect, useRef, useState } from 'react'
@@ -99,10 +100,13 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
     activeRequest.current?.abort()
     const controller = new AbortController()
     activeRequest.current = controller
+    const telemetryEvent = label.includes('adapter') ? 'recipe_import' : 'load_start'
+    const startedAt = performance.now()
+    trackTeaching(telemetryEvent, { source: dataTab, outcome: 'started' })
     setBusy(label)
     setError(null)
-    try { await operation(controller.signal) }
-    catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)) }
+    try { await operation(controller.signal); if (!controller.signal.aborted) trackTeaching(telemetryEvent === 'recipe_import' ? 'recipe_import' : 'source_selected', { source: dataTab, outcome: 'success', duration_ms: performance.now() - startedAt }) }
+    catch (cause) { if (!controller.signal.aborted) { trackTeaching(telemetryEvent === 'recipe_import' ? 'recipe_import' : 'load_error', { source: dataTab, outcome: 'failure', duration_ms: performance.now() - startedAt }); setError(cause instanceof Error ? cause.message : String(cause)) } }
     finally { if (!controller.signal.aborted) setBusy(null) }
   }
 
@@ -123,6 +127,7 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
       handingOff.current = false
       setInventory(selected)
       setSaved(matches)
+      trackTeaching('recognized', { match_count: matches.length, file_count: selected.snapshot().entries.length })
       if (purpose === 'teach') handOffTeaching(selected, matches)
     })
   }
@@ -134,7 +139,9 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
     setSaved([])
     setError(null)
   }
-  const connectRemote = (load = false) => void run('Connecting to dataset…', async (signal) => {
+  const connectRemote = (load = false) => {
+    if (load) beginTeachingCase()
+    return void run('Connecting to dataset…', async (signal) => {
     const root = new URL(dataUrl.trim())
     if (root.search || root.hash) throw new Error('Use a dataset folder URL without a query or fragment.')
     if (!root.pathname.endsWith('/')) root.pathname += '/'
@@ -152,6 +159,7 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
       handingOff.current = false
       setInventory(selected)
       setSaved(matches)
+      trackTeaching('recognized', { match_count: matches.length, file_count: selected.snapshot().entries.length })
       if (load && !recipe && onChoose) {
         handingOff.current = true
         inventoryRef.current = null
@@ -164,11 +172,13 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
         if (signal.aborted) return
         handingOff.current = true
         await onRender(selected, validated)
+        trackTeaching('load_success', { source: 'remote' })
         inventoryRef.current = null
         onClose()
       }
     } catch (cause) { selected.revoke(); throw cause }
   })
+  }
 
   const importFile = (file: File | undefined) => {
     if (!file) return
@@ -199,6 +209,7 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
       if (signal.aborted) return
       handingOff.current = true
       await onRender(inventory, validated)
+      trackTeaching('load_success', { source: inventory.kind })
       // The scene now owns this inventory. Do not revoke it when closing.
       inventoryRef.current = null
       onClose()
@@ -207,6 +218,8 @@ export default function AdapterEntryDialog({ request, onClose, onTeach, onRender
 
   const loadLocal = () => {
     if (!inventory) return
+    beginTeachingCase()
+    trackTeaching('load_start', { source: 'local' })
     if (recipe) { render(recipe); return }
     if (onChoose) {
       handingOff.current = true

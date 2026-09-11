@@ -1,3 +1,4 @@
+import { trackTeachingTool, teachingRevisionContext } from '../../utils/teachableTelemetry'
 import { declaredSensorSummaryV1 } from './sensorConfiguration'
 import type { TeachableAuthoringSessionV1 } from './AuthoringSession'
 import type { SourceInspectionModeV1 } from './inspection'
@@ -107,12 +108,18 @@ export async function registerTeachableWebMcpToolsV1(
       session.markAgentEngaged()
       const started = Date.now()
       const normalized = normalizeInput(input)
+      let revisionContext: ReturnType<typeof teachingRevisionContext> | undefined
+      try {
+        if (toolName === 'apply_revision') revisionContext = teachingRevisionContext(session.getState().currentArtifact, normalized.recipe)
+      } catch { /* Diagnostic comparison must not prevent submission. */ }
       try {
         const result = await handler(normalized as T)
+        try { trackTeachingTool(toolName, normalized, result, Date.now() - started, session.getState().revisionCount, false, revisionContext) } catch { /* telemetry is optional */ }
         const summary = summarize(toolName, normalized, result, true)
         session.recordActivity({ tool: toolName, arg: summary.arg, ms: Date.now() - started, result: summary.text, kind: summary.kind })
         return native ? JSON.stringify(result ?? null) : result
       } catch (error) {
+        try { trackTeachingTool(toolName, normalized, null, Date.now() - started, session.getState().revisionCount, true, revisionContext) } catch { /* telemetry is optional */ }
         session.recordActivity({ tool: toolName, arg: summarize(toolName, normalized, null, false).arg, ms: Date.now() - started, result: `failed — ${error instanceof Error ? error.message.slice(0, 140) : String(error)}`, kind: 'bad' })
         throw error
       }

@@ -1,3 +1,4 @@
+import { trackTeaching } from '../../utils/teachableTelemetry'
 import { useRef, useState, useSyncExternalStore } from 'react'
 import { colors, radius, alpha } from '../../theme'
 import type { EgoLensAdapterRecipeV1 } from '../../teachable/recipe/types'
@@ -150,7 +151,7 @@ function P0Stage({ session, state, agent, savedRecipes, onRenderSaved, onLeave }
                     sealed {new Date(record.finalizedAt).toLocaleDateString()} · {record.recipeHash.slice(0, 15)}…{record.recipeHash.slice(-8)} · {record.capabilities.length} capabilities
                   </div>
                 </div>
-                <button onClick={() => onRenderSaved(record)} style={{ padding: '12px 22px', borderRadius: 10, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>Render now</button>
+                <button onClick={() => { trackTeaching('render_saved', { match_count: savedRecipes.length }); onRenderSaved(record) }} style={{ padding: '12px 22px', borderRadius: 10, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>Render now</button>
               </div>
             ))}
             <div style={{ textAlign: 'center', fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>
@@ -439,7 +440,7 @@ function SealedStage({ session, state, onRenderDataset, onLeave, error, setError
           <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.55, color: colors.textSecondary }}>Render now, or export the recipe file to hand this format to anyone.</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
             {onRenderDataset && <button onClick={onRenderDataset} style={{ padding: 11, borderRadius: 8, border: 0, background: colors.accent, color: colors.textOnAccent, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Render this dataset</button>}
-            {artifact && <button onClick={() => { try { downloadRecipeArtifactV1(artifact); setError(null) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } }} style={{ padding: 11, borderRadius: 8, border: `1px solid ${colors.accentBlue}`, background: alpha(colors.accentBlue, 0.12), color: colors.textPrimary, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Export JSON</button>}
+            {artifact && <button onClick={() => { try { downloadRecipeArtifactV1(artifact); trackTeaching('export_recipe'); setError(null) } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } }} style={{ padding: 11, borderRadius: 8, border: `1px solid ${colors.accentBlue}`, background: alpha(colors.accentBlue, 0.12), color: colors.textPrimary, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Export JSON</button>}
           </div>
         </div>
         <div style={{ padding: 20, border: `1px solid ${colors.border}`, borderRadius: 14, background: colors.bgSurface }}>
