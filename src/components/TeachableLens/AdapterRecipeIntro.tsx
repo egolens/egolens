@@ -13,10 +13,10 @@ export default function AdapterRecipeIntro({ onClose, onTry }: { onClose: () => 
   return <dialog ref={dialog} className="adapter-dialog adapter-intro" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); onClose() }} onKeyDown={event => event.stopPropagation()}>
     <div className="adapter-dialog-heading">
-      <h2 id={titleId}>Open more dataset formats with adapter recipes</h2>
+      <h2 id={titleId}>Teachable Lens: Teach EgoLens a new dataset format</h2>
       <button type="button" className="adapter-text-button" aria-label="Close adapter guide" onClick={onClose}>✕</button>
     </div>
-    <p>An adapter recipe tells EgoLens how to read a dataset format.</p>
+    <p>Create reusable adapter recipes with AI, then visually review the results.</p>
     <h3>Use an existing recipe</h3>
     <p>Load a recipe file or URL with your local or remote data. No AI agent needed.</p>
     <h3>Create or improve a recipe with AI</h3>

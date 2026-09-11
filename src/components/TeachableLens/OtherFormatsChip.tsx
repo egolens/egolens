@@ -16,7 +16,7 @@ export default function OtherFormatsChip({ onClick, disabled = false }: { onClic
         <span aria-hidden="true">＋ </span>Other formats
       </button>
       <span id={tooltipId} role="tooltip" className="other-formats-tooltip">
-        <span>Learn how adapter recipes open more dataset formats.</span>
+        <span>Teach EgoLens a new dataset format with AI and reusable adapter recipes.</span>
       </span>
     </span>
   )
