@@ -224,6 +224,9 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
     await hosted.dispose()
   })
 
+  // This integration test reloads an isolated scene with all capabilities,
+  // including trajectories across the 199-frame fixture. Allow for Node 20
+  // and shared CI CPUs without relaxing timeouts for the rest of the suite.
   it('restores a counted portable share in an empty profile through the ordinary store path', async () => {
     await expectPortableShareRoundTripV1({
       entries: sourceFixture().entries,
@@ -232,5 +235,5 @@ describe('Waymo recipe-backed NormalizedSceneV1', () => {
       referenced: true,
       cameraPresentation: false,
     })
-  })
+  }, 15_000)
 })
