@@ -1,5 +1,5 @@
 /** Shared ingestion allowlist: never serialize tool input/output directly. */
-export const TELEMETRY_EVENTS = ['intro_open', 'intro_try', 'preset_select', 'sample_zip', 'load_start', 'load_success', 'load_error', 'recipe_import', 'source_selected', 'recognized', 'render_saved', 'edit_recipe', 'session_start', 'phase_change', 'human_review', 'seal', 'tool_call', 'session_end', 'export_recipe', 'setup_check'] as const
+export const TELEMETRY_EVENTS = ['browser_context', 'codex_visit', 'intro_open', 'intro_try', 'preset_select', 'sample_zip', 'load_start', 'load_success', 'load_error', 'recipe_import', 'source_selected', 'recognized', 'render_saved', 'edit_recipe', 'session_start', 'phase_change', 'human_review', 'seal', 'tool_call', 'session_end', 'export_recipe', 'setup_check'] as const
 export type TeachingEvent = typeof TELEMETRY_EVENTS[number]
 export const ENUMS: Record<string, readonly string[]> = {
   tool: ['inspect', 'get_contract', 'get_state', 'apply_revision', 'finalize'],

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
+import { installAgentTelemetry } from './utils/agentTelemetry'
 import { installAnalytics } from './utils/analyticsBootstrap'
 import { installGlobalErrorHandlers } from './utils/errorReporting'
 import { installLoadTelemetry } from './utils/loadTelemetry'
@@ -26,6 +27,7 @@ applyTheme(initialTheme(), document.documentElement, initialAccent())
 
 // Analytics first: the error handlers below report through it.
 installAnalytics()
+installAgentTelemetry()
 const themePreference = parseThemePreference(window.location.search)
 const accentPreference = parseAccent(window.location.search)
 if (themePreference || accentPreference) {

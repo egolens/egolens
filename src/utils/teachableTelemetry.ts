@@ -1,3 +1,4 @@
+import { detectWebMcpAgentV1 } from '../teachable/authoring/agentDetection'
 import { revisionChanges } from './teachingRevisionSummary'
 import { getDeployment } from './analyticsBootstrap'
 import { sanitizeProps, valueShape, vocabularyValue, type TeachingEvent, type TeachingRecord } from './teachableTelemetrySchema'
@@ -21,7 +22,8 @@ export function trackTeaching(event: TeachingEvent, input: Record<string, unknow
     if (!caseId) caseId = crypto.randomUUID()
     if (!flowId) flowId = crypto.randomUUID()
     if (sequence >= 500) return
-    const props = sanitizeProps({ build: import.meta.env.VITE_BUILD_ID || 'development', revision_id: acceptedRevisionId, flow_id: flowId, ...input })
+    const agent = detectWebMcpAgentV1()
+    const props = sanitizeProps({ agent: agent.kind, available: Number(agent.available), build: import.meta.env.VITE_BUILD_ID || 'development', revision_id: acceptedRevisionId, flow_id: flowId, ...input })
     const record: TeachingRecord = { event, case_id: caseId, sequence: ++sequence, props, ...(detail ? { detail } : {}) }
     window.gtag?.('event', `tl_${event}`, { ...props, case_id: caseId, flow_id: flowId, sequence, deployment: getDeployment() })
     if (!endpoint) return
